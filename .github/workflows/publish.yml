@@ -17,23 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Install npm@latest (OIDC requires >= 11.5.1)
-        run: npm install -g npm@latest
-
-      - name: Diagnostics
-        run: |
-          echo "--- versions ---"
-          node --version
-          npm --version
-          which npm
-          echo "--- OIDC env presence ---"
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL:   ${ACTIONS_ID_TOKEN_REQUEST_URL:+SET}${ACTIONS_ID_TOKEN_REQUEST_URL:-UNSET}"
-          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+SET}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-UNSET}"
-          echo "--- npmrc contents ---"
-          cat ~/.npmrc 2>/dev/null || echo "(no ~/.npmrc)"
-          echo "--- repo .npmrc ---"
-          cat .npmrc 2>/dev/null || echo "(no repo .npmrc)"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Install
         run: npm ci
@@ -50,5 +34,7 @@ jobs:
             exit 1
           fi
 
-      - name: Publish (trusted publishing via OIDC)
+      - name: Publish
         run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
