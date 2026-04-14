@@ -1,0 +1,63 @@
+{
+  "name": "llm-tracker",
+  "version": "0.1.0",
+  "description": "File-system-as-database project tracker for LLM agents and humans. Hub-authoritative merge, Bloomberg-terminal UI, two write modes (file patches or HTTP).",
+  "type": "module",
+  "bin": {
+    "llm-tracker": "bin/llm-tracker.js"
+  },
+  "scripts": {
+    "start": "node bin/llm-tracker.js",
+    "init": "node bin/llm-tracker.js init",
+    "status": "node bin/llm-tracker.js status",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/justguy/llm-tracker.git"
+  },
+  "homepage": "https://github.com/justguy/llm-tracker#readme",
+  "bugs": {
+    "url": "https://github.com/justguy/llm-tracker/issues"
+  },
+  "license": "MIT",
+  "author": "justguy",
+  "keywords": [
+    "llm",
+    "ai",
+    "agent",
+    "claude",
+    "cursor",
+    "project-tracker",
+    "kanban",
+    "swimlane",
+    "task-manager",
+    "cli",
+    "terminal-ui",
+    "bloomberg",
+    "dashboard"
+  ],
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "chokidar": "^3.6.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "htm": "^3.1.1",
+    "preact": "^10.22.0",
+    "ws": "^8.18.0"
+  },
+  "files": [
+    "bin",
+    "hub",
+    "ui",
+    "workspace-template",
+    "img",
+    "README.md",
+    "ARCHITECTURE.md",
+    "LICENSE"
+  ]
+}

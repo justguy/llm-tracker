@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+.DS_Store
+*.tgz
+.env
+.env.*
+coverage/
+.vscode/
+.idea/
+
+# Project-local scratch
+initial prompt.txt

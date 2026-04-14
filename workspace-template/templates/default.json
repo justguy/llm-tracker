@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "name": "New Project",
+    "slug": "new-project",
+    "swimlanes": [
+      { "id": "main", "label": "Main" }
+    ],
+    "priorities": [
+      { "id": "p0", "label": "P0 / Now" },
+      { "id": "p1", "label": "P1 / Next" },
+      { "id": "p2", "label": "P2 / Soon" },
+      { "id": "p3", "label": "P3 / Later" }
+    ],
+    "scratchpad": ""
+  },
+  "tasks": []
+}
