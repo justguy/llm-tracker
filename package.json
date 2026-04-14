@@ -10,7 +10,7 @@
     "start": "node bin/llm-tracker.js",
     "init": "node bin/llm-tracker.js init",
     "status": "node bin/llm-tracker.js status",
-    "test": "node --test test/*.test.js"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"
