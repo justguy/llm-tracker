@@ -14,13 +14,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `registry-url`: that would write a .npmrc with always-auth=true +
+      # _authToken=${NODE_AUTH_TOKEN}, which breaks OIDC because the empty
+      # token is treated as "use this (broken) auth" instead of "fall through
+      # to OIDC". Trusted publishing works against the default registry.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
 
-      - name: Upgrade npm (trusted publishing / OIDC needs npm >= 11.5.1)
+      - name: Upgrade npm (trusted publishing / OIDC requires npm >= 11.5.1)
         run: npm install -g npm@latest
+
+      - name: Versions (for debug)
+        run: |
+          node --version
+          npm --version
 
       - name: Install
         run: npm ci
