@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { cmdBlockers } from "./commands/blockers.js";
+import { cmdBrief } from "./commands/brief.js";
 import { cmdChanged } from "./commands/changed.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
@@ -545,6 +546,7 @@ async function main() {
   if (cmd === "__run-hub") return cmdRun(args, { daemonized: true });
   if (cmd === "init") return cmdInit(args);
   if (cmd === "status") return cmdStatus(args);
+  if (cmd === "brief") return cmdBrief(args, { resolveWorkspace, httpRequest });
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
@@ -565,6 +567,7 @@ Usage:
   llm-tracker daemon status [--path <dir>]             Show daemon status
   llm-tracker daemon logs [--path <dir>] [--lines N]   Print recent daemon logs
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
+  llm-tracker brief <slug> <taskId> [--json]           Print a task brief pack (requires hub)
   llm-tracker blockers <slug> [--json]                 Print structurally blocked tasks (requires hub)
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)

@@ -1,3 +1,4 @@
+import { getBriefPayload } from "../briefs.js";
 import { getBlockersPayload } from "../blockers.js";
 import { getChangedPayload } from "../changed.js";
 import { getNextPayload } from "../next.js";
@@ -32,6 +33,20 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       limit: clampLimit(req.query.limit, 5, 5)
     });
     res.json(payload);
+  });
+
+  app.get("/api/projects/:slug/tasks/:taskId/brief", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const result = getBriefPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      taskId: req.params.taskId
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    res.json(result.payload);
   });
 
   app.get("/api/projects/:slug/blockers", (req, res) => {

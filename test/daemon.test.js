@@ -185,11 +185,12 @@ test("daemon stop force-kills a process that ignores SIGTERM", () => {
   }
 });
 
-test("help output documents daemon commands and the --daemon flag", () => {
+test("help output documents daemon commands, brief, and the --daemon flag", () => {
   const res = runCli(["help"]);
   assert.equal(res.status, 0, res.stderr || res.stdout);
   assert.match(res.stdout, /--daemon/);
   assert.match(res.stdout, /daemon start/);
   assert.match(res.stdout, /daemon stop/);
   assert.match(res.stdout, /daemon logs/);
+  assert.match(res.stdout, /brief <slug> <taskId>/);
 });

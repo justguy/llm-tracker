@@ -18,4 +18,4 @@ For this repo specifically:
 
 - keep `/help` accurate when you add or change agent-facing endpoints or commands
 - prefer additive updates to the contract rather than silent behavior changes
-- remind agents to use `/help`, `next`, `blockers`, `changed`, and `pick` before they fall back to broad file reads
+- remind agents to use `/help`, `next`, `brief`, `blockers`, `changed`, and `pick` before they fall back to broad file reads

@@ -12,6 +12,8 @@ It's a file-system-as-database tracker. Your LLMs update project states with tin
 
 When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker.
 
+When an agent already knows the task id and needs focused context, it can now make one call to `npx llm-tracker brief <slug> <task-id>` or `GET /api/projects/<slug>/tasks/<taskId>/brief` and get a capped pack instead of rereading the tracker, docs, and code by hand.
+
 When an agent needs the current contract for a running hub, it should call `GET /help` first instead of guessing write modes or endpoints.
 
 ## Why use llm-tracker?
@@ -83,6 +85,7 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 - It serves the workspace `README.md`
 - For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
 - Agents should read `/help` before using write paths or task-intelligence endpoints
+- Agents should prefer `next` to choose work and `brief` to load task context before broad file reads
 - If you change agent-facing behavior, update the workspace template so `/help` stays accurate
 
 ---
@@ -162,7 +165,7 @@ If you want the hub to keep running without a dedicated shell, use `npx llm-trac
 
 Existing workspaces do not need migration work. The `.runtime/` directory is created on demand the first time daemon mode is used.
 
-Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `next`, `since`, `rollback`, and `link` keep working against a background hub started on a non-default port.
+Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, and `link` keep working against a background hub started on a non-default port.
 
 Daemon state is **workspace-scoped**. `npx llm-tracker daemon stop --path <dir>` only affects the daemon for that workspace. In the recommended shared-daemon topology, that means one daemon for the central workspace and linked repo-local project files underneath it.
 
@@ -189,6 +192,8 @@ LLMs send small patches. The hub merges them under a per-project lock, bumps `me
 
 For task pickup, prefer the atomic claim flow over hand-built status patches:
 
+- `GET /api/projects/:slug/tasks/:taskId/brief`
+- `npx llm-tracker brief <slug> <task-id>`
 - `POST /api/projects/:slug/pick`
 - `npx llm-tracker pick <slug> [task-id] --assignee <model>`
 
