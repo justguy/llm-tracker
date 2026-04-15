@@ -390,21 +390,6 @@ export async function startHub({ workspace, port, uiDir }) {
       if (r) broadcast({ type: "REMOVE", slug: r.slug });
     });
 
-  httpServer.listen(port, () => {
-    const url = `http://localhost:${port}`;
-    console.log("─────────────────────────────────────────────────────────");
-    console.log(` LLM Project Tracker — hub running`);
-    console.log(`   UI:         ${url}`);
-    console.log(`   Workspace:  ${workspace}`);
-    console.log(`   README:     ${join(workspace, "README.md")}`);
-    console.log("─────────────────────────────────────────────────────────");
-    console.log(" Paste into your LLM to register a project:");
-    console.log("");
-    console.log(`   Read ${join(workspace, "README.md")} and register this project as <slug>.`);
-    console.log("");
-    console.log("─────────────────────────────────────────────────────────");
-  });
-
   const shutdown = async () => {
     try {
       await watcher.close();
@@ -412,10 +397,50 @@ export async function startHub({ workspace, port, uiDir }) {
     try {
       await patchesWatcher.close();
     } catch {}
+    try {
+      wss.close();
+    } catch {}
     httpServer.close(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  await new Promise((resolve, reject) => {
+    const onError = async (err) => {
+      httpServer.off("listening", onListening);
+      try {
+        await watcher.close();
+      } catch {}
+      try {
+        await patchesWatcher.close();
+      } catch {}
+      try {
+        wss.close();
+      } catch {}
+      reject(err);
+    };
+
+    const onListening = () => {
+      httpServer.off("error", onError);
+      const url = `http://localhost:${port}`;
+      console.log("─────────────────────────────────────────────────────────");
+      console.log(` LLM Project Tracker — hub running`);
+      console.log(`   UI:         ${url}`);
+      console.log(`   Workspace:  ${workspace}`);
+      console.log(`   README:     ${join(workspace, "README.md")}`);
+      console.log("─────────────────────────────────────────────────────────");
+      console.log(" Paste into your LLM to register a project:");
+      console.log("");
+      console.log(`   Read ${join(workspace, "README.md")} and register this project as <slug>.`);
+      console.log("");
+      console.log("─────────────────────────────────────────────────────────");
+      resolve();
+    };
+
+    httpServer.once("error", onError);
+    httpServer.once("listening", onListening);
+    httpServer.listen(port);
+  });
 
   return { httpServer, wss, store, watcher };
 }

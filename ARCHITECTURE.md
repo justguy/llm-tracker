@@ -7,12 +7,13 @@ Deep-dive on the internals. For the marketing hook and installation, see [README
 ## Pieces
 
 ```
-bin/llm-tracker.js       CLI: init | run | status | since | rollback | link
+bin/llm-tracker.js       CLI: init | run | daemon start/stop/status/logs | status | since | rollback | link
 hub/server.js            Express + WebSocket + chokidar wiring + vendor routes
 hub/store.js             In-memory state, per-slug lock, applyPatch/applyMove/applyCollapse/rollback/deleteTask/deleteProject/symlinkProject
 hub/merge.js             Hub-authoritative merge: preserves task order, refuses deletions, keeps collapsed, drops updatedAt/rev
 hub/versioning.js        computeDelta (structured field-level diff), summarize, hasChanges
 hub/snapshots.js         Per-rev .snapshots/<slug>/<rev>.json + .history/<slug>.jsonl append-only log
+hub/runtime.js           Workspace runtime helpers (.runtime/, daemon pid/log metadata)
 hub/validator.js         Ajv schema + cross-reference checks
 hub/progress.js          Counts, pct, blocked-by derivation
 hub/status.js            Terminal dashboard (used by `llm-tracker status`)
@@ -33,6 +34,8 @@ workspace-template/      Copied on `init` into the workspace folder. README.md i
 ├── trackers/<slug>.json        # canonical project state
 ├── patches/<slug>.*.json       # LLM patches (Mode A) — transient
 ├── templates/default.json      # copy to start a new project
+├── .runtime/daemon.json        # optional background-hub pid/port metadata
+├── .runtime/daemon.log         # optional background-hub stdout/stderr
 ├── .snapshots/<slug>/<rev>.json # hub-managed full snapshot per rev (rollback source)
 └── .history/<slug>.jsonl       # append-only event log: {rev, ts, delta, summary}
 ```
@@ -281,6 +284,22 @@ First match wins:
 2. `LLM_TRACKER_PORT` env
 3. `<workspace>/settings.json` → `port`
 4. Default `4400`
+
+---
+
+## Background daemon
+
+Foreground startup remains the default: `llm-tracker` starts the hub in the current shell.
+
+Daemon mode is explicit:
+
+- `llm-tracker --daemon`
+- `llm-tracker daemon start`
+- `llm-tracker daemon stop`
+- `llm-tracker daemon status`
+- `llm-tracker daemon logs --lines N`
+
+Daemon runtime files live under `<workspace>/.runtime/`. Existing workspaces do not need manual migration; the directory is created lazily on first daemon start.
 
 ---
 

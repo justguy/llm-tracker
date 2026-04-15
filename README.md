@@ -16,7 +16,7 @@ It's a file-system-as-database tracker. Your LLMs update project states with tin
 
 💸 **Massive Token Savings** — no full-file rewrites. LLMs send surgical JSON patches (often <100 bytes) and pull changes since their last rev, keeping context windows small and API costs low.
 
-⚡ **Stupidly Simple** — no databases, no daemons, no cloud accounts. `npx llm-tracker init`, `npx llm-tracker`, open the browser. Every project is one JSON file you can `cat`, diff, or commit.
+⚡ **Stupidly Simple** — no databases, no cloud accounts, and no behavior surprises. `npx llm-tracker init`, `npx llm-tracker`, open the browser. Foreground remains the default; an optional local background daemon is available if you do not want to dedicate a shell. Every project is one JSON file you can `cat`, diff, or commit.
 
 ---
 
@@ -47,6 +47,7 @@ It's a file-system-as-database tracker. Your LLMs update project states with tin
 ```bash
 npx llm-tracker init     # scaffolds ~/.llm-tracker workspace
 npx llm-tracker          # starts hub + UI on http://localhost:4400
+npx llm-tracker --daemon # same hub, but detached into the background
 ```
 
 The first command prints a paste-ready prompt. Give it to any LLM with file-write or HTTP access, and your project appears in the UI within half a second.
@@ -104,9 +105,26 @@ npx llm-tracker status --json       # machine-readable
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
 npx llm-tracker rollback <slug> <rev>
 npx llm-tracker link <slug> <abs-path>  # symlink an external tracker into the workspace
+
+# Optional background lifecycle
+npx llm-tracker --daemon                  # start hub in the background
+npx llm-tracker daemon status             # show pid / port / log path
+npx llm-tracker daemon stop               # stop the background hub
+npx llm-tracker daemon logs --lines 80    # print recent daemon logs
 ```
 
 Full flag reference: `npx llm-tracker help`.
+
+## Background daemon
+
+Foreground startup is still the default. Existing users can keep using `npx llm-tracker` exactly as before.
+
+If you want the hub to keep running without a dedicated shell, use `npx llm-tracker --daemon` or `npx llm-tracker daemon start`. Runtime artifacts live under `~/.llm-tracker/.runtime/` by default:
+
+- `daemon.json` stores pid, port, and startup metadata
+- `daemon.log` captures hub stdout and stderr
+
+Existing workspaces do not need migration work. The `.runtime/` directory is created on demand the first time daemon mode is used.
 
 ---
 
@@ -148,8 +166,9 @@ Full schema, merge semantics, field ownership, versioning, rollback, and the who
 
 ```bash
 npm install
-npm test           # 55 tests (Node's built-in test runner)
+npm test           # 67 tests (Node's built-in test runner)
 npm start          # hub on http://localhost:4400
+node bin/llm-tracker.js --daemon  # optional background hub in dev
 ```
 
 Module map, internals, and schema deep-dive → **[ARCHITECTURE.md](./ARCHITECTURE.md)**.

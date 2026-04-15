@@ -41,6 +41,8 @@ trackers/<slug>.errors.json      ← hub writes here when your update is rejecte
 patches/<slug>.<anything>.json   ← drop small update patches here (Mode A)
 patches/<slug>.<anything>.errors.json  ← hub writes here when your patch is invalid
 templates/default.json           ← copy this when registering (already exists)
+.runtime/daemon.json             ← optional background-hub metadata (hub-managed)
+.runtime/daemon.log              ← optional background-hub log output (hub-managed)
 .snapshots/<slug>/<rev>.json     ← hub-managed per-rev snapshot (for rollback)
 .history/<slug>.jsonl            ← hub-managed append-only event log (rev + delta)
 ```
@@ -409,6 +411,11 @@ Error shape:
 | --------------------------------------------------------- | ----------------------------------------------------------------------------- | :----------: |
 | `llm-tracker init [--path <dir>]`                         | Scaffold a workspace.                                                         |     no       |
 | `llm-tracker [--path <dir>] [--port N]`                   | Start the hub + UI.                                                           |     no       |
+| `llm-tracker [--path <dir>] [--port N] --daemon`          | Start the hub in the background.                                              |     no       |
+| `llm-tracker daemon start [--path <dir>] [--port N]`      | Start the background hub.                                                     |     no       |
+| `llm-tracker daemon stop [--path <dir>]`                  | Stop the background hub.                                                      |     no       |
+| `llm-tracker daemon status [--path <dir>]`                | Show background-hub pid / port / log path.                                    |     no       |
+| `llm-tracker daemon logs [--path <dir>] [--lines N]`      | Print recent background-hub logs.                                             |     no       |
 | `llm-tracker status`                                      | Dashboard of all projects.                                                    |     no       |
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |
 | `llm-tracker status --json`                               | Machine-readable dashboard.                                                   |     no       |
@@ -441,7 +448,7 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 - Never invent a `priorityId` or `swimlaneId` not declared in `meta`.
 - Never set `updatedAt` or `rev` — hub ignores and overwrites.
 - Never rewrite this README.
-- Never touch `settings.json`, `.snapshots/`, `.history/`, `<slug>.errors.json`.
+- Never touch `settings.json`, `.runtime/`, `.snapshots/`, `.history/`, `<slug>.errors.json`.
 - Never call `DELETE /api/projects/...` or `DELETE /api/projects/:slug/tasks/:taskId` — human-only. Archive with `status: "deferred"`.
 - Never call the rollback endpoint — human-only.
 - When symlinking (§7 Option C), the target path MUST be absolute and the file MUST be valid before you call the endpoint.
