@@ -26,6 +26,8 @@ It's a file-system-as-database tracker. Your LLMs update project states with tin
 
 ![Main view](./img/main-screen.png)
 
+**Task comments** — each task has an optional `comment` field (≤ 500 chars). Set it via JSON, patch API, or the inline `[+C]` editor on the card; hover the `[C]` badge to read it. The popover clamps to the viewport so cards near the edges don't clip.
+
 **Overview drawer** — all projects at a glance; click to switch, pin to keep it open.
 
 ![Overview drawer](./img/overview-drawer.png)
