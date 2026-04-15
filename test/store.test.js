@@ -173,6 +173,92 @@ test("applyPatch: 404 when project doesn't exist", async () => {
   }
 });
 
+test("pickTask auto-selects the top ready task and updates status atomically", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { assignee: "codex" });
+    assert.equal(res.ok, true);
+    assert.equal(res.payload.pickedTaskId, "t1");
+    assert.equal(res.payload.autoSelected, true);
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    const t1 = after.tasks.find((task) => task.id === "t1");
+    assert.equal(t1.status, "in_progress");
+    assert.equal(t1.assignee, "codex");
+    assert.equal(t1.blocker_reason ?? null, null);
+    assert.ok(after.meta.rev >= 2);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("pickTask rejects blocked tasks without force", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { taskId: "t2", assignee: "claude" });
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 409);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("pickTask refuses to steal an in-progress task without force", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    project.tasks[1].dependencies = [];
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(project));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { taskId: "t2", assignee: "codex" });
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 409);
+
+    const forced = await store.pickTask("test-project", {
+      taskId: "t2",
+      assignee: "codex",
+      force: true
+    });
+    assert.equal(forced.ok, true);
+    assert.equal(forced.payload.task.assignee, "codex");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("pickTask is a no-op when the same assignee re-claims the same task", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    project.tasks[1].dependencies = [];
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(project));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { taskId: "t2", assignee: "claude" });
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, true);
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.meta.rev, 1);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("ingest: direct-file-edit that reorders is corrected back to existing order", () => {
   const ws = setupWorkspace();
   try {

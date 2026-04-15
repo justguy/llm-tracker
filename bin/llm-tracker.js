@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { cmdBlockers } from "./commands/blockers.js";
 import { cmdChanged } from "./commands/changed.js";
 import { cmdNext } from "./commands/next.js";
+import { cmdPick } from "./commands/pick.js";
 import { startHub } from "../hub/server.js";
 import { loadProjects, renderDashboard, renderProject, renderJson } from "../hub/status.js";
 import {
@@ -522,6 +523,7 @@ async function main() {
   if (cmd === "status") return cmdStatus(args);
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
+  if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
   if (cmd === "next") return cmdNext(args, { resolveWorkspace, httpRequest });
   if (cmd === "rollback") return cmdRollback(args);
   if (cmd === "since") return cmdSince(args);
@@ -541,6 +543,7 @@ Usage:
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
   llm-tracker blockers <slug> [--json]                 Print structurally blocked tasks (requires hub)
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
+  llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)
   llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)
@@ -550,6 +553,7 @@ Usage:
 Env:
   LLM_TRACKER_HOME    Workspace folder (overrides default)
   LLM_TRACKER_PORT    Port (overrides settings.json and default)
+  LLM_TRACKER_ASSIGNEE Default assignee for pick / claim
 
 Port priority (first match wins):
   1. --port flag

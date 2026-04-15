@@ -9,6 +9,18 @@ function clampLimit(value, fallback, max) {
 }
 
 export function registerIntelligenceRoutes(app, { workspace, store }) {
+  const pickHandler = async (req, res) => {
+    const body = req.body || {};
+    const result = await store.pickTask(req.params.slug, {
+      taskId: body.taskId,
+      assignee: typeof body.assignee === "string" && body.assignee.trim() ? body.assignee : null,
+      force: body.force === true,
+      comment: body.comment
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    res.json(result.payload);
+  };
+
   app.get("/api/projects/:slug/next", (req, res) => {
     const entry = store.get(req.params.slug);
     if (!entry) return res.status(404).json({ error: "not found" });
@@ -53,4 +65,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
     });
     res.json(payload);
   });
+
+  app.post("/api/projects/:slug/pick", pickHandler);
+  app.post("/api/projects/:slug/claim", pickHandler);
 }

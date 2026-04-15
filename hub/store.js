@@ -23,6 +23,7 @@ import {
   historySince,
   readHistory
 } from "./snapshots.js";
+import { buildPickedPayload, resolvePickSelection } from "./pick.js";
 
 export function slugFromFile(filePath) {
   const base = basename(filePath);
@@ -415,6 +416,105 @@ export class Store {
 
       atomicWriteJson(file, merged);
       return { ok: true, notes };
+    });
+  }
+
+  async pickTask(slug, { taskId, assignee = null, force = false, comment } = {}) {
+    return this.withLock(slug, async () => {
+      const current = this.projects.get(slug);
+      if (!current || !current.data) {
+        return { ok: false, status: 404, message: "project not found" };
+      }
+
+      const file = trackerPath(this.workspace, slug);
+      const history = readHistory(this.workspace, slug);
+      const selection = resolvePickSelection({
+        slug,
+        data: current.data,
+        history,
+        taskId,
+        assignee,
+        force
+      });
+      if (!selection.ok) return selection;
+
+      const newState = JSON.parse(JSON.stringify(current.data));
+      const target = newState.tasks.find((task) => task.id === selection.taskId);
+      if (!target) {
+        return { ok: false, status: 404, message: `task "${selection.taskId}" not found` };
+      }
+
+      const effectiveAssignee = assignee ?? target.assignee ?? null;
+      const shouldRefreshClaim =
+        target.status !== "in_progress" ||
+        target.assignee !== effectiveAssignee ||
+        target.blocker_reason != null ||
+        comment !== undefined;
+      target.status = "in_progress";
+      target.assignee = effectiveAssignee;
+      if (shouldRefreshClaim) {
+        target.blocker_reason = null;
+      }
+      if (comment !== undefined) target.comment = comment;
+
+      const { ok, errors } = validateProject(newState);
+      if (!ok) return { ok: false, status: 400, message: errors.join("; ") };
+
+      const delta = computeDelta(current.data, newState);
+      if (!hasChanges(delta)) {
+        return {
+          ok: true,
+          noop: true,
+          payload: buildPickedPayload({
+            slug,
+            data: current.data,
+            history,
+            taskId: selection.taskId,
+            autoSelected: selection.autoSelected,
+            selectedBecause: selection.selectedBecause,
+            noop: true
+          })
+        };
+      }
+
+      const newRev = current.rev + 1;
+      newState.meta.rev = newRev;
+      newState.meta.updatedAt = new Date().toISOString();
+
+      const derived = deriveProject(newState);
+      this.projects.set(slug, {
+        data: newState,
+        derived,
+        path: file,
+        rev: newRev,
+        error: null,
+        notes: { ignored: [], warnings: [], appended: [], updated: [] }
+      });
+
+      writeSnapshot(this.workspace, slug, newRev, newState);
+      appendHistoryEntry(this.workspace, slug, {
+        rev: newRev,
+        ts: newState.meta.updatedAt,
+        delta,
+        summary: summarize(delta)
+      });
+
+      atomicWriteJson(file, newState);
+
+      return {
+        ok: true,
+        noop: false,
+        payload: buildPickedPayload({
+          slug,
+          data: newState,
+          history: [...history, { rev: newRev, delta }],
+          taskId: selection.taskId,
+          autoSelected: selection.autoSelected,
+          selectedBecause: selection.selectedBecause,
+          noop: false,
+          now: newState.meta.updatedAt
+        })
+      };
     });
   }
 

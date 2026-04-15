@@ -242,6 +242,7 @@ Related deterministic reads:
 
 - `GET /api/projects/<slug>/blockers` for structural blockers and what is blocking them
 - `GET /api/projects/<slug>/changed?fromRev=<n>&limit=20` for changed tasks since a rev, without replaying raw history yourself
+- `POST /api/projects/<slug>/pick` to atomically claim work once you know what to do next
 
 ---
 
@@ -338,7 +339,33 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 1. Call `GET /api/projects/<slug>/next?limit=5` or run `llm-tracker next <slug>`.
 2. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
-3. Send a patch: `{ tasks: { <id>: { status: "in_progress", assignee: "<your model id>", blocker_reason: null } } }`.
+3. Claim it atomically:
+
+```bash
+curl -X POST http://localhost:<PORT>/api/projects/<slug>/pick \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/<slug>-pick.json
+```
+
+Example body:
+
+```json
+{
+  "assignee": "codex",
+  "taskId": "t-001"
+}
+```
+
+If you omit `taskId`, the hub claims the current top ready task from the deterministic `next` ranking.
+
+Shell shortcut:
+
+```bash
+llm-tracker pick <slug> [<taskId>] --assignee codex
+```
+
+`llm-tracker claim ...` and `POST /api/projects/<slug>/claim` are aliases.
+
 4. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
 5. On completion: patch `status: "complete"`.
 6. On blocker: patch `status: "not_started"` + `blocker_reason: "<one sentence>"`, and post to `meta.scratchpad`.
@@ -463,6 +490,7 @@ Error shape:
 | `llm-tracker status --json`                               | Machine-readable dashboard.                                                   |     no       |
 | `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
 | `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
+| `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
 | `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |
 | `llm-tracker rollback <slug> <rev>`                       | Roll back to a prior rev (human-only).                                        |    **yes**   |

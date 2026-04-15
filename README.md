@@ -106,6 +106,7 @@ npx llm-tracker status --json       # machine-readable
 # Requires hub running
 npx llm-tracker blockers <slug>        # structural blockers and what they are waiting on
 npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
+npx llm-tracker pick <slug> [task-id] --assignee codex  # atomic claim, defaults to top ready task
 npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + alternatives
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
 npx llm-tracker rollback <slug> <rev>
@@ -143,6 +144,11 @@ Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json`
 - **Hub enforces** — task array order, existence (no accidental deletion), human UI state (drag positions, swimlane collapse), version stamps
 
 LLMs send small patches. The hub merges them under a per-project lock, bumps `meta.rev`, writes a full snapshot, and appends a `{rev, delta}` line to the history log. When the LLM needs to refresh, it calls `GET /api/projects/:slug/since/<last-rev>` and gets only what changed — **constant-size payload regardless of project size**.
+
+For task pickup, prefer the atomic claim flow over hand-built status patches:
+
+- `POST /api/projects/:slug/pick`
+- `npx llm-tracker pick <slug> [task-id] --assignee <model>`
 
 Two write modes:
 
