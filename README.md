@@ -154,6 +154,33 @@ Module map, internals, and schema deep-dive → **[ARCHITECTURE.md](./ARCHITECTU
 
 ---
 
+## Contributing & releases
+
+The repo ships every change through **issues → feature branch → PR → automated release**.
+
+**1. Propose a change** — open a GitHub issue (`bug`, `enhancement`, etc.). Attach it to a milestone if you want it scoped to a specific release.
+
+**2. Branch + PR** — branch off `main` using a prefix that matches the work (`fix/…`, `feat/…`, `docs/…`, `chore/…`). `main` is protected: no direct pushes, PR-only, linear history, squash-merge.
+
+**3. PR title = Conventional Commits** — squash-merge uses the PR title as the commit subject on `main`. A CI check rejects titles that don't match `feat:` / `fix:` / `docs:` / `refactor:` / `perf:` / `chore:` / etc. Close the relevant issue with `Closes #N` in the body.
+
+**4. Merge lands on `main` immediately** — no need to hold PRs for a release. Feature work and releases are decoupled.
+
+**5. Release-please accumulates** — every commit on `main` updates a rolling "release PR" (auto-opened by [release-please](https://github.com/googleapis/release-please)) that bumps `package.json` and appends to `CHANGELOG.md` based on the commit types:
+
+| Commit type(s) since last tag | Version bump        |
+| ----------------------------- | ------------------- |
+| any `feat!:` / `BREAKING CHANGE:` footer | major (x.0.0) |
+| any `feat:`                   | minor (0.x.0)       |
+| only `fix:` / `perf:`         | patch (0.0.x)       |
+| only `chore:` / `ci:` / `test:` / `docs:` / `refactor:` | no bump (hidden from notes) |
+
+**6. Cut a release** — merge the release PR when you want to ship. That tags `v*.*.*`, which triggers `publish.yml` → `npm publish`. You decide the cadence: after every feature, weekly, or whenever a milestone closes.
+
+Workflow files: [`.github/workflows/release-please.yml`](./.github/workflows/release-please.yml), [`.github/workflows/pr-title.yml`](./.github/workflows/pr-title.yml), [`release-please-config.json`](./release-please-config.json).
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
