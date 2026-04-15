@@ -488,9 +488,6 @@ body {
   display: flex;
   justify-content: flex-end;
 }
-.drawer-overlay.pinned { background: transparent; pointer-events: none; }
-.drawer-overlay.pinned .drawer { pointer-events: auto; }
-
 .drawer {
   width: 420px;
   max-width: 94vw;
@@ -500,6 +497,14 @@ body {
   display: flex;
   flex-direction: column;
   animation: drawer-in 0.14s ease-out;
+}
+.drawer.pinned {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  animation: none;
 }
 @keyframes drawer-in {
   from { transform: translateX(20px); opacity: 0; }
