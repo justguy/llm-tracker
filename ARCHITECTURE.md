@@ -7,14 +7,21 @@ Deep-dive on the internals. For the marketing hook and installation, see [README
 ## Pieces
 
 ```
-bin/llm-tracker.js       CLI entrypoint: init | run | daemon | status | next | since | rollback | link
+bin/llm-tracker.js       CLI entrypoint: init | run | daemon | status | blockers | changed | next | since | rollback | link
+bin/commands/shared.js   Shared CLI helpers for hub-backed command modules
+bin/commands/blockers.js `llm-tracker blockers` formatter + HTTP client wrapper
+bin/commands/changed.js  `llm-tracker changed` formatter + HTTP client wrapper
 bin/commands/next.js     `llm-tracker next` formatter + HTTP client wrapper
 hub/server.js            Express + WebSocket + chokidar wiring + vendor routes
+hub/routes/intelligence.js Registers deterministic task-intelligence routes
 hub/store.js             In-memory state, per-slug lock, applyPatch/applyMove/applyCollapse/rollback/deleteTask/deleteProject/symlinkProject
 hub/merge.js             Hub-authoritative merge: preserves task order, refuses deletions, keeps collapsed, drops updatedAt/rev
 hub/versioning.js        computeDelta (structured field-level diff), summarize, hasChanges
 hub/snapshots.js         Per-rev .snapshots/<slug>/<rev>.json + .history/<slug>.jsonl append-only log
 hub/runtime.js           Workspace runtime helpers (.runtime/, daemon pid/log metadata)
+hub/task-metadata.js     Shared normalized task summary helpers used by deterministic retrieval
+hub/blockers.js          Structural blocker payload builder
+hub/changed.js           Changed-task payload builder from append-only history
 hub/references.js        Shared reference + effort normalization helpers
 hub/next.js              Deterministic next-task ranking + shortlist payload builder
 hub/validator.js         Ajv schema + cross-reference checks
@@ -158,6 +165,11 @@ Ranking currently favors:
 
 Approval requirements are treated as a penalty, not a hard exclusion, so near-ready work still appears in the shortlist.
 
+### Companion surfaces
+
+- `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
+- `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
+
 ---
 
 ## Versioning & history
@@ -282,6 +294,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug`                               | PUT    | Create or replace a project (full body).                   |
 | `/api/projects/:slug`                               | DELETE | Remove the tracker file. Snapshots/history preserved.      |
 | `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 tasks for agent pickup.  |
+| `/api/projects/:slug/blockers`                      | GET    | Structural blockers: blocked tasks plus their blockers.    |
+| `/api/projects/:slug/changed`                       | GET    | Changed tasks since `fromRev`, grouped by task.            |
 | `/api/projects/:slug/patch`                         | POST   | Partial update merged with existing state.                 |
 | `/api/projects/:slug/move`                          | POST   | UI drag-drop: change task placement + array position.      |
 | `/api/projects/:slug/swimlane-collapse`             | POST   | Toggle `meta.swimlanes[i].collapsed`.                      |

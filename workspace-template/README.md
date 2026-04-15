@@ -238,6 +238,11 @@ The shortlist is deterministic and capped at 5 tasks:
 
 Use this instead of scanning the whole tracker just to choose work.
 
+Related deterministic reads:
+
+- `GET /api/projects/<slug>/blockers` for structural blockers and what is blocking them
+- `GET /api/projects/<slug>/changed?fromRev=<n>&limit=20` for changed tasks since a rev, without replaying raw history yourself
+
 ---
 
 ## 7. How to register a new project
@@ -456,6 +461,8 @@ Error shape:
 | `llm-tracker status`                                      | Dashboard of all projects.                                                    |     no       |
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |
 | `llm-tracker status --json`                               | Machine-readable dashboard.                                                   |     no       |
+| `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
+| `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
 | `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |
 | `llm-tracker rollback <slug> <rev>`                       | Roll back to a prior rev (human-only).                                        |    **yes**   |

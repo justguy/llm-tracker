@@ -104,6 +104,8 @@ npx llm-tracker status <slug>       # detail on one project
 npx llm-tracker status --json       # machine-readable
 
 # Requires hub running
+npx llm-tracker blockers <slug>        # structural blockers and what they are waiting on
+npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
 npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + alternatives
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
 npx llm-tracker rollback <slug> <rev>

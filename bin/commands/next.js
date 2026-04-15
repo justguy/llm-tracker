@@ -1,8 +1,4 @@
-function parseLimit(value) {
-  const parsed = parseInt(value, 10);
-  if (isNaN(parsed) || parsed < 1) return 5;
-  return Math.min(parsed, 5);
-}
+import { ensureHubResponse, parseLimit } from "./shared.js";
 
 function formatTask(task, index) {
   const lines = [];
@@ -42,14 +38,7 @@ export async function cmdNext(args, { resolveWorkspace, httpRequest }) {
     `/api/projects/${slug}/next?limit=${limit}`
   );
 
-  if (status === 0) {
-    console.error("Hub not reachable. Start it with 'llm-tracker' or 'llm-tracker --daemon'.");
-    process.exit(1);
-  }
-  if (status >= 400) {
-    console.error(`Next failed (${status}): ${body.error || body.raw}`);
-    process.exit(1);
-  }
+  ensureHubResponse(status, body, "Next");
 
   if (args.flags.json) {
     console.log(JSON.stringify(body, null, 2));

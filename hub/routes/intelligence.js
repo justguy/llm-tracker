@@ -1,0 +1,56 @@
+import { getBlockersPayload } from "../blockers.js";
+import { getChangedPayload } from "../changed.js";
+import { getNextPayload } from "../next.js";
+
+function clampLimit(value, fallback, max) {
+  const parsed = parseInt(Array.isArray(value) ? value[0] : value, 10);
+  if (isNaN(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, max);
+}
+
+export function registerIntelligenceRoutes(app, { workspace, store }) {
+  app.get("/api/projects/:slug/next", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const payload = getNextPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      limit: clampLimit(req.query.limit, 5, 5)
+    });
+    res.json(payload);
+  });
+
+  app.get("/api/projects/:slug/blockers", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const payload = getBlockersPayload({
+      workspace,
+      slug: req.params.slug,
+      entry
+    });
+    res.json(payload);
+  });
+
+  app.get("/api/projects/:slug/changed", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const fromRevRaw = Array.isArray(req.query.fromRev) ? req.query.fromRev[0] : req.query.fromRev;
+    const fromRev = fromRevRaw === undefined ? 0 : parseInt(fromRevRaw, 10);
+    if (isNaN(fromRev) || fromRev < 0) {
+      return res.status(400).json({ error: "fromRev must be a non-negative integer" });
+    }
+
+    const payload = getChangedPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      fromRev,
+      limit: clampLimit(req.query.limit, 20, 50)
+    });
+    res.json(payload);
+  });
+}
