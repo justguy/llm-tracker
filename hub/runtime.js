@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -7,6 +8,22 @@ import {
   writeFileSync
 } from "node:fs";
 import { join } from "node:path";
+
+function isZombieProcess(pid) {
+  if (process.platform === "win32") return false;
+  try {
+    const result = spawnSync("ps", ["-p", String(pid), "-o", "state="], {
+      encoding: "utf-8"
+    });
+    if (result.status !== 0) return false;
+    return (result.stdout || "")
+      .trim()
+      .split(/\s+/)
+      .some((state) => state.startsWith("Z"));
+  } catch {
+    return false;
+  }
+}
 
 export function runtimeDir(workspace) {
   return join(workspace, ".runtime");
@@ -59,7 +76,7 @@ export function isPidRunning(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
-    return true;
+    return !isZombieProcess(pid);
   } catch (e) {
     return e?.code === "EPERM";
   }

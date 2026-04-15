@@ -61,6 +61,19 @@ npm install -g llm-tracker
 llm-tracker init && llm-tracker
 ```
 
+## Supported Topologies
+
+`llm-tracker` supports two deployment shapes:
+
+- Recommended: **one shared workspace + one shared daemon + many linked projects.** Run the hub on a central workspace such as `~/.llm-tracker`, then link repo-local tracker files into it with `npx llm-tracker link <slug> <abs-path>`. This gives one source of truth for humans and agents.
+- Supported: **multiple isolated workspaces + multiple daemons.** Useful for demos, sandboxes, or teams that want hard isolation. Each daemon needs its own workspace folder and port.
+
+If you keep a tracker file in a repo and link it into the shared workspace:
+
+- the shared daemon automatically watches the linked tracker file for direct edits
+- the shared daemon automatically watches the shared workspace `patches/` directory
+- patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
+
 ---
 
 ## Wire it into your LLM CLI
@@ -134,6 +147,18 @@ Existing workspaces do not need migration work. The `.runtime/` directory is cre
 
 Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `next`, `since`, `rollback`, and `link` keep working against a background hub started on a non-default port.
 
+Daemon state is **workspace-scoped**. `npx llm-tracker daemon stop --path <dir>` only affects the daemon for that workspace. In the recommended shared-daemon topology, that means one daemon for the central workspace and linked repo-local project files underneath it.
+
+### Daemon troubleshooting
+
+If `daemon stop` times out or hub-backed commands say `Hub not reachable`:
+
+1. Run `npx llm-tracker daemon status --path <workspace>` and `npx llm-tracker daemon logs --path <workspace> --lines 120`.
+2. If the recorded PID still exists but the recorded port does not answer, stop that PID manually.
+3. Run `daemon status` again. If the process is gone but `.runtime/daemon.json` is still present, remove the stale metadata file and start the daemon again.
+
+Do **not** fix this by creating a second accidental workspace in the repo. The correct recovery target is the original workspace.
+
 ---
 
 ## The Contract (TL;DR)
@@ -149,6 +174,8 @@ For task pickup, prefer the atomic claim flow over hand-built status patches:
 
 - `POST /api/projects/:slug/pick`
 - `npx llm-tracker pick <slug> [task-id] --assignee <model>`
+
+Legacy compatibility: if an older patch or tracker file still uses `status: "partial"`, the hub normalizes it to `in_progress` on ingest and writes back the canonical value.
 
 Two write modes:
 

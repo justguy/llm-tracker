@@ -1,8 +1,7 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { EFFORT_VALUES, REFERENCE_PATTERN_SOURCE } from "./references.js";
-
-export const STATUS_VALUES = ["not_started", "in_progress", "complete", "deferred"];
+import { STATUS_VALUES } from "./status-vocabulary.js";
 
 const schema = {
   type: "object",

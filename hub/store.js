@@ -15,6 +15,7 @@ import { validateProject } from "./validator.js";
 import { deriveProject } from "./progress.js";
 import { mergeProject, stableEq } from "./merge.js";
 import { computeDelta, hasChanges, summarize } from "./versioning.js";
+import { normalizeProjectStatuses } from "./status-vocabulary.js";
 import {
   writeSnapshot,
   readSnapshot,
@@ -125,6 +126,9 @@ export class Store {
       return this._recordError(slug, filePath, { kind: "parse", message: e.message });
     }
 
+    const normalizationNotes = { warnings: [] };
+    incoming = normalizeProjectStatuses(incoming, normalizationNotes).data;
+
     let prev = this.projects.get(slug);
 
     // Cold-start resume: if we don't have in-memory state but incoming matches
@@ -146,7 +150,12 @@ export class Store {
               path: filePath,
               rev: incomingRev,
               error: null,
-              notes: { ignored: [], warnings: [], appended: [], updated: [] }
+              notes: {
+                ignored: [],
+                warnings: [...normalizationNotes.warnings],
+                appended: [],
+                updated: []
+              }
             };
             this.projects.set(slug, entry);
             clearErrorFile(this.workspace, slug);
@@ -160,6 +169,9 @@ export class Store {
 
     const prevData = prev?.data || null;
     const { merged, notes } = mergeProject(prevData, incoming);
+    if (normalizationNotes.warnings.length > 0) {
+      notes.warnings.push(...normalizationNotes.warnings);
+    }
 
     const { ok, errors } = validateProject(merged);
     if (!ok) {
@@ -233,6 +245,7 @@ export class Store {
 
   async createOrReplace(slug, data) {
     return this.withLock(slug, async () => {
+      data = normalizeProjectStatuses(data).data;
       if (!data?.meta?.slug) {
         return { ok: false, status: 400, message: "meta.slug is required in body" };
       }
@@ -285,6 +298,7 @@ export class Store {
       } catch (e) {
         return { ok: false, status: 400, message: `target is not valid JSON: ${e.message}` };
       }
+      data = normalizeProjectStatuses(data).data;
       const { ok, errors } = validateProject(data);
       if (!ok) {
         return { ok: false, status: 400, message: `target fails schema: ${errors.join("; ")}` };
@@ -410,7 +424,12 @@ export class Store {
         return { ok: false, status: 500, message: `tracker file not parseable: ${e.message}` };
       }
 
+      const normalizationNotes = { warnings: [] };
+      patch = normalizeProjectStatuses(patch, normalizationNotes).data;
       const { merged, notes } = mergeProject(existing, patch);
+      if (normalizationNotes.warnings.length > 0) {
+        notes.warnings.push(...normalizationNotes.warnings);
+      }
       const { ok, errors } = validateProject(merged);
       if (!ok) return { ok: false, status: 400, message: errors.join("; "), notes };
 

@@ -18,6 +18,19 @@ Before you write anything:
 
 **The safest way to avoid this entirely: use HTTP mode** (§7 Option B, §8 Mode B). HTTP mode requires zero filesystem access to the workspace.
 
+### Supported topologies
+
+The system supports two shapes:
+
+- Recommended: one **shared workspace** such as `~/.llm-tracker/`, one shared daemon, many projects registered or symlinked into it.
+- Supported: multiple isolated workspaces, each with its own daemon and port.
+
+If a project keeps its tracker JSON in a repo and the hub registers it via **§7 Option C**, the repo-local file is only the project file. The **workspace is still the shared workspace** containing this README. That means:
+
+- `patches/` means `<shared-workspace>/patches/`, not `<repo>/.llm-tracker/patches/`
+- `.runtime/` means the shared workspace runtime metadata
+- HTTP calls should still target the shared daemon
+
 ---
 
 ## 1. TL;DR
@@ -197,6 +210,8 @@ Four values only:
 | `complete`    | Shipped / merged / done.                                                   |
 | `deferred`    | Intentionally parked. Use instead of deletion. Excluded from progress %.   |
 
+Backward compatibility: legacy patches or tracker files that still send `status: "partial"` are normalized to `in_progress` on ingest. Canonical tracker state always writes back the four values above.
+
 **Progress %** = `round((count(complete) + 0.5 * count(in_progress)) / (total - count(deferred)) * 100)`.
 
 ---
@@ -282,6 +297,12 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/symlink \
 ```
 
 The hub validates (must exist, be a regular `.json`, pass schema, `meta.slug` matches URL slug) and creates `<workspace>/trackers/<slug>.json` as a symlink. Rev stamps flow back through the symlink to the real file.
+
+After linking:
+
+- the hub automatically watches the linked target file for direct edits
+- file patches still go to `<workspace>/patches/`
+- HTTP updates still go to the shared daemon for that workspace
 
 To unlink: `DELETE /api/projects/<slug>` removes the symlink, leaves the target intact.
 
@@ -499,6 +520,16 @@ Error shape:
 
 When a background daemon is running, hub-backed CLI commands reuse the recorded daemon port from `.runtime/daemon.json` if you omit `--port`. Do not edit `.runtime/` by hand.
 
+Daemon state is workspace-scoped. In the recommended topology, everyone should point at the same shared workspace. Do **not** fix a stale daemon by creating another `.llm-tracker/` directory in a repo.
+
+### Daemon mismatch recovery
+
+If `llm-tracker daemon status` and actual hub reachability disagree:
+
+1. Check `llm-tracker daemon logs [--path <dir>] --lines 120`.
+2. If the workspace has a recorded PID but the port is dead, tell the human the daemon is wedged rather than silently creating a new workspace.
+3. Recovery is: stop the stale PID, clear stale `.runtime/daemon.json` if needed, then restart the daemon on the same workspace.
+
 ### Wiring the status shortcut into the user's CLI
 
 When the human asks you to "wire up the status command" or "add a skill for project status," drop a small integration file pointing at `npx llm-tracker status`. Don't reinvent the command.
@@ -518,6 +549,7 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 ## 14. Hard rules (do not violate)
 
 - **Never create a new `.llm-tracker/` folder outside the workspace** (§0).
+- In shared-daemon mode, never drop patch files into a repo-local `.llm-tracker/` folder. Use the shared workspace or HTTP.
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.
 - Never invent a `priorityId` or `swimlaneId` not declared in `meta`.

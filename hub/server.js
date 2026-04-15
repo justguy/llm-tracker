@@ -278,6 +278,13 @@ export async function startHub({ workspace, port, uiDir }) {
 
   const httpServer = createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  const sockets = new Set();
+  let shuttingDown = false;
+
+  httpServer.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
 
   function broadcast(msg) {
     const data = JSON.stringify(msg);
@@ -393,6 +400,9 @@ export async function startHub({ workspace, port, uiDir }) {
     });
 
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
     try {
       await watcher.close();
     } catch {}
@@ -400,9 +410,36 @@ export async function startHub({ workspace, port, uiDir }) {
       await patchesWatcher.close();
     } catch {}
     try {
-      wss.close();
+      for (const client of wss.clients) {
+        try {
+          client.terminate();
+        } catch {}
+      }
+      await new Promise((resolve) => wss.close(() => resolve()));
     } catch {}
-    httpServer.close(() => process.exit(0));
+    try {
+      if (typeof httpServer.closeIdleConnections === "function") {
+        httpServer.closeIdleConnections();
+      }
+    } catch {}
+
+    const forceTimer = setTimeout(() => {
+      try {
+        if (typeof httpServer.closeAllConnections === "function") {
+          httpServer.closeAllConnections();
+        }
+      } catch {}
+      for (const socket of sockets) {
+        try {
+          socket.destroy();
+        } catch {}
+      }
+    }, 1500);
+    forceTimer.unref?.();
+
+    await new Promise((resolve) => httpServer.close(() => resolve()));
+    clearTimeout(forceTimer);
+    process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

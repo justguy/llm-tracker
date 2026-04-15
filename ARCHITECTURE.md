@@ -131,6 +131,8 @@ Four values only:
 | `complete`    | Shipped.                                                                   |
 | `deferred`    | Intentionally parked. Excluded from progress %; LLMs use this in place of deletion. |
 
+Backward compatibility: legacy patch files or tracker files that still use `status: "partial"` are normalized to `in_progress` at the store boundary before validation. Canonical state remains limited to the four values above.
+
 **Progress %** = `round((count(complete) + 0.5 * count(in_progress)) / (total - count(deferred)) * 100)`.
 
 ---
@@ -256,6 +258,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/symlink \
 
 Hub creates `<workspace>/trackers/<slug>.json` as a symlink. Polling on the trackers dir picks up target-file changes.
 
+The linked repo-local file is still part of the same project, but it is **not** a second workspace. File patches still go to `<workspace>/patches/`, and HTTP writes still target the daemon serving that workspace.
+
 ---
 
 ## Updates — two modes
@@ -346,6 +350,13 @@ First match wins:
 
 Foreground startup remains the default: `llm-tracker` starts the hub in the current shell.
 
+Two deployment topologies are supported:
+
+1. Recommended: one shared workspace, one shared daemon, many projects registered or symlinked into that workspace.
+2. Supported alternative: multiple isolated workspaces, each with its own daemon and port.
+
+In the recommended topology, repo-local tracker files are usually linked in via Option C. The shared daemon remains the source of truth for HTTP, `patches/`, `.runtime/`, and the central UI, while the linked repo-local file is watched for direct edits.
+
 Daemon mode is explicit:
 
 - `llm-tracker --daemon`
@@ -357,6 +368,8 @@ Daemon mode is explicit:
 Daemon runtime files live under `<workspace>/.runtime/`. Existing workspaces do not need manual migration; the directory is created lazily on first daemon start.
 
 Hub-backed CLI commands (`next`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
+
+Daemon lifecycle is workspace-scoped. `llm-tracker daemon stop --path <dir>` only targets the daemon registered for that workspace.
 
 ---
 
@@ -379,6 +392,18 @@ First match wins:
 ### Polling-based file watching
 
 Chokidar uses native fsevents on macOS, which subscribes to directory events. When a tracker file in `trackers/` is a symlink to a file in a **different directory** (Option C), writes to the target file fire OS events in *that* other directory — which fsevents on the trackers dir does not see. The hub therefore runs chokidar with `usePolling: true, interval: 300`: `stat()` every ~300 ms picks up changes to target files regardless of where they live. For a local tool watching a handful of files, polling overhead is negligible.
+
+### Stale daemon recovery
+
+If a workspace still has `.runtime/daemon.json` but the recorded port no longer answers, the daemon is wedged or stale rather than healthy. Recovery should stay on the same workspace:
+
+1. Inspect `.runtime/daemon.log` or `llm-tracker daemon logs`.
+2. Stop the recorded PID.
+3. Re-run `llm-tracker daemon status`.
+4. If the PID is gone but metadata remains, remove the stale `.runtime/daemon.json`.
+5. Restart the daemon on that workspace.
+
+Creating a second accidental workspace is the wrong fix because it forks the source of truth.
 
 ### Body parsing & error format
 

@@ -56,6 +56,7 @@ const DEFAULT_WORKSPACE = join(homedir(), ".llm-tracker");
 const DEFAULT_PORT = 4400;
 const DAEMON_READY_TIMEOUT_MS = 5000;
 const DAEMON_STOP_TIMEOUT_MS = 5000;
+const DAEMON_FORCE_STOP_TIMEOUT_MS = 2000;
 
 function parseArgs(argv) {
   const args = { _: [], flags: {} };
@@ -450,9 +451,32 @@ async function cmdDaemonStop(args) {
   }
   const stopped = await waitForPidExit(status.meta.pid, DAEMON_STOP_TIMEOUT_MS);
   if (!stopped) {
-    console.error(`Timed out waiting for pid ${status.meta.pid} to stop.`);
-    console.error(`  log: ${status.logFile}`);
-    process.exit(1);
+    try {
+      process.kill(status.meta.pid, "SIGKILL");
+    } catch (e) {
+      if (!isPidRunning(status.meta.pid)) {
+        removeDaemonMeta(workspace);
+        console.log(`Stopped background hub for ${workspace}.`);
+        console.log(`  pid: ${status.meta.pid}`);
+        return;
+      }
+      console.error(`Timed out waiting for pid ${status.meta.pid} to stop.`);
+      console.error(`  log: ${status.logFile}`);
+      console.error(`  force-stop failed: ${e.message}`);
+      process.exit(1);
+    }
+
+    const forced = await waitForPidExit(status.meta.pid, DAEMON_FORCE_STOP_TIMEOUT_MS);
+    if (!forced) {
+      console.error(`Timed out waiting for pid ${status.meta.pid} to stop after SIGKILL.`);
+      console.error(`  log: ${status.logFile}`);
+      process.exit(1);
+    }
+
+    removeDaemonMeta(workspace);
+    console.log(`Force-stopped background hub for ${workspace}.`);
+    console.log(`  pid: ${status.meta.pid}`);
+    return;
   }
 
   removeDaemonMeta(workspace);

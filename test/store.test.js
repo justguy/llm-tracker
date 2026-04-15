@@ -161,6 +161,28 @@ test("applyPatch: updates only the fields the patch mentions", async () => {
   }
 });
 
+test("applyPatch: normalizes legacy partial status to in_progress", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      tasks: { t1: { status: "partial" } }
+    });
+    assert.equal(res.ok, true);
+    assert.ok(res.notes.warnings.some((warning) => warning.includes('"partial" -> "in_progress"')));
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    const t1 = after.tasks.find((task) => task.id === "t1");
+    assert.equal(t1.status, "in_progress");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyPatch: 404 when project doesn't exist", async () => {
   const ws = setupWorkspace();
   try {
@@ -280,6 +302,29 @@ test("ingest: direct-file-edit that reorders is corrected back to existing order
   }
 });
 
+test("ingest: normalizes legacy partial status from tracker file", () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    const project = validProject();
+    project.tasks[0].status = "partial";
+    writeFileSync(file, JSON.stringify(project));
+
+    const res = store.ingest(file, readFileSync(file, "utf-8"));
+    assert.equal(res.ok, true);
+
+    const entry = store.get("test-project");
+    assert.equal(entry.data.tasks[0].status, "in_progress");
+    assert.ok(entry.notes.warnings.some((warning) => warning.includes('"partial" -> "in_progress"')));
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.tasks[0].status, "in_progress");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyCollapse: flips swimlane collapsed flag", async () => {
   const ws = setupWorkspace();
   try {
@@ -372,6 +417,23 @@ test("createOrReplace validates slug parity + schema", async () => {
     const ok = await store.createOrReplace("test-project", validProject());
     assert.equal(ok.ok, true);
     assert.equal(existsSync(trackerPath(ws, "test-project")), true);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("createOrReplace accepts legacy partial status and writes canonical status", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    project.tasks[0].status = "partial";
+
+    const res = await store.createOrReplace("test-project", project);
+    assert.equal(res.ok, true);
+
+    const after = JSON.parse(readFileSync(trackerPath(ws, "test-project"), "utf-8"));
+    assert.equal(after.tasks[0].status, "in_progress");
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
