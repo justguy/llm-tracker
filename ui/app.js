@@ -689,9 +689,8 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
 
   const slugs = Object.keys(projects).sort();
 
-  return html`
-    <div class=${`drawer-overlay ${pinned ? "pinned" : ""}`} onClick=${pinned ? null : onClose}>
-      <aside class="drawer" onClick=${(e) => e.stopPropagation()}>
+  const drawerEl = html`
+    <aside class=${`drawer ${pinned ? "pinned" : ""}`} onClick=${(e) => e.stopPropagation()}>
         <div class="drawer-header">
           <span class="brand">[OVERVIEW] · ALL PROJECTS</span>
           <div class="drawer-header-actions">
@@ -751,7 +750,12 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
               })}
         </div>
       </aside>
-    </div>
+  `;
+
+  if (pinned) return drawerEl;
+
+  return html`
+    <div class="drawer-overlay" onClick=${onClose}>${drawerEl}</div>
   `;
 }
 
