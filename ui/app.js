@@ -184,6 +184,20 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete }) {
           ? html`<${Badge} kind="blocked" title=${`Blocked by ${blockedBy.join(", ")}`}>blocked · ${blockedBy.length}</${Badge}>`
           : null}
         ${task.assignee ? html`<${Badge} kind="assignee">${task.assignee}</${Badge}>` : null}
+        ${task.reference
+          ? html`<button
+              class="card-reference"
+              title=${`Copy reference: ${task.reference}`}
+              onMouseDown=${(e) => e.stopPropagation()}
+              onClick=${(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(task.reference).catch(() => {});
+                }
+              }}
+            >${task.reference}</button>`
+          : null}
         ${tags.map((t) => html`<${Badge} kind="tag">${t}</${Badge}>`)}
       </div>
     </div>

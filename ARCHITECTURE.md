@@ -77,6 +77,7 @@ Ordered by array index. Hub owns the order.
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓     | Both values must exist in `meta`.                     |
 | `dependencies`   | array of task ids                              |          | Drives **block state** (§Block state).                |
 | `assignee`       | string \| null                                 |          | LLM's model id when claimed.                          |
+| `reference`      | string \| null                                 |          | Source location as `path/to/file.ext:line` or `…:line-line`. |
 | `blocker_reason` | string \| null                                 |          | One sentence when the LLM is stuck.                   |
 | `context`        | object (freeform)                              |          | Tags, files touched, notes — shallow-merged on patch. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
