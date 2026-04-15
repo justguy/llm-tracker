@@ -41,7 +41,7 @@ const schema = {
             }
           }
         },
-        scratchpad: { type: "string" },
+        scratchpad: { type: "string", maxLength: 5000 },
         updatedAt: { type: ["string", "null"] }
       }
     },

@@ -116,6 +116,21 @@ test("allows task comment to be null (clears the field)", () => {
   assert.equal(ok, true);
 });
 
+test("accepts a scratchpad up to 5000 chars", () => {
+  const p = validProject();
+  p.meta.scratchpad = "x".repeat(5000);
+  const { ok } = validateProject(p);
+  assert.equal(ok, true);
+});
+
+test("rejects a scratchpad over 5000 chars", () => {
+  const p = validProject();
+  p.meta.scratchpad = "x".repeat(5001);
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("scratchpad")));
+});
+
 test("requires at least one swimlane and priority", () => {
   const p = validProject();
   p.meta.swimlanes = [];
