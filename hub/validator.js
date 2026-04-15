@@ -66,6 +66,10 @@ const schema = {
           },
           dependencies: { type: "array", items: { type: "string" } },
           assignee: { type: ["string", "null"] },
+          reference: {
+            type: ["string", "null"],
+            pattern: "^.+:\\d+(-\\d+)?$"
+          },
           blocker_reason: { type: ["string", "null"] },
           context: { type: "object" },
           updatedAt: { type: ["string", "null"] },

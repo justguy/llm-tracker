@@ -65,6 +65,35 @@ test("allows additional context keys", () => {
   assert.equal(ok, true);
 });
 
+test("accepts a well-formed task reference", () => {
+  const p = validProject();
+  p.tasks[0].reference = "src/hub/store.js:142";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("accepts a task reference with a line range", () => {
+  const p = validProject();
+  p.tasks[0].reference = "hub/versioning.js:59-85";
+  const { ok } = validateProject(p);
+  assert.equal(ok, true);
+});
+
+test("rejects a task reference without a line number", () => {
+  const p = validProject();
+  p.tasks[0].reference = "src/hub/store.js";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("reference")));
+});
+
+test("allows task reference to be null (clears the field)", () => {
+  const p = validProject();
+  p.tasks[0].reference = null;
+  const { ok } = validateProject(p);
+  assert.equal(ok, true);
+});
+
 test("requires at least one swimlane and priority", () => {
   const p = validProject();
   p.meta.swimlanes = [];
