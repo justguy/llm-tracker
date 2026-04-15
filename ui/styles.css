@@ -1154,6 +1154,7 @@ body {
   gap: 4px;
   align-items: center;
   margin-top: 2px;
+  padding-right: 48px;
 }
 
 .card-context {
@@ -1223,11 +1224,15 @@ body {
 }
 
 .badge.comment-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
   color: var(--amber);
   background: var(--amber-soft);
   border-color: var(--amber-dim);
   cursor: pointer;
   outline: none;
+  z-index: 2;
 }
 .badge.comment-badge.empty {
   color: var(--muted);

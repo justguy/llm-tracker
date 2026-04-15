@@ -305,16 +305,16 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onS
       ${extraKeys.length > 0
         ? html`<div class="card-context"><b>${extraKeys[0]}:</b> ${String(ctx[extraKeys[0]])}</div>`
         : null}
+      <${CommentBadge}
+        comment=${task.comment}
+        onSave=${(value) => onSaveComment && onSaveComment(task.id, value)}
+      />
       <div class="card-footer">
         <${Badge} kind=${`status-${task.status}`}>${task.status.replace("_", " ")}</${Badge}>
         ${blockedBy && blockedBy.length > 0
           ? html`<${Badge} kind="blocked" title=${`Blocked by ${blockedBy.join(", ")}`}>blocked · ${blockedBy.length}</${Badge}>`
           : null}
         ${task.assignee ? html`<${Badge} kind="assignee">${task.assignee}</${Badge}>` : null}
-        <${CommentBadge}
-          comment=${task.comment}
-          onSave=${(value) => onSaveComment && onSaveComment(task.id, value)}
-        />
         ${task.reference
           ? html`<button
               class="card-reference"
