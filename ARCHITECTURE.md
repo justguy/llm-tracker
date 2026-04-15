@@ -51,7 +51,7 @@ Every tracker JSON has two top-level keys: `meta` and `tasks`.
 | `slug`       | `^[a-z0-9][a-z0-9-]*$`            |    ✓     | Must match the filename stem (`<slug>.json`).                      |
 | `swimlanes`  | array of swimlane objects         |    ✓     | ≥ 1. Row axis. See below.                                          |
 | `priorities` | array of `{id, label}`            |    ✓     | ≥ 1. Column axis. Conventional: `p0`–`p3`.                         |
-| `scratchpad` | string                            |          | LLM's status banner to the human. Rendered above the matrix.       |
+| `scratchpad` | string (≤ 5000 chars)             |          | LLM's status banner to the human. Rendered above the matrix, collapsed by default, editable inline. |
 | `updatedAt`  | ISO string \| null                |          | **Hub-owned.**                                                     |
 | `rev`        | integer \| null                   |          | **Hub-owned.** Monotonic, bumps on every accepted change.          |
 

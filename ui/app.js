@@ -537,6 +537,88 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onT
   `;
 }
 
+// ─────── Scratchpad block (one per project pane) ───────
+function ScratchpadBlock({ slug, text, expanded, onToggleExpand, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef(null);
+
+  const hasText = !!(text && text.length > 0);
+
+  const startEdit = (e) => {
+    e?.stopPropagation();
+    setDraft(text || "");
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+    setDraft("");
+  };
+  const commit = async () => {
+    if (saving || draft.length > 5000) return;
+    setSaving(true);
+    const ok = await onSave(slug, draft);
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
+
+  useEffect(() => {
+    if (editing) textareaRef.current?.focus();
+  }, [editing]);
+
+  if (editing) {
+    return html`
+      <div class="scratchpad scratchpad-editing" onClick=${(e) => e.stopPropagation()} onMouseDown=${(e) => e.stopPropagation()}>
+        <div class="scratchpad-edit-header">
+          <span class="scratchpad-label">scratchpad</span>
+          <span class="scratchpad-counter">${draft.length} / 5000</span>
+        </div>
+        <textarea
+          ref=${textareaRef}
+          class="scratchpad-textarea"
+          maxlength="5000"
+          placeholder="plain text — ≤ 5000 chars"
+          value=${draft}
+          onInput=${(e) => setDraft(e.currentTarget.value)}
+          onKeyDown=${(e) => {
+            if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+          }}
+        />
+        <div class="scratchpad-edit-actions">
+          <button class="icon-btn small" onClick=${cancelEdit} disabled=${saving}>[CANCEL]</button>
+          <button class="icon-btn small" onClick=${commit} disabled=${saving || draft.length > 5000}>
+            ${saving ? "[SAVING…]" : "[SAVE]"}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class=${`scratchpad ${expanded ? "expanded" : "collapsed"} ${hasText ? "" : "empty"}`}>
+      <span class="scratchpad-label">scratchpad</span>
+      <span class="scratchpad-body">${hasText ? text : html`<em class="muted">(none)</em>`}</span>
+      <span class="scratchpad-actions">
+        ${hasText
+          ? html`<button
+              class="scratchpad-toggle"
+              onClick=${(e) => { e.stopPropagation(); onToggleExpand(slug); }}
+              title=${expanded ? "Collapse" : "Expand"}
+            >${expanded ? "[−]" : "[+]"}</button>`
+          : null}
+        <button
+          class="scratchpad-edit"
+          onClick=${startEdit}
+          onMouseDown=${(e) => e.stopPropagation()}
+          title="Edit scratchpad"
+        >[EDIT]</button>
+      </span>
+    </div>
+  `;
+}
+
 // ─────── Project pane (one per workspace slot) ───────
 function ProjectPane({
   project,
@@ -552,7 +634,10 @@ function ProjectPane({
   onMove,
   onToggleCollapse,
   onDeleteTask,
-  onSaveComment
+  onSaveComment,
+  scratchpadExpanded,
+  onToggleScratchpad,
+  onSaveScratchpad
 }) {
   const data = project?.data;
   const derived = project?.derived;
@@ -574,8 +659,14 @@ function ProjectPane({
             >${pinned ? "[UNPIN]" : "[PIN]"}</button>`
           : null}
       </div>
-      ${meta?.scratchpad
-        ? html`<div class="scratchpad"><span class="scratchpad-label">scratchpad</span><span>${meta.scratchpad}</span></div>`
+      ${data
+        ? html`<${ScratchpadBlock}
+            slug=${slug}
+            text=${meta?.scratchpad || ""}
+            expanded=${!!scratchpadExpanded}
+            onToggleExpand=${onToggleScratchpad}
+            onSave=${onSaveScratchpad}
+          />`
         : null}
       ${project?.error
         ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
@@ -1218,6 +1309,11 @@ function App() {
   const [pinnedSlugs, setPinnedSlugs] = useState(() =>
     Array.isArray(initialSettings.pinnedSlugs) ? initialSettings.pinnedSlugs : []
   );
+  const [scratchpadExpanded, setScratchpadExpanded] = useState(() =>
+    initialSettings.scratchpadExpanded && typeof initialSettings.scratchpadExpanded === "object"
+      ? initialSettings.scratchpadExpanded
+      : {}
+  );
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1242,8 +1338,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, drawerPinned, pinnedSlugs });
-  }, [theme, drawerPinned, pinnedSlugs]);
+    saveSettings({ theme, drawerPinned, pinnedSlugs, scratchpadExpanded });
+  }, [theme, drawerPinned, pinnedSlugs, scratchpadExpanded]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -1358,6 +1454,30 @@ function App() {
     setPinnedSlugs((prev) =>
       prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
     );
+  };
+
+  const onToggleScratchpad = (slug) => {
+    setScratchpadExpanded((prev) => ({ ...prev, [slug]: !prev[slug] }));
+  };
+
+  const onSaveScratchpad = async (slug, text) => {
+    if (!slug) return false;
+    try {
+      const res = await fetch(`/api/projects/${slug}/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meta: { scratchpad: text } })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(`Save scratchpad failed: ${body.error || res.statusText}`);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      alert(`Save scratchpad failed: ${e.message}`);
+      return false;
+    }
   };
 
   const slugs = Object.keys(projects).sort();
@@ -1568,6 +1688,9 @@ function App() {
             onToggleCollapse=${onToggleCollapse}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
+            scratchpadExpanded=${!!scratchpadExpanded[s]}
+            onToggleScratchpad=${onToggleScratchpad}
+            onSaveScratchpad=${onSaveScratchpad}
           />
         `)}
       </div>
