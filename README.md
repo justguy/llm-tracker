@@ -12,6 +12,8 @@ It's a file-system-as-database tracker. Your LLMs update project states with tin
 
 When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker.
 
+When an agent needs the current contract for a running hub, it should call `GET /help` first instead of guessing write modes or endpoints.
+
 ## Why use llm-tracker?
 
 🔒 **100 % Local & Secure** — the hub makes zero external calls. It doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine.
@@ -74,6 +76,15 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - the shared daemon automatically watches the shared workspace `patches/` directory
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
 
+## Agent Help
+
+Running hubs expose `GET /help` as the current agent contract for that workspace.
+
+- It serves the workspace `README.md`
+- For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
+- Agents should read `/help` before using write paths or task-intelligence endpoints
+- If you change agent-facing behavior, update the workspace template so `/help` stays accurate
+
 ---
 
 ## Wire it into your LLM CLI
@@ -106,6 +117,8 @@ For JSON (chainable): `npx llm-tracker status --json`.
 
 Each file just says: *"For project status, run `npx llm-tracker status`."* That's it.
 
+If the hub is already running, add one more line: *"Before using the tracker, read `GET /help`."*
+
 ---
 
 ## Shell commands
@@ -117,6 +130,7 @@ npx llm-tracker status <slug>       # detail on one project
 npx llm-tracker status --json       # machine-readable
 
 # Requires hub running
+npx llm-tracker help                     # local CLI usage help
 npx llm-tracker blockers <slug>        # structural blockers and what they are waiting on
 npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
 npx llm-tracker pick <slug> [task-id] --assignee codex  # atomic claim, defaults to top ready task
@@ -130,6 +144,9 @@ npx llm-tracker --daemon                  # start hub in the background
 npx llm-tracker daemon status             # show pid / port / log path
 npx llm-tracker daemon stop               # stop the background hub
 npx llm-tracker daemon logs --lines 80    # print recent daemon logs
+
+# For LLMs talking to the running hub
+curl http://localhost:4400/help           # current workspace agent contract
 ```
 
 Full flag reference: `npx llm-tracker help`.

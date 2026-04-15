@@ -4,6 +4,8 @@ You are being asked to read this because there is a **local project tracker** ru
 
 Writes are **frequent and tiny**. Reads are **rare and only at decision points**. The hub is authoritative for structure (task order, which tasks exist, human UI state). You are authoritative for content (status, assignee, dependencies, context, new tasks, priority changes).
 
+If the hub is running and you can make one HTTP call, prefer `GET /help` first. It serves this exact contract for the active workspace.
+
 ---
 
 ## 0. The rule that prevents the most common failure
@@ -39,6 +41,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **Hub enforces** — task array order, task existence (no accidental deletion), human UI state (`meta.swimlanes[i].collapsed`), version stamps (`updatedAt`, `rev`).
 - **You write freely** — `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
+- **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
 - **On failure**, read `<slug>.errors.json` (file mode) or the JSON response body (HTTP mode). Both are structured `{error, type, hint}` with a precise path pointer.
@@ -506,6 +509,7 @@ Error shape:
 | `llm-tracker daemon stop [--path <dir>]`                  | Stop the background hub.                                                      |     no       |
 | `llm-tracker daemon status [--path <dir>]`                | Show background-hub pid / port / log path.                                    |     no       |
 | `llm-tracker daemon logs [--path <dir>] [--lines N]`      | Print recent background-hub logs.                                             |     no       |
+| `GET /help`                                               | Fetch the current workspace agent contract over HTTP.                         |     no       |
 | `llm-tracker status`                                      | Dashboard of all projects.                                                    |     no       |
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |
 | `llm-tracker status --json`                               | Machine-readable dashboard.                                                   |     no       |
@@ -549,6 +553,7 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 ## 14. Hard rules (do not violate)
 
 - **Never create a new `.llm-tracker/` folder outside the workspace** (§0).
+- If the hub is running, read `/help` before guessing contract details.
 - In shared-daemon mode, never drop patch files into a repo-local `.llm-tracker/` folder. Use the shared workspace or HTTP.
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.

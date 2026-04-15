@@ -44,9 +44,19 @@ export async function startHub({ workspace, port, uiDir }) {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "16mb" }));
+  const readmePath = join(workspace, "README.md");
+
+  const sendWorkspaceHelp = (res) => {
+    if (!existsSync(readmePath)) return res.status(404).send("No README");
+    res.type("text/markdown").send(readFileSync(readmePath, "utf-8"));
+  };
 
   app.get("/api/workspace", (_req, res) => {
-    res.json({ workspace, readme: join(workspace, "README.md") });
+    res.json({ workspace, readme: readmePath, help: "/help" });
+  });
+
+  app.get("/help", (_req, res) => {
+    sendWorkspaceHelp(res);
   });
 
   const settingsFile = join(workspace, "settings.json");
@@ -203,9 +213,7 @@ export async function startHub({ workspace, port, uiDir }) {
   });
 
   app.get("/README.md", (_req, res) => {
-    const readme = join(workspace, "README.md");
-    if (!existsSync(readme)) return res.status(404).send("No README");
-    res.type("text/markdown").send(readFileSync(readme, "utf-8"));
+    sendWorkspaceHelp(res);
   });
 
   app.get("/api/history/:slug", (req, res) => {
@@ -468,7 +476,8 @@ export async function startHub({ workspace, port, uiDir }) {
       console.log(` LLM Project Tracker — hub running`);
       console.log(`   UI:         ${url}`);
       console.log(`   Workspace:  ${workspace}`);
-      console.log(`   README:     ${join(workspace, "README.md")}`);
+      console.log(`   Help:       ${url}/help`);
+      console.log(`   README:     ${readmePath}`);
       console.log("─────────────────────────────────────────────────────────");
       console.log(" Paste into your LLM to register a project:");
       console.log("");

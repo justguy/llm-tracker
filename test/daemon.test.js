@@ -85,6 +85,11 @@ test("daemon mode starts in the background, creates .runtime, and stops cleanly"
     assert.equal(health.status, 200);
     const workspacePayload = await health.json();
     assert.equal(workspacePayload.workspace, workspace);
+    assert.equal(workspacePayload.help, "/help");
+
+    const help = await fetch(`http://localhost:${port}/help`);
+    assert.equal(help.status, 200);
+    assert.match(await help.text(), /test workspace/);
 
     const status = runCli(["daemon", "status", "--path", workspace]);
     assert.equal(status.status, 0, status.stderr || status.stdout);
