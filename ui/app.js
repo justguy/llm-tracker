@@ -537,6 +537,75 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onT
   `;
 }
 
+// ─────── Project pane (one per workspace slot) ───────
+function ProjectPane({
+  project,
+  slug,
+  isActive,
+  solo,
+  pinned,
+  onFocus,
+  onTogglePin,
+  filter,
+  statusFilters,
+  blockFilters,
+  onMove,
+  onToggleCollapse,
+  onDeleteTask,
+  onSaveComment
+}) {
+  const data = project?.data;
+  const derived = project?.derived;
+  const meta = data?.meta;
+
+  return html`
+    <section
+      class=${`project-pane ${isActive ? "active" : ""} ${solo ? "solo" : ""}`}
+      onMouseDown=${() => onFocus && onFocus(slug)}
+    >
+      <div class="project-pane-header">
+        <span class="project-pane-name">${meta?.name || slug}</span>
+        <span class="project-pane-slug">${slug}</span>
+        ${onTogglePin
+          ? html`<button
+              class=${`icon-btn small ${pinned ? "active" : ""}`}
+              onClick=${(e) => { e.stopPropagation(); onTogglePin(slug); }}
+              title=${pinned ? "Unpin this project" : "Pin this project"}
+            >${pinned ? "[UNPIN]" : "[PIN]"}</button>`
+          : null}
+      </div>
+      ${meta?.scratchpad
+        ? html`<div class="scratchpad"><span class="scratchpad-label">scratchpad</span><span>${meta.scratchpad}</span></div>`
+        : null}
+      ${project?.error
+        ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
+        : null}
+      ${derived
+        ? html`<div class="progress-strip">
+            <span class="progress-label">project</span>
+            <${SegBar} counts=${derived.counts} total=${derived.total} />
+            <span class="progress-count">
+              ${derived.counts.complete || 0} / ${derived.total}
+              <span class="pct">${derived.pct}%</span>
+            </span>
+          </div>`
+        : null}
+      ${data
+        ? html`<${Matrix}
+            project=${project}
+            filterQuery=${filter}
+            statusFilters=${statusFilters}
+            blockFilters=${blockFilters}
+            onMove=${(args) => onMove(slug, args)}
+            onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
+            onDeleteTask=${(task) => onDeleteTask(slug, task)}
+            onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
+          />`
+        : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
+    </section>
+  `;
+}
+
 // ─────── Help modal ───────
 function HelpModal({ workspace, onClose }) {
   const port = typeof location !== "undefined" ? location.port || "4400" : "4400";
@@ -937,7 +1006,7 @@ function HistoryModal({ slug, onClose }) {
 }
 
 // ─────── Overview drawer ───────
-function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSelect, onDelete }) {
+function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSelect, onDelete, pinnedSlugs, onTogglePinProject }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
@@ -984,6 +1053,16 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
                       <span class="drawer-project-name">${p.data?.meta?.name || s}</span>
                       ${err ? html`<span class="badge blocked">${err.kind}</span>` : null}
                       <span class="drawer-project-pct">${d?.pct ?? 0}%</span>
+                      ${onTogglePinProject
+                        ? html`<button
+                            class=${`drawer-project-pin ${pinnedSlugs?.includes(s) ? "active" : ""}`}
+                            title=${pinnedSlugs?.includes(s) ? "Unpin from workspace" : "Pin to workspace"}
+                            onClick=${(e) => {
+                              e.stopPropagation();
+                              onTogglePinProject(s);
+                            }}
+                          >${pinnedSlugs?.includes(s) ? "[PINNED]" : "[PIN]"}</button>`
+                        : null}
                       <button
                         class="drawer-project-delete"
                         title=${`Delete ${s}`}
@@ -1136,6 +1215,9 @@ function App() {
   const [theme, setTheme] = useState(initialSettings.theme || "dark");
   const [drawerOpen, setDrawerOpen] = useState(!!initialSettings.drawerPinned);
   const [drawerPinned, setDrawerPinned] = useState(!!initialSettings.drawerPinned);
+  const [pinnedSlugs, setPinnedSlugs] = useState(() =>
+    Array.isArray(initialSettings.pinnedSlugs) ? initialSettings.pinnedSlugs : []
+  );
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1160,8 +1242,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, drawerPinned });
-  }, [theme, drawerPinned]);
+    saveSettings({ theme, drawerPinned, pinnedSlugs });
+  }, [theme, drawerPinned, pinnedSlugs]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -1217,10 +1299,10 @@ function App() {
     };
   }, []);
 
-  const onMove = async ({ taskId, swimlaneId, priorityId, targetIndex }) => {
-    if (!activeSlug) return;
+  const onMove = async (slug, { taskId, swimlaneId, priorityId, targetIndex }) => {
+    if (!slug) return;
     try {
-      await fetch(`/api/projects/${activeSlug}/move`, {
+      await fetch(`/api/projects/${slug}/move`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskId, swimlaneId, priorityId, targetIndex })
@@ -1230,10 +1312,10 @@ function App() {
     }
   };
 
-  const onSaveComment = async (taskId, value) => {
-    if (!activeSlug || !taskId) return false;
+  const onSaveComment = async (slug, taskId, value) => {
+    if (!slug || !taskId) return false;
     try {
-      const res = await fetch(`/api/projects/${activeSlug}/patch`, {
+      const res = await fetch(`/api/projects/${slug}/patch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tasks: { [taskId]: { comment: value } } })
@@ -1250,10 +1332,10 @@ function App() {
     }
   };
 
-  const onToggleCollapse = async (swimlaneId, collapsed) => {
-    if (!activeSlug) return;
+  const onToggleCollapse = async (slug, swimlaneId, collapsed) => {
+    if (!slug) return;
     try {
-      await fetch(`/api/projects/${activeSlug}/swimlane-collapse`, {
+      await fetch(`/api/projects/${slug}/swimlane-collapse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ swimlaneId, collapsed })
@@ -1272,17 +1354,23 @@ function App() {
 
   const onTogglePin = () => setDrawerPinned((p) => !p);
 
+  const onTogglePinProject = (slug) => {
+    setPinnedSlugs((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
+    );
+  };
+
   const slugs = Object.keys(projects).sort();
   const active = activeSlug ? projects[activeSlug] : null;
 
-  const onDeleteTask = async (task) => {
-    if (!activeSlug) return;
+  const onDeleteTask = async (slug, task) => {
+    if (!slug) return;
     const ok = window.confirm(
       `Delete task "${task.title}" (${task.id})?\n\nThis bumps the project rev. Use [UNDO] to revert.`
     );
     if (!ok) return;
     try {
-      const res = await fetch(`/api/projects/${activeSlug}/tasks/${task.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/projects/${slug}/tasks/${task.id}`, { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(`Delete failed: ${body.error || res.statusText}`);
@@ -1343,6 +1431,8 @@ function App() {
       activeSlug=${activeSlug}
       onSelect=${onSelectProject}
       onDelete=${onDeleteProject}
+      pinnedSlugs=${pinnedSlugs}
+      onTogglePinProject=${onTogglePinProject}
     />
   `;
   const helpEl = helpOpen ? html`<${HelpModal} workspace=${workspace} onClose=${() => setHelpOpen(false)} />` : null;
@@ -1423,8 +1513,10 @@ function App() {
     `;
   }
 
-  const meta = active.data.meta;
   const derived = active.derived;
+  const validPinned = pinnedSlugs.filter((s) => projects[s]);
+  const paneSlugs = validPinned.length > 0 ? validPinned : [activeSlug];
+  const solo = paneSlugs.length === 1 && validPinned.length === 1;
 
   return html`
     <div class=${shellClass}>
@@ -1447,9 +1539,7 @@ function App() {
         onDeleteProject=${onDeleteProject}
       />
       <div class="banner-row">
-        ${meta.scratchpad
-          ? html`<div class="scratchpad"><span class="scratchpad-label">scratchpad</span><span>${meta.scratchpad}</span></div>`
-          : html`<div class="banner-spacer"></div>`}
+        <div class="banner-spacer"></div>
         <${FilterToggles}
           counts=${derived.counts}
           statusFilters=${statusFilters}
@@ -1460,27 +1550,27 @@ function App() {
           toggleBlock=${toggleBlock}
         />
       </div>
-      ${active.error
-        ? html`<div class="error-banner"><b>${active.error.kind} error</b> — last valid state shown; ${active.error.message}</div>`
-        : null}
-      <div class="progress-strip">
-        <span class="progress-label">project</span>
-        <${SegBar} counts=${derived.counts} total=${derived.total} />
-        <span class="progress-count">
-          ${derived.counts.complete || 0} / ${derived.total}
-          <span class="pct">${derived.pct}%</span>
-        </span>
+      <div class=${`workspace-split ${solo ? "has-solo" : ""}`}>
+        ${paneSlugs.map((s) => html`
+          <${ProjectPane}
+            key=${s}
+            slug=${s}
+            project=${projects[s]}
+            isActive=${s === activeSlug}
+            solo=${solo}
+            pinned=${pinnedSlugs.includes(s)}
+            onFocus=${setActiveSlug}
+            onTogglePin=${onTogglePinProject}
+            filter=${filter}
+            statusFilters=${statusFilters}
+            blockFilters=${blockFilters}
+            onMove=${onMove}
+            onToggleCollapse=${onToggleCollapse}
+            onDeleteTask=${onDeleteTask}
+            onSaveComment=${onSaveComment}
+          />
+        `)}
       </div>
-      <${Matrix}
-        project=${active}
-        filterQuery=${filter}
-        statusFilters=${statusFilters}
-        blockFilters=${blockFilters}
-        onMove=${onMove}
-        onToggleCollapse=${onToggleCollapse}
-        onDeleteTask=${onDeleteTask}
-        onSaveComment=${onSaveComment}
-      />
       <${ConnectionPip} up=${wsUp} />
       ${drawerEl}
       ${helpEl}
