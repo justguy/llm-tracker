@@ -94,6 +94,28 @@ test("allows task reference to be null (clears the field)", () => {
   assert.equal(ok, true);
 });
 
+test("accepts a task comment under 500 chars", () => {
+  const p = validProject();
+  p.tasks[0].comment = "needs review from @claude before merging";
+  const { ok } = validateProject(p);
+  assert.equal(ok, true);
+});
+
+test("rejects a task comment over 500 chars", () => {
+  const p = validProject();
+  p.tasks[0].comment = "x".repeat(501);
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("comment")));
+});
+
+test("allows task comment to be null (clears the field)", () => {
+  const p = validProject();
+  p.tasks[0].comment = null;
+  const { ok } = validateProject(p);
+  assert.equal(ok, true);
+});
+
 test("requires at least one swimlane and priority", () => {
   const p = validProject();
   p.meta.swimlanes = [];

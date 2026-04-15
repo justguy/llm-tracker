@@ -39,6 +39,57 @@ function Badge({ kind, children, title }) {
   return html`<span class=${`badge ${kind || ""}`} title=${title || ""}>${children}</span>`;
 }
 
+function CommentBadge({ comment }) {
+  const badgeRef = useRef(null);
+  const popRef = useRef(null);
+  const [pos, setPos] = useState(null);
+
+  const show = () => {
+    const b = badgeRef.current?.getBoundingClientRect();
+    if (!b) return;
+    setPos({ placeholder: true, top: b.top, left: b.left });
+  };
+  const hide = () => setPos(null);
+
+  useEffect(() => {
+    if (!pos || !pos.placeholder || !popRef.current) return;
+    const b = badgeRef.current?.getBoundingClientRect();
+    const p = popRef.current.getBoundingClientRect();
+    if (!b) return;
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let top = b.top - p.height - 6;
+    if (top < margin) top = b.bottom + 6;
+    if (top + p.height > vh - margin) top = Math.max(margin, vh - margin - p.height);
+    let left = b.left + b.width / 2 - p.width / 2;
+    if (left < margin) left = margin;
+    if (left + p.width > vw - margin) left = vw - margin - p.width;
+    setPos({ placeholder: false, top, left });
+  }, [pos?.placeholder, comment]);
+
+  return html`
+    <span
+      ref=${badgeRef}
+      class="badge comment-badge"
+      onMouseEnter=${show}
+      onMouseLeave=${hide}
+      onFocus=${show}
+      onBlur=${hide}
+      tabIndex="0"
+      title="Comment (hover or focus to read)"
+    >[C]</span>
+    ${pos
+      ? html`<div
+          ref=${popRef}
+          class="comment-popover"
+          style=${`top: ${pos.top}px; left: ${pos.left}px; visibility: ${pos.placeholder ? "hidden" : "visible"};`}
+          role="tooltip"
+        >${comment}</div>`
+      : null}
+  `;
+}
+
 function IconBtn({ label, onClick, active, title }) {
   return html`
     <button class=${`icon-btn ${active ? "active" : ""}`} onClick=${onClick} title=${title || ""}>
@@ -184,6 +235,7 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete }) {
           ? html`<${Badge} kind="blocked" title=${`Blocked by ${blockedBy.join(", ")}`}>blocked · ${blockedBy.length}</${Badge}>`
           : null}
         ${task.assignee ? html`<${Badge} kind="assignee">${task.assignee}</${Badge}>` : null}
+        ${task.comment ? html`<${CommentBadge} comment=${task.comment} />` : null}
         ${task.reference
           ? html`<button
               class="card-reference"

@@ -1222,6 +1222,32 @@ body {
   border-color: var(--amber-dim);
 }
 
+.badge.comment-badge {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: var(--amber-dim);
+  cursor: help;
+  outline: none;
+}
+.badge.comment-badge:focus-visible { box-shadow: 0 0 0 2px var(--amber); }
+
+.comment-popover {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--amber);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: var(--white);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+}
+
 .card-reference {
   display: inline-flex;
   align-items: center;

@@ -70,6 +70,10 @@ const schema = {
             type: ["string", "null"],
             pattern: "^.+:\\d+(-\\d+)?$"
           },
+          comment: {
+            type: ["string", "null"],
+            maxLength: 500
+          },
           blocker_reason: { type: ["string", "null"] },
           context: { type: "object" },
           updatedAt: { type: ["string", "null"] },
