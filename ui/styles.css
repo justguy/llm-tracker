@@ -873,6 +873,65 @@ body {
 .seg-not_started { background: var(--status-not-started); }
 .seg-deferred    { background: var(--status-not-started); }
 
+/* ─────── Workspace split (pinned panes) ─────── */
+.workspace-split {
+  flex: 1;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg);
+  min-height: 0;
+}
+
+.project-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 480px;
+  border-right: 1px solid var(--hairline-strong);
+  overflow: hidden;
+  min-height: 0;
+}
+.project-pane:last-child { border-right: none; }
+.project-pane.solo { flex: 0 0 50%; min-width: 480px; }
+.workspace-split.has-solo { justify-content: flex-start; }
+.project-pane.active .project-pane-header { border-bottom-color: var(--amber); }
+
+.project-pane-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--hairline-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.project-pane-name { color: var(--amber); font-weight: 700; }
+.project-pane-slug { color: var(--muted); font-size: 10px; }
+.project-pane-header .icon-btn.small {
+  margin-left: auto;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+/* Pin toggle inside drawer rows */
+.drawer-project-pin {
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  padding: 2px 6px;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.drawer-project-pin:hover { color: var(--amber); border-color: var(--amber-dim); }
+.drawer-project-pin.active { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
+
 /* ─────── Matrix grid ─────── */
 .matrix-wrap {
   flex: 1;
