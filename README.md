@@ -16,6 +16,8 @@ When an agent already knows the task id and needs focused context, it can now ma
 
 When an agent needs to answer "why does this task exist?" or "what decisions did we already make?", it can now call `npx llm-tracker why <slug> <task-id>` or `npx llm-tracker decisions <slug>` instead of reconstructing that from raw comments and history.
 
+When an agent is ready to act or validate work, it can now call `npx llm-tracker execute <slug> <task-id>` and `npx llm-tracker verify <slug> <task-id>` for deterministic execution and verification packs instead of inventing a plan from scratch.
+
 When an agent needs the current contract for a running hub, it should call `GET /help` first instead of guessing write modes or endpoints.
 
 ## Why use llm-tracker?
@@ -87,7 +89,7 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 - It serves the workspace `README.md`
 - For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
 - Agents should read `/help` before using write paths or task-intelligence endpoints
-- Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, and `decisions` to recall prior decisions before broad file reads
+- Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, `decisions` to recall prior decisions, and `execute` / `verify` to close the work loop before broad file reads
 - If you change agent-facing behavior, update the workspace template so `/help` stays accurate
 
 ---
@@ -167,7 +169,7 @@ If you want the hub to keep running without a dedicated shell, use `npx llm-trac
 
 Existing workspaces do not need migration work. The `.runtime/` directory is created on demand the first time daemon mode is used.
 
-Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, and `link` keep working against a background hub started on a non-default port.
+Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, and `link` keep working against a background hub started on a non-default port.
 
 Daemon state is **workspace-scoped**. `npx llm-tracker daemon stop --path <dir>` only affects the daemon for that workspace. In the recommended shared-daemon topology, that means one daemon for the central workspace and linked repo-local project files underneath it.
 
@@ -200,6 +202,10 @@ For task pickup, prefer the atomic claim flow over hand-built status patches:
 - `npx llm-tracker why <slug> <task-id>`
 - `GET /api/projects/:slug/decisions`
 - `npx llm-tracker decisions <slug>`
+- `GET /api/projects/:slug/tasks/:taskId/execute`
+- `npx llm-tracker execute <slug> <task-id>`
+- `GET /api/projects/:slug/tasks/:taskId/verify`
+- `npx llm-tracker verify <slug> <task-id>`
 - `POST /api/projects/:slug/pick`
 - `npx llm-tracker pick <slug> [task-id] --assignee <model>`
 

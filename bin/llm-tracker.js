@@ -17,8 +17,10 @@ import { cmdBlockers } from "./commands/blockers.js";
 import { cmdBrief } from "./commands/brief.js";
 import { cmdChanged } from "./commands/changed.js";
 import { cmdDecisions } from "./commands/decisions.js";
+import { cmdExecute } from "./commands/execute.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
+import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
 import { startHub } from "../hub/server.js";
 import { loadProjects, renderDashboard, renderProject, renderJson } from "../hub/status.js";
@@ -551,6 +553,8 @@ async function main() {
   if (cmd === "brief") return cmdBrief(args, { resolveWorkspace, httpRequest });
   if (cmd === "why") return cmdWhy(args, { resolveWorkspace, httpRequest });
   if (cmd === "decisions") return cmdDecisions(args, { resolveWorkspace, httpRequest });
+  if (cmd === "execute") return cmdExecute(args, { resolveWorkspace, httpRequest });
+  if (cmd === "verify") return cmdVerify(args, { resolveWorkspace, httpRequest });
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
@@ -574,6 +578,8 @@ Usage:
   llm-tracker brief <slug> <taskId> [--json]           Print a task brief pack (requires hub)
   llm-tracker why <slug> <taskId> [--json]             Explain why a task matters now (requires hub)
   llm-tracker decisions <slug> [--json] [--limit N]    Print recent project decisions (requires hub)
+  llm-tracker execute <slug> <taskId> [--json]         Print a deterministic execution pack (requires hub)
+  llm-tracker verify <slug> <taskId> [--json]          Print a deterministic verification pack (requires hub)
   llm-tracker blockers <slug> [--json]                 Print structurally blocked tasks (requires hub)
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)

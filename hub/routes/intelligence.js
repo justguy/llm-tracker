@@ -2,7 +2,9 @@ import { getBriefPayload } from "../briefs.js";
 import { getBlockersPayload } from "../blockers.js";
 import { getChangedPayload } from "../changed.js";
 import { getDecisionsPayload } from "../decisions.js";
+import { getExecutePayload } from "../execute.js";
 import { getNextPayload } from "../next.js";
+import { getVerifyPayload } from "../verify.js";
 import { getWhyPayload } from "../why.js";
 
 function clampLimit(value, fallback, max) {
@@ -56,6 +58,34 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
     if (!entry) return res.status(404).json({ error: "not found" });
 
     const result = getWhyPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      taskId: req.params.taskId
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    res.json(result.payload);
+  });
+
+  app.get("/api/projects/:slug/tasks/:taskId/execute", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const result = getExecutePayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      taskId: req.params.taskId
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    res.json(result.payload);
+  });
+
+  app.get("/api/projects/:slug/tasks/:taskId/verify", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const result = getVerifyPayload({
       workspace,
       slug: req.params.slug,
       entry,

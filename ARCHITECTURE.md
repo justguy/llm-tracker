@@ -30,6 +30,8 @@ hub/snippets.js          Reference parsing + cached snippet extraction under .ru
 hub/briefs.js            Deterministic task brief pack builder
 hub/why.js               Deterministic task rationale pack builder
 hub/decisions.js         Deterministic project decision-memory pack builder
+hub/execute.js           Deterministic execution pack builder
+hub/verify.js            Deterministic verification pack builder
 hub/validator.js         Ajv schema + cross-reference checks
 hub/progress.js          Counts, pct, blocked-by derivation
 hub/status.js            Terminal dashboard (used by `llm-tracker status`)
@@ -178,6 +180,8 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 - `GET /api/projects/:slug/tasks/:taskId/brief` returns a capped task-context pack: task metadata, dependency summaries, normalized references, extracted snippets, and recent task history.
 - `GET /api/projects/:slug/tasks/:taskId/why` returns a capped rationale pack: why the task matters now, what blocks it, what it unblocks, and recent task history.
 - `GET /api/projects/:slug/decisions?limit=20` returns recent decision notes derived from task comments in deterministic order.
+- `GET /api/projects/:slug/tasks/:taskId/execute` returns the action pack: readiness, explicit contract fields, references, snippets, and recent task history.
+- `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources.
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
 - `POST /api/projects/:slug/pick` atomically claims a task under the hub lock. If `taskId` is omitted, the hub selects the top ready task from the deterministic `next` ranking. `POST /api/projects/:slug/claim` is an alias.
@@ -187,6 +191,8 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 - `GET /api/projects/:slug/tasks/:taskId/brief` is the deterministic read path when the agent already knows which task it needs to work on.
 - `GET /api/projects/:slug/tasks/:taskId/why` is the deterministic read path when the agent needs the task's rationale rather than its code context.
 - `GET /api/projects/:slug/decisions` is the project-level decision-memory surface, backed by current task comments plus history-derived freshness.
+- `GET /api/projects/:slug/tasks/:taskId/execute` is the deterministic read path immediately before implementation.
+- `GET /api/projects/:slug/tasks/:taskId/verify` is the deterministic read path immediately before sign-off.
 - The pack includes task metadata, dependency context, normalized references with `selectedBecause`, up to 5 extracted snippets capped to 8 KB combined text, and up to 3 recent history entries for that task.
 - Snippet artifacts are cached under `<workspace>/.runtime/snippets/<slug>.json`.
 - For linked repo-local trackers, snippet extraction resolves references relative to the real tracker target, not the shared-workspace symlink path.
@@ -319,6 +325,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 tasks for agent pickup.  |
 | `/api/projects/:slug/tasks/:taskId/brief`           | GET    | Focused task-context brief pack.                          |
 | `/api/projects/:slug/tasks/:taskId/why`             | GET    | Focused task-rationale pack.                              |
+| `/api/projects/:slug/tasks/:taskId/execute`         | GET    | Focused execution pack.                                   |
+| `/api/projects/:slug/tasks/:taskId/verify`          | GET    | Focused verification pack.                                |
 | `/api/projects/:slug/decisions`                     | GET    | Recent decision notes from task comments.                 |
 | `/api/projects/:slug/blockers`                      | GET    | Structural blockers: blocked tasks plus their blockers.    |
 | `/api/projects/:slug/changed`                       | GET    | Changed tasks since `fromRev`, grouped by task.            |
@@ -386,7 +394,7 @@ Daemon mode is explicit:
 
 Daemon runtime files live under `<workspace>/.runtime/`. Existing workspaces do not need manual migration; the directory is created lazily on first daemon start.
 
-Hub-backed CLI commands (`brief`, `why`, `decisions`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
+Hub-backed CLI commands (`brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
 
 Daemon lifecycle is workspace-scoped. `llm-tracker daemon stop --path <dir>` only targets the daemon registered for that workspace.
 

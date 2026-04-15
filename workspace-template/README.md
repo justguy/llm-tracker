@@ -44,6 +44,8 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
 - **When you need the task rationale**, prefer `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
 - **When you need prior decision memory**, prefer `GET /api/projects/<slug>/decisions` or `llm-tracker decisions <slug>`.
+- **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
+- **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
@@ -264,6 +266,8 @@ Related deterministic reads:
 - `GET /api/projects/<slug>/tasks/<taskId>/brief` for one capped task-context pack: metadata, dependency context, references, snippets, and recent task history
 - `GET /api/projects/<slug>/tasks/<taskId>/why` for one capped rationale pack: why the task exists now, what it blocks or unblocks, and recent task history
 - `GET /api/projects/<slug>/decisions?limit=20` for the current project's recent decision notes
+- `GET /api/projects/<slug>/tasks/<taskId>/execute` for one deterministic execution pack: readiness, guardrails, expected changes, references, and snippets
+- `GET /api/projects/<slug>/tasks/<taskId>/verify` for one deterministic verification pack: explicit checks plus real evidence sources from tracker state, history, references, and snippets
 - `GET /api/projects/<slug>/blockers` for structural blockers and what is blocking them
 - `GET /api/projects/<slug>/changed?fromRev=<n>&limit=20` for changed tasks since a rev, without replaying raw history yourself
 - `POST /api/projects/<slug>/pick` to atomically claim work once you know what to do next
@@ -290,7 +294,7 @@ The brief pack is deterministic and capped:
 - up to 5 extracted snippets, capped to 8 KB combined text
 - up to 3 recent history entries for that task
 
-Use this before broad repo reads. The intended flow is `/help` → `next` → `brief`/`why` → `pick`.
+Use this before broad repo reads. The intended flow is `/help` → `next` → `brief`/`why` → `execute` → `pick` → `verify`.
 
 ### 6.3 Understanding why a task exists
 
@@ -329,6 +333,48 @@ llm-tracker decisions <slug>
 ```
 
 This returns the current task comments/decision notes in deterministic order, newest first, capped at 20 items by default.
+
+### 6.5 Building a deterministic execution plan
+
+When you are about to start the task and want the current execution contract in one place, call:
+
+```bash
+curl http://localhost:<PORT>/api/projects/<slug>/tasks/<taskId>/execute
+```
+
+or:
+
+```bash
+llm-tracker execute <slug> <taskId>
+```
+
+The pack includes:
+
+- current task state and readiness
+- explicit execution contract fields: `definition_of_done`, `constraints`, `expected_changes`, `allowed_paths`
+- approvals that still gate the task
+- references and cached snippets
+- recent task history
+
+### 6.6 Building a deterministic verification checklist
+
+When you need to confirm what evidence counts for sign-off, call:
+
+```bash
+curl http://localhost:<PORT>/api/projects/<slug>/tasks/<taskId>/verify
+```
+
+or:
+
+```bash
+llm-tracker verify <slug> <taskId>
+```
+
+The pack includes:
+
+- explicit verification checks derived from `definition_of_done`, `expected_changes`, `allowed_paths`, and dependency state
+- real evidence sources only: task state, recent history, references, and extracted snippets
+- no guessed git diff or semantic inference
 
 ---
 
@@ -432,8 +478,9 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 1. Call `GET /api/projects/<slug>/next?limit=5` or run `llm-tracker next <slug>`.
 2. If you need focused context before claiming, call `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>`.
 3. If you need to justify the task before touching it, call `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
-4. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
-5. Claim it atomically:
+4. If you are about to implement, call `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
+5. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
+6. Claim it atomically:
 
 ```bash
 curl -X POST http://localhost:<PORT>/api/projects/<slug>/pick \
@@ -460,9 +507,10 @@ llm-tracker pick <slug> [<taskId>] --assignee codex
 
 `llm-tracker claim ...` and `POST /api/projects/<slug>/claim` are aliases.
 
-6. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
-7. On completion: patch `status: "complete"`.
-8. On blocker: patch `status: "not_started"` + `blocker_reason: "<one sentence>"`, and post to `meta.scratchpad`.
+7. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
+8. Before sign-off, call `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
+9. On completion: patch `status: "complete"`.
+10. On blocker: patch `status: "not_started"` + `blocker_reason: "<one sentence>"`, and post to `meta.scratchpad`.
 
 ---
 
@@ -586,6 +634,8 @@ Error shape:
 | `llm-tracker brief <slug> <taskId> [--json]`              | Focused task brief pack with references, snippets, and recent history.        |    **yes**   |
 | `llm-tracker why <slug> <taskId> [--json]`                | Explain why a task matters now and what it blocks or unblocks.                |    **yes**   |
 | `llm-tracker decisions <slug> [--json] [--limit N]`       | Recent project decision notes derived from task comments.                     |    **yes**   |
+| `llm-tracker execute <slug> <taskId> [--json]`            | Deterministic execution pack with readiness, guardrails, and reading list.    |    **yes**   |
+| `llm-tracker verify <slug> <taskId> [--json]`             | Deterministic verification checklist with tracker-backed evidence.             |    **yes**   |
 | `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
 | `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
 | `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
@@ -630,6 +680,8 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 - If you know the task id, read `brief` before broad repo reads.
 - If you need to explain or justify work, read `why` before guessing intent from raw fields.
 - If the human asks what was already decided, read `decisions` instead of scanning every task comment manually.
+- If you are about to change code, read `execute` before inventing a work plan.
+- If you are about to mark work complete, read `verify` before guessing what counts as evidence.
 - In shared-daemon mode, never drop patch files into a repo-local `.llm-tracker/` folder. Use the shared workspace or HTTP.
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.
