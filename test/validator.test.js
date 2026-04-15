@@ -79,6 +79,22 @@ test("accepts a task reference with a line range", () => {
   assert.equal(ok, true);
 });
 
+test("accepts additive references[] alongside legacy reference", () => {
+  const p = validProject();
+  p.tasks[0].reference = "hub/store.js:1-20";
+  p.tasks[0].references = ["ARCHITECTURE.md:10-40", "hub/server.js:1-20"];
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("rejects malformed references[] entries", () => {
+  const p = validProject();
+  p.tasks[0].references = ["hub/server.js"];
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("references")));
+});
+
 test("rejects a task reference without a line number", () => {
   const p = validProject();
   p.tasks[0].reference = "src/hub/store.js";
@@ -99,6 +115,21 @@ test("accepts a task comment under 500 chars", () => {
   p.tasks[0].comment = "needs review from @claude before merging";
   const { ok } = validateProject(p);
   assert.equal(ok, true);
+});
+
+test("accepts supported effort values", () => {
+  const p = validProject();
+  p.tasks[0].effort = "m";
+  const { ok } = validateProject(p);
+  assert.equal(ok, true);
+});
+
+test("rejects unsupported effort values", () => {
+  const p = validProject();
+  p.tasks[0].effort = "xxl";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("effort")));
 });
 
 test("rejects a task comment over 500 chars", () => {

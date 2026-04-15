@@ -6,6 +6,7 @@ import express from "express";
 import cors from "cors";
 import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
+import { getNextPayload } from "./next.js";
 import { Store, slugFromFile } from "./store.js";
 
 const MIME = {
@@ -100,6 +101,25 @@ export async function startHub({ workspace, port, uiDir }) {
     const entry = store.get(req.params.slug);
     if (!entry) return res.status(404).json({ error: "not found" });
     res.json(projectPayload(req.params.slug, entry));
+  });
+
+  app.get("/api/projects/:slug/next", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const rawLimit = req.query.limit;
+    const limit =
+      rawLimit === undefined
+        ? 5
+        : Math.max(1, Math.min(5, parseInt(Array.isArray(rawLimit) ? rawLimit[0] : rawLimit, 10) || 5));
+
+    const payload = getNextPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      limit
+    });
+    res.json(payload);
   });
 
   app.put("/api/projects/:slug", async (req, res) => {

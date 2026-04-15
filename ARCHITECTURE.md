@@ -7,13 +7,16 @@ Deep-dive on the internals. For the marketing hook and installation, see [README
 ## Pieces
 
 ```
-bin/llm-tracker.js       CLI: init | run | daemon start/stop/status/logs | status | since | rollback | link
+bin/llm-tracker.js       CLI entrypoint: init | run | daemon | status | next | since | rollback | link
+bin/commands/next.js     `llm-tracker next` formatter + HTTP client wrapper
 hub/server.js            Express + WebSocket + chokidar wiring + vendor routes
 hub/store.js             In-memory state, per-slug lock, applyPatch/applyMove/applyCollapse/rollback/deleteTask/deleteProject/symlinkProject
 hub/merge.js             Hub-authoritative merge: preserves task order, refuses deletions, keeps collapsed, drops updatedAt/rev
 hub/versioning.js        computeDelta (structured field-level diff), summarize, hasChanges
 hub/snapshots.js         Per-rev .snapshots/<slug>/<rev>.json + .history/<slug>.jsonl append-only log
 hub/runtime.js           Workspace runtime helpers (.runtime/, daemon pid/log metadata)
+hub/references.js        Shared reference + effort normalization helpers
+hub/next.js              Deterministic next-task ranking + shortlist payload builder
 hub/validator.js         Ajv schema + cross-reference checks
 hub/progress.js          Counts, pct, blocked-by derivation
 hub/status.js            Terminal dashboard (used by `llm-tracker status`)
@@ -80,12 +83,22 @@ Ordered by array index. Hub owns the order.
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓     | Both values must exist in `meta`.                     |
 | `dependencies`   | array of task ids                              |          | Drives **block state** (§Block state).                |
 | `assignee`       | string \| null                                 |          | LLM's model id when claimed.                          |
-| `reference`      | string \| null                                 |          | Source location as `path/to/file.ext:line` or `…:line-line`. |
+| `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. |
+| `references`     | array of strings \| null                       |          | Preferred additive source list. Each entry uses the same `path:line` or `path:line-line` format. |
+| `effort`         | `xs`\|`s`\|`m`\|`l`\|`xl`\|null                |          | Optional sizing hint for deterministic ranking and agent planning. |
+| `related`        | array of task ids \| null                      |          | Optional soft links for future retrieval/search flows. |
 | `comment`        | string \| null (≤ 500 chars)                   |          | One free-form note per task. Rendered as a `[C]` badge with a hover popover. |
 | `blocker_reason` | string \| null                                 |          | One sentence when the LLM is stuck.                   |
+| `definition_of_done` | array of strings \| null                   |          | Optional completion contract for future execution / verify flows. |
+| `constraints`    | array of strings \| null                       |          | Optional execution guardrails.                        |
+| `expected_changes` | array of strings \| null                     |          | Optional hint about files, modules, or artifacts likely to change. |
+| `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
+| `approval_required_for` | array of strings \| null                |          | Optional approval categories; ranking penalizes these relative to equally-ready work. |
 | `context`        | object (freeform)                              |          | Tags, files touched, notes — shallow-merged on patch. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
+
+New writers should prefer `references[]`. Legacy `reference` remains valid for backward compatibility and is normalized alongside `references[]` in ranked `next` responses.
 
 ### Cross-reference rules
 
@@ -123,6 +136,27 @@ Computed on every accepted write. LLMs don't set it; they influence it via `depe
 | `open`    | `dependencies` empty **or** every referenced task is `complete`.          |
 
 `blocker_reason` (narrative) is distinct from block state (structural / graph-derived).
+
+---
+
+## Deterministic next-task ranking
+
+`GET /api/projects/:slug/next?limit=5` returns a shortlist for agent decision-making in one call.
+
+- Response size is capped at 5 tasks.
+- The first item is the current recommendation; the rest are ranked alternatives.
+- Each item includes readiness, dependency blockers, approval requirements, normalized references, optional effort, freshness (`lastTouchedRev`), and a `reason[]` array explaining the rank.
+
+Ranking currently favors:
+
+1. Ready work over blocked work
+2. Higher priority lanes (`p0` > `p1` > `p2` > `p3`)
+3. Tasks already in progress
+4. Tasks with explicit references or comments
+5. Smaller effort where priority is otherwise tied
+6. Recently touched tasks as a weak freshness signal
+
+Approval requirements are treated as a penalty, not a hard exclusion, so near-ready work still appears in the shortlist.
 
 ---
 
@@ -247,6 +281,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug`                               | GET    | Full project state.                                        |
 | `/api/projects/:slug`                               | PUT    | Create or replace a project (full body).                   |
 | `/api/projects/:slug`                               | DELETE | Remove the tracker file. Snapshots/history preserved.      |
+| `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 tasks for agent pickup.  |
 | `/api/projects/:slug/patch`                         | POST   | Partial update merged with existing state.                 |
 | `/api/projects/:slug/move`                          | POST   | UI drag-drop: change task placement + array position.      |
 | `/api/projects/:slug/swimlane-collapse`             | POST   | Toggle `meta.swimlanes[i].collapsed`.                      |
@@ -283,7 +318,8 @@ First match wins:
 1. `--port N` flag
 2. `LLM_TRACKER_PORT` env
 3. `<workspace>/settings.json` → `port`
-4. Default `4400`
+4. Running daemon metadata in `<workspace>/.runtime/daemon.json`
+5. Default `4400`
 
 ---
 
@@ -300,6 +336,8 @@ Daemon mode is explicit:
 - `llm-tracker daemon logs --lines N`
 
 Daemon runtime files live under `<workspace>/.runtime/`. Existing workspaces do not need manual migration; the directory is created lazily on first daemon start.
+
+Hub-backed CLI commands (`next`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
 
 ---
 

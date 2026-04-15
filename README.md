@@ -10,6 +10,8 @@ Stop forcing your LLMs to re-read and rewrite massive architecture files just to
 
 It's a file-system-as-database tracker. Your LLMs update project states with tiny HTTP or file-based patches, and the local hub renders a live, **Bloomberg-terminal-style** priority matrix so you can see exactly what your agents are doing at a glance.
 
+When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker.
+
 ## Why use llm-tracker?
 
 🔒 **100 % Local & Secure** — the hub makes zero external calls. It doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine.
@@ -102,6 +104,7 @@ npx llm-tracker status <slug>       # detail on one project
 npx llm-tracker status --json       # machine-readable
 
 # Requires hub running
+npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + alternatives
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
 npx llm-tracker rollback <slug> <rev>
 npx llm-tracker link <slug> <abs-path>  # symlink an external tracker into the workspace
@@ -125,6 +128,8 @@ If you want the hub to keep running without a dedicated shell, use `npx llm-trac
 - `daemon.log` captures hub stdout and stderr
 
 Existing workspaces do not need migration work. The `.runtime/` directory is created on demand the first time daemon mode is used.
+
+Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `next`, `since`, `rollback`, and `link` keep working against a background hub started on a non-default port.
 
 ---
 
@@ -166,7 +171,7 @@ Full schema, merge semantics, field ownership, versioning, rollback, and the who
 
 ```bash
 npm install
-npm test           # 67 tests (Node's built-in test runner)
+npm test           # Node's built-in test runner
 npm start          # hub on http://localhost:4400
 node bin/llm-tracker.js --daemon  # optional background hub in dev
 ```

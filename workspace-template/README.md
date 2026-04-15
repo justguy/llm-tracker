@@ -25,6 +25,7 @@ Before you write anything:
 - **Hub owns structure. You own content.**
 - **Hub enforces** — task array order, task existence (no accidental deletion), human UI state (`meta.swimlanes[i].collapsed`), version stamps (`updatedAt`, `rev`).
 - **You write freely** — `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
+- **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
 - **On failure**, read `<slug>.errors.json` (file mode) or the JSON response body (HTTP mode). Both are structured `{error, type, hint}` with a precise path pointer.
@@ -79,7 +80,7 @@ If any is "no" or "unsure," ask the human before proceeding.
 
 ### Workflow
 
-1. **Start of a work burst** — read the relevant task (for full context) or the tracker index (to pick what's next). One read per decision.
+1. **Start of a work burst** — call `GET /api/projects/<slug>/next?limit=5` (or `llm-tracker next <slug>`) to pick what is next. Read the full tracker only when you need broader context than the shortlist gives you.
 2. **During the burst** — write small patches constantly. No re-reading between writes. Each patch is self-contained.
 3. **At the next decision point** — read again if needed. Use `since/<last-rev>` to pull only what changed.
 
@@ -123,10 +124,22 @@ Tasks are ordered by array index. Hub owns the order.
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓    | Both values must exist in `meta`.                     |
 | `dependencies`   | array of task IDs                              |          | Drives block state (§6).                              |
 | `assignee`       | string \| null                                 |          | Your model ID when claiming.                          |
+| `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. |
+| `references`     | array of strings \| null                       |          | Preferred additive source list. Use the same `path:line` or `path:line-line` format. |
+| `effort`         | `xs`\|`s`\|`m`\|`l`\|`xl`\|null                |          | Optional sizing hint for ranking and planning.        |
+| `related`        | array of task IDs \| null                      |          | Optional soft links to adjacent tasks.                |
+| `comment`        | string \| null                                 |          | One short note that helps explain why the task matters. |
 | `blocker_reason` | string \| null                                 |          | One sentence when stuck.                              |
+| `definition_of_done` | array of strings \| null                   |          | Optional completion contract for future verify flows. |
+| `constraints`    | array of strings \| null                       |          | Optional execution guardrails.                        |
+| `expected_changes` | array of strings \| null                     |          | Optional modules, files, or artifacts expected to change. |
+| `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
+| `approval_required_for` | array of strings \| null                |          | Optional approval categories that make the task less ready than peers. |
 | `context`        | object (freeform)                              |          | Shallow-merged per key on patch.                      |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
+
+Prefer `references[]` for new data. Legacy `reference` remains valid for backward compatibility and is normalized alongside `references[]` when the hub builds ranked `next` responses.
 
 ### 4.4 Canonical example
 
@@ -200,6 +213,30 @@ Computed by the hub on every write. You influence it via `dependencies` and `sta
 UI shows a red `BLOCKED BY <id>` badge and exposes a `[BLOCKED] / [OPEN]` filter.
 
 `blocker_reason` is a separate, narrative field ("I'm stuck because…") — independent of graph-derived block state.
+
+---
+
+## 6.1 Getting the next task in one call
+
+When the human asks "what's next?" or you need to pick work, call:
+
+```bash
+curl http://localhost:<PORT>/api/projects/<slug>/next?limit=5
+```
+
+or, if shell access is available:
+
+```bash
+llm-tracker next <slug>
+```
+
+The shortlist is deterministic and capped at 5 tasks:
+
+- item 1 is the current recommendation
+- items 2-5 are ranked alternatives
+- each task includes `ready`, `blocked_kind`, `blocking_on`, `requires_approval`, normalized `references`, optional `effort`, freshness (`lastTouchedRev`), and `reason[]`
+
+Use this instead of scanning the whole tracker just to choose work.
 
 ---
 
@@ -294,8 +331,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 ## 9. How to claim work
 
-1. Read the tracker (`GET` the file, or `curl http://localhost:<PORT>/api/projects/<slug>`).
-2. Find the highest-priority task (`p0` > `p1` > `p2` > `p3`) with `status == "not_started"` and block state `open`.
+1. Call `GET /api/projects/<slug>/next?limit=5` or run `llm-tracker next <slug>`.
+2. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
 3. Send a patch: `{ tasks: { <id>: { status: "in_progress", assignee: "<your model id>", blocker_reason: null } } }`.
 4. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
 5. On completion: patch `status: "complete"`.
@@ -419,10 +456,13 @@ Error shape:
 | `llm-tracker status`                                      | Dashboard of all projects.                                                    |     no       |
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |
 | `llm-tracker status --json`                               | Machine-readable dashboard.                                                   |     no       |
+| `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |
 | `llm-tracker rollback <slug> <rev>`                       | Roll back to a prior rev (human-only).                                        |    **yes**   |
 | `llm-tracker link <slug> <abs-path>`                      | Symlink an external tracker (Option C).                                       |    **yes**   |
 | `llm-tracker help`                                        | Show usage.                                                                   |     no       |
+
+When a background daemon is running, hub-backed CLI commands reuse the recorded daemon port from `.runtime/daemon.json` if you omit `--port`. Do not edit `.runtime/` by hand.
 
 ### Wiring the status shortcut into the user's CLI
 

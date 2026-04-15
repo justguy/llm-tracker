@@ -13,6 +13,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { homedir } from "node:os";
+import { cmdNext } from "./commands/next.js";
 import { startHub } from "../hub/server.js";
 import { loadProjects, renderDashboard, renderProject, renderJson } from "../hub/status.js";
 import {
@@ -74,10 +75,12 @@ function resolveWorkspace(flag) {
 
 function resolvePort(workspace, flagPort) {
   const wsSettings = loadWorkspaceSettings(workspace);
+  const daemonStatus = getDaemonStatus(workspace);
   return (
     validPort(flagPort) ||
     validPort(process.env.LLM_TRACKER_PORT) ||
     validPort(wsSettings.port) ||
+    (daemonStatus.running ? validPort(daemonStatus.meta?.port) : null) ||
     DEFAULT_PORT
   );
 }
@@ -515,6 +518,7 @@ async function main() {
   if (cmd === "__run-hub") return cmdRun(args, { daemonized: true });
   if (cmd === "init") return cmdInit(args);
   if (cmd === "status") return cmdStatus(args);
+  if (cmd === "next") return cmdNext(args, { resolveWorkspace, httpRequest });
   if (cmd === "rollback") return cmdRollback(args);
   if (cmd === "since") return cmdSince(args);
   if (cmd === "link") return cmdLink(args);
@@ -531,6 +535,7 @@ Usage:
   llm-tracker daemon status [--path <dir>]             Show daemon status
   llm-tracker daemon logs [--path <dir>] [--lines N]   Print recent daemon logs
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
+  llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)
   llm-tracker link <slug> <abs-path>                   Symlink an external tracker file into the workspace (requires hub)

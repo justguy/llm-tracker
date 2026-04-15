@@ -1,5 +1,6 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
+import { EFFORT_VALUES, REFERENCE_PATTERN_SOURCE } from "./references.js";
 
 export const STATUS_VALUES = ["not_started", "in_progress", "complete", "deferred"];
 
@@ -68,13 +69,47 @@ const schema = {
           assignee: { type: ["string", "null"] },
           reference: {
             type: ["string", "null"],
-            pattern: "^.+:\\d+(-\\d+)?$"
+            pattern: REFERENCE_PATTERN_SOURCE
+          },
+          references: {
+            type: ["array", "null"],
+            items: {
+              type: "string",
+              pattern: REFERENCE_PATTERN_SOURCE
+            }
+          },
+          effort: {
+            enum: [...EFFORT_VALUES, null]
+          },
+          related: {
+            type: ["array", "null"],
+            items: { type: "string" }
           },
           comment: {
             type: ["string", "null"],
             maxLength: 500
           },
           blocker_reason: { type: ["string", "null"] },
+          definition_of_done: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          constraints: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          expected_changes: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          allowed_paths: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          approval_required_for: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
           context: { type: "object" },
           updatedAt: { type: ["string", "null"] },
           rev: { type: ["integer", "null"] }
