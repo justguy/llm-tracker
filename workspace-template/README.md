@@ -42,6 +42,8 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **You write freely** — `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
+- **When you need the task rationale**, prefer `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
+- **When you need prior decision memory**, prefer `GET /api/projects/<slug>/decisions` or `llm-tracker decisions <slug>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
@@ -260,6 +262,8 @@ Use this instead of scanning the whole tracker just to choose work.
 Related deterministic reads:
 
 - `GET /api/projects/<slug>/tasks/<taskId>/brief` for one capped task-context pack: metadata, dependency context, references, snippets, and recent task history
+- `GET /api/projects/<slug>/tasks/<taskId>/why` for one capped rationale pack: why the task exists now, what it blocks or unblocks, and recent task history
+- `GET /api/projects/<slug>/decisions?limit=20` for the current project's recent decision notes
 - `GET /api/projects/<slug>/blockers` for structural blockers and what is blocking them
 - `GET /api/projects/<slug>/changed?fromRev=<n>&limit=20` for changed tasks since a rev, without replaying raw history yourself
 - `POST /api/projects/<slug>/pick` to atomically claim work once you know what to do next
@@ -286,7 +290,45 @@ The brief pack is deterministic and capped:
 - up to 5 extracted snippets, capped to 8 KB combined text
 - up to 3 recent history entries for that task
 
-Use this before broad repo reads. The intended flow is `/help` → `next` → `brief` → `pick`.
+Use this before broad repo reads. The intended flow is `/help` → `next` → `brief`/`why` → `pick`.
+
+### 6.3 Understanding why a task exists
+
+When the human asks "why is this task here?" or you need to justify work before touching it, call:
+
+```bash
+curl http://localhost:<PORT>/api/projects/<slug>/tasks/<taskId>/why
+```
+
+or:
+
+```bash
+llm-tracker why <slug> <taskId>
+```
+
+The pack is deterministic and capped:
+
+- task goal and decision note
+- why-now reasons derived from priority, blockers, approvals, and freshness
+- what the task is blocked by and what it unblocks
+- normalized references with `selectedBecause`
+- up to 3 recent history entries
+
+### 6.4 Recalling recent decisions
+
+When the human asks what you already decided, call:
+
+```bash
+curl http://localhost:<PORT>/api/projects/<slug>/decisions?limit=20
+```
+
+or:
+
+```bash
+llm-tracker decisions <slug>
+```
+
+This returns the current task comments/decision notes in deterministic order, newest first, capped at 20 items by default.
 
 ---
 
@@ -389,8 +431,9 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 1. Call `GET /api/projects/<slug>/next?limit=5` or run `llm-tracker next <slug>`.
 2. If you need focused context before claiming, call `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>`.
-3. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
-4. Claim it atomically:
+3. If you need to justify the task before touching it, call `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
+4. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
+5. Claim it atomically:
 
 ```bash
 curl -X POST http://localhost:<PORT>/api/projects/<slug>/pick \
@@ -417,9 +460,9 @@ llm-tracker pick <slug> [<taskId>] --assignee codex
 
 `llm-tracker claim ...` and `POST /api/projects/<slug>/claim` are aliases.
 
-5. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
-6. On completion: patch `status: "complete"`.
-7. On blocker: patch `status: "not_started"` + `blocker_reason: "<one sentence>"`, and post to `meta.scratchpad`.
+6. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
+7. On completion: patch `status: "complete"`.
+8. On blocker: patch `status: "not_started"` + `blocker_reason: "<one sentence>"`, and post to `meta.scratchpad`.
 
 ---
 
@@ -541,6 +584,8 @@ Error shape:
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |
 | `llm-tracker status --json`                               | Machine-readable dashboard.                                                   |     no       |
 | `llm-tracker brief <slug> <taskId> [--json]`              | Focused task brief pack with references, snippets, and recent history.        |    **yes**   |
+| `llm-tracker why <slug> <taskId> [--json]`                | Explain why a task matters now and what it blocks or unblocks.                |    **yes**   |
+| `llm-tracker decisions <slug> [--json] [--limit N]`       | Recent project decision notes derived from task comments.                     |    **yes**   |
 | `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
 | `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
 | `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
@@ -583,6 +628,8 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 - **Never create a new `.llm-tracker/` folder outside the workspace** (§0).
 - If the hub is running, read `/help` before guessing contract details.
 - If you know the task id, read `brief` before broad repo reads.
+- If you need to explain or justify work, read `why` before guessing intent from raw fields.
+- If the human asks what was already decided, read `decisions` instead of scanning every task comment manually.
 - In shared-daemon mode, never drop patch files into a repo-local `.llm-tracker/` folder. Use the shared workspace or HTTP.
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.

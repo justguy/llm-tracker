@@ -16,8 +16,10 @@ import { homedir } from "node:os";
 import { cmdBlockers } from "./commands/blockers.js";
 import { cmdBrief } from "./commands/brief.js";
 import { cmdChanged } from "./commands/changed.js";
+import { cmdDecisions } from "./commands/decisions.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
+import { cmdWhy } from "./commands/why.js";
 import { startHub } from "../hub/server.js";
 import { loadProjects, renderDashboard, renderProject, renderJson } from "../hub/status.js";
 import {
@@ -547,6 +549,8 @@ async function main() {
   if (cmd === "init") return cmdInit(args);
   if (cmd === "status") return cmdStatus(args);
   if (cmd === "brief") return cmdBrief(args, { resolveWorkspace, httpRequest });
+  if (cmd === "why") return cmdWhy(args, { resolveWorkspace, httpRequest });
+  if (cmd === "decisions") return cmdDecisions(args, { resolveWorkspace, httpRequest });
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
@@ -568,6 +572,8 @@ Usage:
   llm-tracker daemon logs [--path <dir>] [--lines N]   Print recent daemon logs
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
   llm-tracker brief <slug> <taskId> [--json]           Print a task brief pack (requires hub)
+  llm-tracker why <slug> <taskId> [--json]             Explain why a task matters now (requires hub)
+  llm-tracker decisions <slug> [--json] [--limit N]    Print recent project decisions (requires hub)
   llm-tracker blockers <slug> [--json]                 Print structurally blocked tasks (requires hub)
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)

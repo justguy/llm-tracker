@@ -1,7 +1,9 @@
 import { getBriefPayload } from "../briefs.js";
 import { getBlockersPayload } from "../blockers.js";
 import { getChangedPayload } from "../changed.js";
+import { getDecisionsPayload } from "../decisions.js";
 import { getNextPayload } from "../next.js";
+import { getWhyPayload } from "../why.js";
 
 function clampLimit(value, fallback, max) {
   const parsed = parseInt(Array.isArray(value) ? value[0] : value, 10);
@@ -49,6 +51,20 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
     res.json(result.payload);
   });
 
+  app.get("/api/projects/:slug/tasks/:taskId/why", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const result = getWhyPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      taskId: req.params.taskId
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    res.json(result.payload);
+  });
+
   app.get("/api/projects/:slug/blockers", (req, res) => {
     const entry = store.get(req.params.slug);
     if (!entry) return res.status(404).json({ error: "not found" });
@@ -77,6 +93,19 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       entry,
       fromRev,
       limit: clampLimit(req.query.limit, 20, 50)
+    });
+    res.json(payload);
+  });
+
+  app.get("/api/projects/:slug/decisions", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const payload = getDecisionsPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      limit: clampLimit(req.query.limit, 20, 20)
     });
     res.json(payload);
   });
