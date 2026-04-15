@@ -39,6 +39,133 @@ function Badge({ kind, children, title }) {
   return html`<span class=${`badge ${kind || ""}`} title=${title || ""}>${children}</span>`;
 }
 
+function CommentBadge({ comment, onSave }) {
+  const badgeRef = useRef(null);
+  const popRef = useRef(null);
+  const textareaRef = useRef(null);
+  const [mode, setMode] = useState(null); // null | "read" | "edit"
+  const [pos, setPos] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const hasComment = !!comment;
+
+  const openRead = () => {
+    if (!hasComment || mode === "edit") return;
+    setMode("read");
+    setPos({ placeholder: true });
+  };
+  const closeRead = () => {
+    if (mode === "read") {
+      setMode(null);
+      setPos(null);
+    }
+  };
+  const openEdit = (e) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    setDraft(comment || "");
+    setMode("edit");
+    setPos({ placeholder: true });
+  };
+  const cancelEdit = () => {
+    setMode(null);
+    setPos(null);
+    setDraft("");
+  };
+  const commit = async () => {
+    if (!onSave || saving) return;
+    const trimmed = draft.trim();
+    const value = trimmed === "" ? null : draft;
+    if (value && value.length > 500) return;
+    setSaving(true);
+    const ok = await onSave(value);
+    setSaving(false);
+    if (ok) cancelEdit();
+  };
+
+  useEffect(() => {
+    if (!pos || !pos.placeholder || !popRef.current) return;
+    const b = badgeRef.current?.getBoundingClientRect();
+    const p = popRef.current.getBoundingClientRect();
+    if (!b) return;
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let top = b.top - p.height - 6;
+    if (top < margin) top = b.bottom + 6;
+    if (top + p.height > vh - margin) top = Math.max(margin, vh - margin - p.height);
+    let left = b.left + b.width / 2 - p.width / 2;
+    if (left < margin) left = margin;
+    if (left + p.width > vw - margin) left = vw - margin - p.width;
+    setPos({ placeholder: false, top, left });
+  }, [pos?.placeholder, mode]);
+
+  useEffect(() => {
+    if (mode === "edit") textareaRef.current?.focus();
+  }, [mode]);
+
+  const badgeClass = `badge comment-badge ${hasComment ? "" : "empty"}`;
+  const badgeLabel = hasComment ? "[C]" : "[+C]";
+  const badgeTitle = hasComment
+    ? "Comment — hover to read, click to edit"
+    : "Add a comment";
+
+  return html`
+    <span
+      ref=${badgeRef}
+      class=${badgeClass}
+      onMouseEnter=${openRead}
+      onMouseLeave=${closeRead}
+      onFocus=${openRead}
+      onBlur=${closeRead}
+      onClick=${openEdit}
+      onMouseDown=${(e) => e.stopPropagation()}
+      tabIndex="0"
+      role="button"
+      title=${badgeTitle}
+    >${badgeLabel}</span>
+    ${mode === "read" && pos
+      ? html`<div
+          ref=${popRef}
+          class="comment-popover"
+          style=${`top: ${pos.top}px; left: ${pos.left}px; visibility: ${pos.placeholder ? "hidden" : "visible"};`}
+          role="tooltip"
+        >${comment}</div>`
+      : null}
+    ${mode === "edit" && pos
+      ? html`<div
+          ref=${popRef}
+          class="comment-editor"
+          style=${`top: ${pos.top}px; left: ${pos.left}px; visibility: ${pos.placeholder ? "hidden" : "visible"};`}
+          onClick=${(e) => e.stopPropagation()}
+          onMouseDown=${(e) => e.stopPropagation()}
+        >
+          <textarea
+            ref=${textareaRef}
+            class="comment-textarea"
+            maxlength="500"
+            placeholder="plain text — ≤ 500 chars"
+            value=${draft}
+            onInput=${(e) => setDraft(e.currentTarget.value)}
+            onKeyDown=${(e) => {
+              if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+            }}
+          />
+          <div class="comment-editor-row">
+            <span class="comment-counter">${draft.length} / 500</span>
+            <span class="comment-editor-actions">
+              <button class="icon-btn" onClick=${cancelEdit} disabled=${saving}>[CANCEL]</button>
+              <button class="icon-btn" onClick=${commit} disabled=${saving || draft.length > 500}>
+                ${saving ? "[SAVING…]" : "[SAVE]"}
+              </button>
+            </span>
+          </div>
+        </div>`
+      : null}
+  `;
+}
+
 function IconBtn({ label, onClick, active, title }) {
   return html`
     <button class=${`icon-btn ${active ? "active" : ""}`} onClick=${onClick} title=${title || ""}>
@@ -145,7 +272,7 @@ function FilterToggles({ counts, statusFilters, toggleStatus, blockedCount, open
 
 // ─────── Card / Cell / Matrix ───────
 
-function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete }) {
+function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onSaveComment }) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
   const extraKeys = Object.keys(ctx).filter(
@@ -178,6 +305,10 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete }) {
       ${extraKeys.length > 0
         ? html`<div class="card-context"><b>${extraKeys[0]}:</b> ${String(ctx[extraKeys[0]])}</div>`
         : null}
+      <${CommentBadge}
+        comment=${task.comment}
+        onSave=${(value) => onSaveComment && onSaveComment(task.id, value)}
+      />
       <div class="card-footer">
         <${Badge} kind=${`status-${task.status}`}>${task.status.replace("_", " ")}</${Badge}>
         ${blockedBy && blockedBy.length > 0
@@ -204,7 +335,7 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete }) {
   `;
 }
 
-function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, dragState, setDragState, onDrop, onDeleteTask }) {
+function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, dragState, setDragState, onDrop, onDeleteTask, onSaveComment }) {
   const ref = useRef(null);
   const [over, setOver] = useState(false);
 
@@ -282,6 +413,7 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
             }}
             onDragEnd=${() => setDragState({ taskId: null })}
             onDelete=${onDeleteTask}
+            onSaveComment=${onSaveComment}
           />
         `
       )}
@@ -289,7 +421,7 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
   `;
 }
 
-function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onToggleCollapse, onDeleteTask }) {
+function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onToggleCollapse, onDeleteTask, onSaveComment }) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
   const priorities = project.data.meta.priorities;
@@ -388,6 +520,7 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onT
             setDragState=${setDragState}
             onDrop=${onMove}
             onDeleteTask=${onDeleteTask}
+            onSaveComment=${onSaveComment}
           />
         `
       )}
@@ -1097,6 +1230,26 @@ function App() {
     }
   };
 
+  const onSaveComment = async (taskId, value) => {
+    if (!activeSlug || !taskId) return false;
+    try {
+      const res = await fetch(`/api/projects/${activeSlug}/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tasks: { [taskId]: { comment: value } } })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(`Save comment failed: ${body.error || res.statusText}`);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      alert(`Save comment failed: ${e.message}`);
+      return false;
+    }
+  };
+
   const onToggleCollapse = async (swimlaneId, collapsed) => {
     if (!activeSlug) return;
     try {
@@ -1326,6 +1479,7 @@ function App() {
         onMove=${onMove}
         onToggleCollapse=${onToggleCollapse}
         onDeleteTask=${onDeleteTask}
+        onSaveComment=${onSaveComment}
       />
       <${ConnectionPip} up=${wsUp} />
       ${drawerEl}

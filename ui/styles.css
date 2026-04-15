@@ -1154,6 +1154,7 @@ body {
   gap: 4px;
   align-items: center;
   margin-top: 2px;
+  padding-right: 48px;
 }
 
 .card-context {
@@ -1221,6 +1222,84 @@ body {
   background: transparent;
   border-color: var(--amber-dim);
 }
+
+.badge.comment-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: var(--amber-dim);
+  cursor: pointer;
+  outline: none;
+  z-index: 2;
+}
+.badge.comment-badge.empty {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--hairline-strong);
+  opacity: 0.55;
+}
+.card:hover .badge.comment-badge.empty { opacity: 1; }
+.badge.comment-badge:focus-visible { box-shadow: 0 0 0 2px var(--amber); }
+
+.comment-popover {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--amber);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: var(--white);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+}
+
+.comment-editor {
+  position: fixed;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 16px));
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--amber);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comment-textarea {
+  width: 100%;
+  min-height: 90px;
+  max-height: 240px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--white);
+  border: 1px solid var(--hairline-strong);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+}
+.comment-textarea:focus { border-color: var(--amber); }
+.comment-editor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.comment-counter {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+}
+.comment-editor-actions { display: flex; gap: 6px; }
 
 .card-reference {
   display: inline-flex;
