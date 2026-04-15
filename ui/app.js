@@ -674,6 +674,121 @@ function SettingsModal({ onClose, theme, onToggleTheme, drawerPinned, onToggleDr
   `;
 }
 
+// ─────── History modal ───────
+function summaryItemText(it) {
+  switch (it?.kind) {
+    case "added": return `+ ${it.id} "${it.title || ""}" (${it.status || "?"})`;
+    case "removed": return `− ${it.id} removed`;
+    case "status": return `${it.id} → ${it.to}`;
+    case "placement": return `${it.id} moved`;
+    case "assignee": return `${it.id} assignee: ${it.to ?? "—"}`;
+    case "edit": return `${it.id} edited (${(it.keys || []).join(", ")})`;
+    case "meta": return `meta.${it.key} updated`;
+    case "reorder": return `reorder (${it.total} tasks)`;
+    default: return JSON.stringify(it);
+  }
+}
+
+function HistoryModal({ slug, onClose }) {
+  const [entries, setEntries] = useState(null);
+  const [error, setError] = useState(null);
+  const [rollingBack, setRollingBack] = useState(null);
+
+  const load = async () => {
+    try {
+      const res = await fetch(`/api/projects/${slug}/revisions`);
+      if (!res.ok) throw new Error(res.statusText);
+      const body = await res.json();
+      const recent = [...(body.revisions || [])].sort((a, b) => b.rev - a.rev).slice(0, 10);
+      setEntries(recent);
+      setError(null);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  useEffect(() => { load(); }, [slug]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const rollbackTo = async (rev) => {
+    const ok = window.confirm(
+      `Roll back to rev ${rev}?\n\nThe current state becomes a new rev on top of this rollback — nothing is discarded, you can undo the rollback the same way.`
+    );
+    if (!ok) return;
+    setRollingBack(rev);
+    try {
+      const res = await fetch(`/api/projects/${slug}/rollback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: rev })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || res.statusText);
+      }
+      await load();
+    } catch (e) {
+      alert(`Rollback failed: ${e.message}`);
+    }
+    setRollingBack(null);
+  };
+
+  return html`
+    <div class="modal-overlay" onClick=${onClose}>
+      <div class="modal history-modal" onClick=${(e) => e.stopPropagation()}>
+        <div class="modal-header">
+          <span class="brand">[HISTORY] · ${slug}</span>
+          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+        </div>
+        <div class="modal-body">
+          ${error
+            ? html`<div class="settings-msg error">failed to load: ${error}</div>`
+            : entries === null
+              ? html`<p class="muted">loading…</p>`
+              : entries.length === 0
+                ? html`<p class="muted">no history yet.</p>`
+                : html`<ul class="history-list">
+                    ${entries.map((e, idx) => {
+                      const shown = (e.summary || []).slice(0, 3);
+                      const rest = (e.summary || []).length - shown.length;
+                      return html`
+                        <li key=${e.rev} class="history-entry">
+                          <div class="history-meta">
+                            <span class="history-rev">rev ${e.rev}</span>
+                            <span class="history-ts">${new Date(e.ts).toLocaleString()}</span>
+                            ${e.rolledBackTo !== undefined
+                              ? html`<span class="badge">rolled back to ${e.rolledBackTo}</span>`
+                              : null}
+                          </div>
+                          <ul class="history-gist">
+                            ${shown.length === 0
+                              ? html`<li class="muted">no structured changes</li>`
+                              : shown.map((it, i) => html`<li key=${i}>${summaryItemText(it)}</li>`)}
+                            ${rest > 0 ? html`<li class="muted">…and ${rest} more</li>` : null}
+                          </ul>
+                          <div class="history-actions">
+                            <button
+                              class="icon-btn"
+                              disabled=${idx === 0 || rollingBack !== null}
+                              onClick=${() => rollbackTo(e.rev)}
+                              title=${idx === 0 ? "This is the current revision" : `Roll back to rev ${e.rev}`}
+                            >${rollingBack === e.rev ? "[ROLLING BACK…]" : idx === 0 ? "[CURRENT]" : "[UNDO TO HERE]"}</button>
+                          </div>
+                        </li>
+                      `;
+                    })}
+                  </ul>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ─────── Overview drawer ───────
 function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSelect, onDelete }) {
   useEffect(() => {
@@ -796,6 +911,7 @@ function Header({
   onOpenHelp,
   onOpenDrawer,
   onOpenSettings,
+  onOpenHistory,
   onUndo,
   onDeleteProject
 }) {
@@ -833,6 +949,12 @@ function Header({
             title=${project?.rev >= 2 ? `Undo (rev ${project.rev} → ${project.rev - 1})` : "Nothing to undo"}
           >[UNDO]</button>
           <button
+            class="icon-btn"
+            onClick=${onOpenHistory}
+            disabled=${!project?.slug}
+            title="Recent revisions with rollback"
+          >[HISTORY]</button>
+          <button
             class="icon-btn danger"
             onClick=${() => onDeleteProject(project?.slug)}
             title="Delete this project"
@@ -869,6 +991,7 @@ function App() {
   const [drawerPinned, setDrawerPinned] = useState(!!initialSettings.drawerPinned);
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
 
@@ -1056,6 +1179,9 @@ function App() {
     />
   `;
   const helpEl = helpOpen ? html`<${HelpModal} workspace=${workspace} onClose=${() => setHelpOpen(false)} />` : null;
+  const historyEl = historyOpen && activeSlug
+    ? html`<${HistoryModal} slug=${activeSlug} onClose=${() => setHistoryOpen(false)} />`
+    : null;
 
   const shellPinned = drawerOpen && drawerPinned;
   const shellClass = `app-shell ${shellPinned ? "drawer-pinned" : ""}`;
@@ -1092,6 +1218,7 @@ function App() {
         ${drawerEl}
         ${helpEl}
         ${settingsEl}
+        ${historyEl}
       </div>
     `;
   }
@@ -1114,6 +1241,7 @@ function App() {
           onOpenHelp=${() => setHelpOpen(true)}
           onOpenDrawer=${() => setDrawerOpen(true)}
           onOpenSettings=${() => setSettingsOpen(true)}
+          onOpenHistory=${() => setHistoryOpen(true)}
           onUndo=${onUndo}
           onDeleteProject=${onDeleteProject}
         />
@@ -1123,6 +1251,7 @@ function App() {
         ${drawerEl}
         ${helpEl}
         ${settingsEl}
+        ${historyEl}
       </div>
     `;
   }
@@ -1146,6 +1275,7 @@ function App() {
         onOpenHelp=${() => setHelpOpen(true)}
         onOpenDrawer=${() => setDrawerOpen(true)}
         onOpenSettings=${() => setSettingsOpen(true)}
+        onOpenHistory=${() => setHistoryOpen(true)}
         onUndo=${onUndo}
         onDeleteProject=${onDeleteProject}
       />
@@ -1187,6 +1317,7 @@ function App() {
       ${drawerEl}
       ${helpEl}
       ${settingsEl}
+      ${historyEl}
     </div>
   `;
 }

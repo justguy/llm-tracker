@@ -660,6 +660,48 @@ body {
 .settings-msg.ok    { color: var(--green); border-left-color: var(--green); }
 .settings-msg.error { color: var(--red); border-left-color: var(--red); }
 
+/* ─────── History modal ─────── */
+.history-modal { max-width: 640px; }
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.history-entry {
+  border: 1px solid var(--hairline-strong);
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "meta actions" "gist gist";
+  gap: 8px 12px;
+  background: var(--bg);
+}
+.history-meta {
+  grid-area: meta;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.history-rev { font-weight: 700; color: var(--amber); }
+.history-ts { color: var(--muted); font-size: 12px; }
+.history-actions { grid-area: actions; }
+.history-gist {
+  grid-area: gist;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+.history-gist li { padding-left: 10px; position: relative; }
+.history-gist li::before { content: "·"; position: absolute; left: 0; color: var(--muted); }
+
 /* ─────── Banner row (scratchpad + filter toggles) ─────── */
 .banner-row {
   display: flex;
