@@ -285,6 +285,31 @@ Helpful MCP resources:
 - `tracker://projects` for all project summaries
 - `tracker://projects/<slug>/status` for one project summary
 
+Register the MCP server in your client config instead of launching it manually in a spare shell. `llm-tracker mcp` is a stdio server, so the client should spawn and keep it alive.
+
+Installed package example:
+
+```json
+{
+  "command": "npx",
+  "args": ["llm-tracker", "mcp", "--path", "/Users/you/.llm-tracker"]
+}
+```
+
+Local checkout example:
+
+```json
+{
+  "command": "node",
+  "args": [
+    "/Users/you/path/to/llm-project-tracker/bin/llm-tracker.js",
+    "mcp",
+    "--path",
+    "/Users/you/.llm-tracker"
+  ]
+}
+```
+
 Helpful MCP prompts:
 
 - `tracker_start_here`

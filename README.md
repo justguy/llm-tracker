@@ -217,6 +217,22 @@ Example MCP command:
 }
 ```
 
+Do not run that command manually in a spare shell and expect it to persist for agents. `llm-tracker mcp` is a stdio MCP server, so your MCP client should spawn and manage it.
+
+If you are using this repo from a local checkout instead of an installed package, register the local entrypoint directly:
+
+```json
+{
+  "command": "node",
+  "args": [
+    "/Users/you/path/to/llm-project-tracker/bin/llm-tracker.js",
+    "mcp",
+    "--path",
+    "/Users/you/.llm-tracker"
+  ]
+}
+```
+
 ## Background daemon
 
 Foreground startup is still the default. Existing users can keep using `npx llm-tracker` exactly as before.
