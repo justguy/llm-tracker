@@ -577,7 +577,17 @@ After linking:
 - file patches still go to `<workspace>/patches/`
 - HTTP updates still go to the shared daemon for that workspace
 
-To unlink: `DELETE /api/projects/<slug>` removes the symlink, leaves the target intact.
+To unlink: `DELETE /api/projects/<slug>` removes the workspace symlink registration and leaves the target tracker file intact.
+
+If the slug is already registered and the human explicitly wants to move the shared registration to a different branch/worktree file, the safe relink sequence is:
+
+1. verify the new target file exists, is valid JSON, and already has the same `meta.slug`
+2. call `DELETE /api/projects/<slug>` to remove only the current workspace symlink registration
+3. call `POST /api/projects/<slug>/symlink` again with the new absolute target path
+4. run `reload <slug>`
+5. verify a read call before writing patches
+
+This is the one safe exception to the normal "do not delete projects" rule for agents. In this relink flow, you are deleting only the shared symlink registration, not the real tracker file in the repo/worktree.
 
 **Windows note:** `symlinkSync` requires Developer Mode or Administrator. If EPERM: fall back to Option B.
 
@@ -861,7 +871,8 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 - Never set `updatedAt` or `rev` — hub ignores and overwrites.
 - Never rewrite this README.
 - Never touch `settings.json`, `.runtime/`, `.snapshots/`, `.history/`, `<slug>.errors.json`.
-- Never call `DELETE /api/projects/...` or `DELETE /api/projects/:slug/tasks/:taskId` — human-only. Archive with `status: "deferred"`.
+- Never call `DELETE /api/projects/:slug/tasks/:taskId` — human-only.
+- Never call `DELETE /api/projects/...` unless the human explicitly asked you to relink a shared symlinked project registration to a different target file. In that one case, `DELETE /api/projects/<slug>` removes only the workspace symlink registration and leaves the target tracker file intact.
 - Never call the rollback endpoint — human-only.
 - When symlinking (§7 Option C), the target path MUST be absolute and the file MUST be valid before you call the endpoint.
 - Inline `curl -d '...'` for JSON: **no**. Use `--data-binary @file` (§8 Mode B).

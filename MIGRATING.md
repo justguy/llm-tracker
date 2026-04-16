@@ -173,11 +173,15 @@ Use this when an existing live project is already linked into a shared workspace
 
 If the project is linked from a repo checkout and you want writes to land on a branch worktree rather than the main checkout:
 
-1. relink the shared workspace slug to the branch worktree tracker file
-2. run `reload <slug>`
-3. verify one read call against that slug before writing any patches
+1. verify the new branch/worktree tracker file exists, is valid, and uses the same slug
+2. if the slug is already registered, call `DELETE /api/projects/<slug>` to remove only the current workspace symlink registration
+3. relink the shared workspace slug to the branch worktree tracker file
+4. run `reload <slug>`
+5. verify one read call against that slug before writing any patches
 
 Do not assume the daemon will magically follow a different checkout. The shared workspace tracks the linked file path it was given.
+
+In this relink flow, deleting the project registration removes the workspace symlink only. It does **not** delete the real tracker file in the repo/worktree.
 
 ### Step 2: backfill bounded active work first
 
@@ -339,7 +343,7 @@ Suggested order per task:
 3. Confirm `/help` or `tracker://help` reflects the new contract.
 4. Leave existing tracker files alone unless they need high-value metadata.
 5. Backfill active tasks first.
-6. If the project is linked from a repo worktree, relink the shared workspace slug to the intended branch file and run `reload <slug>`.
+6. If the project is linked from a repo worktree, and the slug is already registered, remove the workspace symlink registration, relink the slug to the intended branch file, then run `reload <slug>`.
 7. Review with:
    - `next`
    - `changed`
