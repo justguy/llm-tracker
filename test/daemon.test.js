@@ -139,6 +139,32 @@ test("daemon stop succeeds with an active websocket client attached", async () =
   }
 });
 
+test("daemon restart restarts the same workspace on the recorded port", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const daemonMeta = join(workspace, ".runtime", "daemon.json");
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const before = JSON.parse(readFileSync(daemonMeta, "utf-8"));
+    const restarted = runCli(["daemon", "restart", "--path", workspace]);
+    assert.equal(restarted.status, 0, restarted.stderr || restarted.stdout);
+    assert.match(restarted.stdout, /Background hub started/);
+
+    const after = JSON.parse(readFileSync(daemonMeta, "utf-8"));
+    assert.equal(after.port, port);
+    assert.notEqual(after.pid, before.pid);
+
+    const health = await fetch(`http://localhost:${port}/api/workspace`);
+    assert.equal(health.status, 200);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("daemon stop force-kills a process that ignores SIGTERM", () => {
   const workspace = setupWorkspace();
   const runtime = join(workspace, ".runtime");
@@ -185,13 +211,15 @@ test("daemon stop force-kills a process that ignores SIGTERM", () => {
   }
 });
 
-test("help output documents daemon commands, retrieval and execution packs, and the --daemon flag", () => {
+test("help output documents daemon commands, reload, retrieval and execution packs, and the --daemon flag", () => {
   const res = runCli(["help"]);
   assert.equal(res.status, 0, res.stderr || res.stdout);
   assert.match(res.stdout, /--daemon/);
   assert.match(res.stdout, /daemon start/);
   assert.match(res.stdout, /daemon stop/);
+  assert.match(res.stdout, /daemon restart/);
   assert.match(res.stdout, /daemon logs/);
+  assert.match(res.stdout, /reload \[\<slug\>\]/);
   assert.match(res.stdout, /brief <slug> <taskId>/);
   assert.match(res.stdout, /why <slug> <taskId>/);
   assert.match(res.stdout, /decisions <slug>/);

@@ -340,6 +340,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug/revisions`                     | GET    | All revs with summaries.                                   |
 | `/api/projects/:slug/rollback`                      | POST   | Create a new rev with the content of an older rev.         |
 | `/api/projects/:slug/symlink`                       | POST   | Register a project by symlinking an external JSON.         |
+| `/api/projects/:slug/reload`                        | POST   | Force one tracker file to be reloaded from disk.           |
+| `/api/reload`                                       | POST   | Force all tracker files to be reloaded from disk.          |
 | `/api/history/:slug`                                | GET    | Last 50 raw history lines.                                 |
 | `/README.md`                                        | GET    | Serve the workspace README.                                |
 | `/ws`                                               | WS     | WebSocket: SNAPSHOT on connect, UPDATE/ERROR/REMOVE on change. |
@@ -389,12 +391,13 @@ Daemon mode is explicit:
 - `llm-tracker --daemon`
 - `llm-tracker daemon start`
 - `llm-tracker daemon stop`
+- `llm-tracker daemon restart`
 - `llm-tracker daemon status`
 - `llm-tracker daemon logs --lines N`
 
 Daemon runtime files live under `<workspace>/.runtime/`. Existing workspaces do not need manual migration; the directory is created lazily on first daemon start.
 
-Hub-backed CLI commands (`brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
+Hub-backed CLI commands (`brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `reload`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
 
 Daemon lifecycle is workspace-scoped. `llm-tracker daemon stop --path <dir>` only targets the daemon registered for that workspace.
 
@@ -419,6 +422,14 @@ First match wins:
 ### Polling-based file watching
 
 Chokidar uses native fsevents on macOS, which subscribes to directory events. When a tracker file in `trackers/` is a symlink to a file in a **different directory** (Option C), writes to the target file fire OS events in *that* other directory — which fsevents on the trackers dir does not see. The hub therefore runs chokidar with `usePolling: true, interval: 300`: `stat()` every ~300 ms picks up changes to target files regardless of where they live. For a local tool watching a handful of files, polling overhead is negligible.
+
+To reduce reliance on watcher timing, the hub also:
+
+- rescans all tracker files on startup before serving requests
+- eagerly ingests a tracker immediately after `POST /api/projects/:slug/symlink`
+- auto-reloads a missing slug from disk when a slug route is hit
+- refreshes `/api/projects` from disk before returning the list
+- exposes `POST /api/projects/:slug/reload` and `POST /api/reload` so operators and agents can force reconciliation without restarting
 
 ### Stale daemon recovery
 

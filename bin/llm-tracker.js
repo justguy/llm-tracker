@@ -20,6 +20,7 @@ import { cmdDecisions } from "./commands/decisions.js";
 import { cmdExecute } from "./commands/execute.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
+import { cmdReload } from "./commands/reload.js";
 import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
 import { startHub } from "../hub/server.js";
@@ -242,6 +243,9 @@ async function cmdLink(args) {
   console.log(`Linked ${slug}:`);
   console.log(`  ${body.linkPath}`);
   console.log(`   → ${body.target}`);
+  if (body.loaded) {
+    console.log(`  loaded: yes${typeof body.rev === "number" ? ` (rev ${body.rev})` : ""}`);
+  }
 }
 
 async function cmdRollback(args) {
@@ -535,10 +539,23 @@ async function cmdDaemon(args) {
   const action = args._[1] || "status";
   if (action === "start") return cmdDaemonStart(args);
   if (action === "stop") return cmdDaemonStop(args);
+  if (action === "restart") {
+    const workspace = resolveWorkspace(args.flags.path);
+    const current = getDaemonStatus(workspace);
+    const restartArgs = {
+      ...args,
+      flags: { ...args.flags }
+    };
+    if (restartArgs.flags.port === undefined && current.running && current.meta?.port) {
+      restartArgs.flags.port = String(current.meta.port);
+    }
+    await cmdDaemonStop(args);
+    return cmdDaemonStart(restartArgs);
+  }
   if (action === "status") return cmdDaemonStatus(args);
   if (action === "logs") return cmdDaemonLogs(args);
 
-  console.error(`Unknown daemon action "${action}". Use start, stop, status, or logs.`);
+  console.error(`Unknown daemon action "${action}". Use start, stop, restart, status, or logs.`);
   process.exit(1);
 }
 
@@ -557,6 +574,7 @@ async function main() {
   if (cmd === "verify") return cmdVerify(args, { resolveWorkspace, httpRequest });
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
+  if (cmd === "reload") return cmdReload(args, { resolveWorkspace, httpRequest });
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
   if (cmd === "next") return cmdNext(args, { resolveWorkspace, httpRequest });
   if (cmd === "rollback") return cmdRollback(args);
@@ -572,9 +590,11 @@ Usage:
   llm-tracker [--path <dir>] [--port N] --daemon       Start the hub in the background
   llm-tracker daemon start [--path <dir>] [--port N]   Start the background daemon
   llm-tracker daemon stop [--path <dir>]               Stop the background daemon
+  llm-tracker daemon restart [--path <dir>] [--port N] Restart the background daemon
   llm-tracker daemon status [--path <dir>]             Show daemon status
   llm-tracker daemon logs [--path <dir>] [--lines N]   Print recent daemon logs
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
+  llm-tracker reload [<slug>] [--json]                 Reload one or all trackers from disk (requires hub)
   llm-tracker brief <slug> <taskId> [--json]           Print a task brief pack (requires hub)
   llm-tracker why <slug> <taskId> [--json]             Explain why a task matters now (requires hub)
   llm-tracker decisions <slug> [--json] [--limit N]    Print recent project decisions (requires hub)

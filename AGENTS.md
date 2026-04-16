@@ -19,3 +19,4 @@ For this repo specifically:
 - keep `/help` accurate when you add or change agent-facing endpoints or commands
 - prefer additive updates to the contract rather than silent behavior changes
 - remind agents to use `/help`, `next`, `brief`, `why`, `decisions`, `execute`, `verify`, `blockers`, `changed`, and `pick` before they fall back to broad file reads
+- if a slug exists on disk but 404s from the hub, retry once first because the hub auto-reloads missing slugs on demand, then prefer `reload` before asking for a daemon restart

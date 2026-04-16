@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, renameSync, readdirSync } from "node:fs";
 import { join, extname, dirname } from "node:path";
 import { createRequire } from "node:module";
 import express from "express";
@@ -77,6 +77,9 @@ export async function startHub({ workspace, port, uiDir }) {
     });
   });
 
+  let reloadProject = () => ({ ok: false, status: 503, message: "hub not ready" });
+  let reloadAllProjects = () => ({ reloaded: [], errors: [] });
+
   app.put("/api/settings", (req, res) => {
     const body = req.body || {};
     const current = readWsSettings();
@@ -106,7 +109,15 @@ export async function startHub({ workspace, port, uiDir }) {
   });
 
   app.get("/api/projects", (_req, res) => {
+    reloadAllProjects({ broadcastUpdate: false });
     res.json({ projects: store.list() });
+  });
+
+  app.param("slug", (req, _res, next, slug) => {
+    if (!slug || store.get(slug)) return next();
+    const result = reloadProject(slug, { broadcastUpdate: true });
+    if (result?.ok) req.projectReloadedFromDisk = true;
+    next();
   });
 
   app.get("/api/projects/:slug", (req, res) => {
@@ -132,7 +143,43 @@ export async function startHub({ workspace, port, uiDir }) {
     const { target } = req.body || {};
     const r = await store.symlinkProject(req.params.slug, target);
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
-    res.json({ ok: true, slug: req.params.slug, linkPath: r.linkPath, target: r.target });
+    const loaded = reloadProject(req.params.slug);
+    if (!loaded?.ok) {
+      return res.status(500).json({
+        error: `symlink created but eager load failed: ${loaded?.message || "unknown error"}`,
+        linkPath: r.linkPath,
+        target: r.target
+      });
+    }
+    res.json({
+      ok: true,
+      slug: req.params.slug,
+      linkPath: r.linkPath,
+      target: r.target,
+      loaded: true,
+      rev: store.get(req.params.slug)?.rev ?? null
+    });
+  });
+
+  app.post("/api/projects/:slug/reload", (req, res) => {
+    const result = reloadProject(req.params.slug);
+    if (!result?.ok) return res.status(result?.status || 400).json({ error: result?.message || "reload failed" });
+    res.json({
+      ok: true,
+      slug: req.params.slug,
+      rev: store.get(req.params.slug)?.rev ?? null,
+      event: result.event,
+      noop: result.noop === true
+    });
+  });
+
+  app.post("/api/reload", (_req, res) => {
+    const result = reloadAllProjects();
+    res.json({
+      ok: result.errors.length === 0,
+      reloaded: result.reloaded,
+      errors: result.errors
+    });
   });
 
   app.delete("/api/projects/:slug/tasks/:taskId", async (req, res) => {
@@ -313,7 +360,7 @@ export async function startHub({ workspace, port, uiDir }) {
   // up changes the LLM makes to the target file, which lives in a different
   // directory than our native fsevents subscription.
   const watcher = chokidar.watch(trackersDir, {
-    ignoreInitial: false,
+    ignoreInitial: true,
     depth: 0,
     followSymlinks: true,
     usePolling: true,
@@ -382,7 +429,7 @@ export async function startHub({ workspace, port, uiDir }) {
     return true;
   };
 
-  const handleFile = (filePath) => {
+  const ingestTrackerFile = (filePath, { broadcastUpdate = true } = {}) => {
     if (!isTrackerFile(filePath)) return;
     const slug = slugFromFile(filePath);
     if (!slug) return;
@@ -393,16 +440,64 @@ export async function startHub({ workspace, port, uiDir }) {
       return;
     }
     const result = store.ingest(filePath, raw);
-    broadcast({
-      type: result.event,
-      slug: result.slug,
-      project: projectPayload(result.slug, store.get(result.slug))
-    });
+    if (broadcastUpdate && result?.slug && result?.event) {
+      broadcast({
+        type: result.event,
+        slug: result.slug,
+        project: projectPayload(result.slug, store.get(result.slug))
+      });
+    }
+    return result;
   };
 
+  reloadProject = (slug, { broadcastUpdate = true } = {}) => {
+    const filePath = join(trackersDir, `${slug}.json`);
+    if (!existsSync(filePath)) {
+      return { ok: false, status: 404, message: "project not found on disk" };
+    }
+    return (
+      ingestTrackerFile(filePath, { broadcastUpdate }) || {
+        ok: false,
+        status: 404,
+        message: "project not found on disk"
+      }
+    );
+  };
+
+  reloadAllProjects = ({ broadcastUpdate = true } = {}) => {
+    const files = existsSync(trackersDir)
+      ? readdirSync(trackersDir)
+          .filter((name) => isTrackerFile(name))
+          .map((name) => join(trackersDir, name))
+      : [];
+
+    const reloaded = [];
+    const errors = [];
+    for (const filePath of files) {
+      const result = ingestTrackerFile(filePath, { broadcastUpdate });
+      if (!result) continue;
+      if (result.ok) {
+        reloaded.push({
+          slug: result.slug,
+          rev: store.get(result.slug)?.rev ?? null,
+          event: result.event,
+          noop: result.noop === true
+        });
+      } else {
+        errors.push({
+          slug: result.slug || slugFromFile(filePath),
+          message: result.reason || result.message || "reload failed"
+        });
+      }
+    }
+    return { reloaded, errors };
+  };
+
+  reloadAllProjects({ broadcastUpdate: false });
+
   watcher
-    .on("add", handleFile)
-    .on("change", handleFile)
+    .on("add", (filePath) => ingestTrackerFile(filePath))
+    .on("change", (filePath) => ingestTrackerFile(filePath))
     .on("unlink", (filePath) => {
       if (!isTrackerFile(filePath)) return;
       const r = store.remove(filePath);

@@ -145,11 +145,13 @@ npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + al
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
 npx llm-tracker rollback <slug> <rev>
 npx llm-tracker link <slug> <abs-path>  # symlink an external tracker into the workspace
+npx llm-tracker reload [<slug>]         # rescan one or all trackers from disk
 
 # Optional background lifecycle
 npx llm-tracker --daemon                  # start hub in the background
 npx llm-tracker daemon status             # show pid / port / log path
 npx llm-tracker daemon stop               # stop the background hub
+npx llm-tracker daemon restart            # restart the same background hub
 npx llm-tracker daemon logs --lines 80    # print recent daemon logs
 
 # For LLMs talking to the running hub
@@ -169,11 +171,20 @@ If you want the hub to keep running without a dedicated shell, use `npx llm-trac
 
 Existing workspaces do not need migration work. The `.runtime/` directory is created on demand the first time daemon mode is used.
 
-Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, and `link` keep working against a background hub started on a non-default port.
+Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, `link`, and `reload` keep working against a background hub started on a non-default port.
 
 Daemon state is **workspace-scoped**. `npx llm-tracker daemon stop --path <dir>` only affects the daemon for that workspace. In the recommended shared-daemon topology, that means one daemon for the central workspace and linked repo-local project files underneath it.
 
 ### Daemon troubleshooting
+
+The hub now rescans tracker files on startup, eagerly loads trackers created through `link`, auto-reloads missing slugs on demand, and refreshes the project list from disk before serving `/api/projects`. In normal use, that should remove most "restart to see the project" failures.
+
+If a tracker exists on disk but does not appear in the UI or a slug 404s unexpectedly:
+
+1. If a specific slug 404s, retry the request once. The hub now attempts an on-demand reload for missing slugs.
+2. Run `npx llm-tracker reload [<slug>] --path <workspace>` to rescan one slug or the whole workspace explicitly.
+3. If it is a symlinked repo-local tracker, make sure it was registered through `npx llm-tracker link ...` rather than by manual symlink creation.
+4. If the daemon itself looks stale, run `npx llm-tracker daemon restart --path <workspace>`.
 
 If `daemon stop` times out or hub-backed commands say `Hub not reachable`:
 

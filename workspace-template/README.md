@@ -625,6 +625,7 @@ Error shape:
 | `llm-tracker [--path <dir>] [--port N] --daemon`          | Start the hub in the background.                                              |     no       |
 | `llm-tracker daemon start [--path <dir>] [--port N]`      | Start the background hub.                                                     |     no       |
 | `llm-tracker daemon stop [--path <dir>]`                  | Stop the background hub.                                                      |     no       |
+| `llm-tracker daemon restart [--path <dir>] [--port N]`    | Restart the background hub on the same workspace.                             |     no       |
 | `llm-tracker daemon status [--path <dir>]`                | Show background-hub pid / port / log path.                                    |     no       |
 | `llm-tracker daemon logs [--path <dir>] [--lines N]`      | Print recent background-hub logs.                                             |     no       |
 | `GET /help`                                               | Fetch the current workspace agent contract over HTTP.                         |     no       |
@@ -638,6 +639,7 @@ Error shape:
 | `llm-tracker verify <slug> <taskId> [--json]`             | Deterministic verification checklist with tracker-backed evidence.             |    **yes**   |
 | `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
 | `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
+| `llm-tracker reload [<slug>] [--json]`                    | Reload one or all tracker files from disk into the running hub.               |    **yes**   |
 | `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
 | `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |
@@ -650,6 +652,15 @@ When a background daemon is running, hub-backed CLI commands reuse the recorded 
 Daemon state is workspace-scoped. In the recommended topology, everyone should point at the same shared workspace. Do **not** fix a stale daemon by creating another `.llm-tracker/` directory in a repo.
 
 ### Daemon mismatch recovery
+
+The hub now rescans tracker files on startup, eagerly loads trackers created through `link`, auto-reloads missing slugs when a slug route is hit, and refreshes `/api/projects` from disk before returning the list.
+
+If a tracker exists on disk but a slug still 404s or the UI is missing it:
+
+1. If a specific slug 404s, retry the request once. The hub now attempts an on-demand reload first.
+2. Run `llm-tracker reload <slug>` or `llm-tracker reload` before assuming the tracker file is bad.
+3. If it was registered via §7 Option C, prefer `llm-tracker link ...` over hand-made symlinks because `link` now forces an eager load.
+4. If the daemon itself is stale, run `llm-tracker daemon restart`.
 
 If `llm-tracker daemon status` and actual hub reachability disagree:
 
@@ -682,6 +693,7 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 - If the human asks what was already decided, read `decisions` instead of scanning every task comment manually.
 - If you are about to change code, read `execute` before inventing a work plan.
 - If you are about to mark work complete, read `verify` before guessing what counts as evidence.
+- If a known slug 404s, retry once, then use `reload` before guessing the workspace is wrong.
 - In shared-daemon mode, never drop patch files into a repo-local `.llm-tracker/` folder. Use the shared workspace or HTTP.
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.
