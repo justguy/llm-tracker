@@ -288,13 +288,29 @@ Patch payloads stay small. Typical shape:
 
 ### Agent Interfaces
 
-This project does not currently ship an MCP interface.
+This project ships a stdio MCP server via `llm-tracker mcp`.
 
-Use the CLI commands and HTTP endpoints above:
+Use the workspace contract first, then the narrowest interface that fits:
 
-- read `GET /help` first for the active workspace contract
-- use `next`, `brief`, `why`, `decisions`, `execute`, `verify`, `search`, and `fuzzy-search` for focused reads
-- use `pick`, `patch`, `undo`, `redo`, and `reload` through the running hub for authoritative writes
+- read `GET /help` or `tracker_help` first for the active workspace contract
+- use `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_search`, and `tracker_fuzzy_search` for focused reads
+- use `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
+
+Register the server in your client config instead of launching it manually:
+
+```toml
+[mcp_servers.llm-tracker]
+command = "node"
+args = [
+  "/Users/you/path/to/llm-project-tracker/bin/llm-tracker.js",
+  "mcp",
+  "--path",
+  "/Users/you/.llm-tracker",
+]
+startup_timeout_sec = 60
+```
+
+MCP reads work directly from workspace files. MCP writes still require the shared hub or daemon to be reachable.
 
 ## Background daemon
 
