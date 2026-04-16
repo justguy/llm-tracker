@@ -174,6 +174,56 @@ function IconBtn({ label, onClick, active, title }) {
   `;
 }
 
+async function copyText(text) {
+  if (!text) return false;
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {}
+  }
+
+  try {
+    const input = document.createElement("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "");
+    input.style.position = "absolute";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    input.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(input);
+    return !!ok;
+  } catch {
+    return false;
+  }
+}
+
+function CopyInlineBtn({ value, label, title }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1200);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return html`
+    <button
+      class=${`card-copy-btn ${copied ? "copied" : ""}`}
+      title=${copied ? `${label} copied` : title}
+      aria-label=${copied ? `${label} copied` : title}
+      onMouseDown=${(e) => e.stopPropagation()}
+      onClick=${async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const ok = await copyText(value);
+        if (ok) setCopied(true);
+      }}
+    >${copied ? "✓" : "⧉"}</button>
+  `;
+}
+
 // ─────── Custom dropdown ───────
 function Dropdown({ value, options, onChange, renderLabel, className }) {
   const [open, setOpen] = useState(false);
@@ -298,8 +348,22 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onS
           onDelete && onDelete(task);
         }}
       >×</button>
-      <div class="card-id">${task.id}</div>
-      <div class="card-title">${task.title}</div>
+      <div class="card-id-row">
+        <div class="card-id">${task.id}</div>
+        <${CopyInlineBtn}
+          value=${task.id}
+          label="Task id"
+          title=${`Copy task id ${task.id}`}
+        />
+      </div>
+      <div class="card-title">
+        <span class="card-title-text">${task.title}</span>
+        <${CopyInlineBtn}
+          value=${task.title}
+          label="Task title"
+          title=${`Copy task title: ${task.title}`}
+        />
+      </div>
       ${task.goal ? html`<div class="card-goal">${task.goal}</div>` : null}
       ${ctx.notes ? html`<div class="card-goal">${ctx.notes}</div>` : null}
       ${extraKeys.length > 0
