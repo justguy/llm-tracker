@@ -258,6 +258,8 @@ The shortlist is deterministic and capped at 5 tasks:
 - item 1 is the current recommendation
 - items 2-5 are ranked alternatives
 - each task includes `ready`, `blocked_kind`, `blocking_on`, `requires_approval`, normalized `references`, optional `effort`, freshness (`lastTouchedRev`), and `reason[]`
+- bounded executable tasks rank ahead of aggregate roadmap/container rows when both are otherwise actionable
+- active bounded work ranks ahead of starting a fresh bounded task
 
 Use this instead of scanning the whole tracker just to choose work.
 

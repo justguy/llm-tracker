@@ -10,7 +10,7 @@ Stop forcing your LLMs to re-read and rewrite massive architecture files just to
 
 It's a file-system-as-database tracker. Your LLMs update project states with tiny HTTP or file-based patches, and the local hub renders a live, **Bloomberg-terminal-style** priority matrix so you can see exactly what your agents are doing at a glance.
 
-When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker.
+When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker. The ranking prefers bounded actionable work over aggregate roadmap/container rows, and prefers continuing active bounded work over starting a fresh bounded task.
 
 When an agent already knows the task id and needs focused context, it can now make one call to `npx llm-tracker brief <slug> <task-id>` or `GET /api/projects/<slug>/tasks/<taskId>/brief` and get a capped pack instead of rereading the tracker, docs, and code by hand.
 

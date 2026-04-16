@@ -167,11 +167,14 @@ Computed on every accepted write. LLMs don't set it; they influence it via `depe
 Ranking currently favors:
 
 1. Ready work over blocked work
-2. Higher priority lanes (`p0` > `p1` > `p2` > `p3`)
-3. Tasks already in progress
-4. Tasks with explicit references or comments
-5. Smaller effort where priority is otherwise tied
-6. Recently touched tasks as a weak freshness signal
+2. Bounded executable tasks over aggregate roadmap/container rows
+3. Active bounded work over starting a fresh bounded task
+4. Higher priority lanes (`p0` > `p1` > `p2` > `p3`)
+5. Tasks with explicit references or comments
+6. Smaller effort where priority is otherwise tied
+7. Recently touched tasks as a weak freshness signal
+
+Aggregate/container rows are detected structurally from roadmap/subtask metadata. They remain in the shortlist as an honest fallback when no finer-grained executable task exists, but they do not block bounded child tasks and they do not outrank them.
 
 Approval requirements are treated as a penalty, not a hard exclusion, so near-ready work still appears in the shortlist.
 

@@ -8,6 +8,7 @@ const EFFORT_BONUS = {
   l: -2,
   xl: -6
 };
+const AGGREGATE_PENALTY = 100;
 
 function freshnessBonus(lastTouchedRev, currentRev) {
   if (!Number.isInteger(lastTouchedRev) || !Number.isInteger(currentRev)) return 0;
@@ -27,6 +28,7 @@ function scoreTask(summary, currentRev) {
   score += EFFORT_BONUS[summary.effort] ?? 0;
   score += freshnessBonus(summary.lastTouchedRev, currentRev);
   if (summary.requires_approval.length > 0) score -= 12;
+  if (summary.aggregate) score -= AGGREGATE_PENALTY;
   return score;
 }
 
@@ -40,6 +42,7 @@ function buildReason(summary, index) {
   }
 
   if (summary.priorityId) reasons.push(`${summary.priorityId} priority`);
+  if (summary.aggregate) reasons.push("aggregate roadmap/container row");
   if (summary.dependenciesResolved) reasons.push("dependencies satisfied");
   if (summary.references.length > 0) reasons.push("explicit references available");
   if (summary.comment) reasons.push("decision note present");
@@ -54,6 +57,8 @@ function buildReason(summary, index) {
 
 function sortSummaries(a, b) {
   if (a.ready !== b.ready) return a.ready ? -1 : 1;
+  if (a.aggregate !== b.aggregate) return a.aggregate ? 1 : -1;
+  if (a.status !== b.status) return a.status === "in_progress" ? -1 : 1;
   if (b.score !== a.score) return b.score - a.score;
   if (a.priorityWeight !== b.priorityWeight) return b.priorityWeight - a.priorityWeight;
   return a.id.localeCompare(b.id);

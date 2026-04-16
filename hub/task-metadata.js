@@ -47,10 +47,30 @@ export function taskRequiresApproval(task) {
   return task.approval_required_for.filter((value) => typeof value === "string" && value.trim());
 }
 
+export function taskTags(task) {
+  if (!Array.isArray(task?.context?.tags)) return [];
+  return task.context.tags.filter((value) => typeof value === "string" && value.trim());
+}
+
+export function isAggregateTask(task) {
+  const context = task?.context || {};
+  const tags = taskTags(task);
+  const hasSubtaskCounts =
+    Number.isInteger(context.task_count) ||
+    Number.isInteger(context.open_subtasks) ||
+    Number.isInteger(context.completed_subtasks);
+  const hasRoadmapEnvelope =
+    tags.includes("roadmap") &&
+    typeof context.source_title === "string" &&
+    context.source_title.trim().length > 0;
+
+  return hasSubtaskCounts || hasRoadmapEnvelope;
+}
+
 export function blockingDependencies(task, byId) {
   return (task?.dependencies || []).filter((dep) => {
     const depTask = byId.get(dep);
-    return depTask && depTask.status !== "complete";
+    return depTask && depTask.status !== "complete" && !isAggregateTask(depTask);
   });
 }
 
@@ -66,6 +86,7 @@ export function buildProjectTaskContext({ data, history = [] }) {
 export function summarizeTask(task, context) {
   const blockingOn = blockingDependencies(task, context.byId);
   const dependenciesResolved = blockingOn.length === 0;
+  const aggregate = isAggregateTask(task);
 
   return {
     id: task.id,
@@ -76,6 +97,7 @@ export function summarizeTask(task, context) {
     priorityId: task.placement?.priorityId ?? null,
     swimlaneId: task.placement?.swimlaneId ?? null,
     effort: normalizeEffort(task.effort),
+    aggregate,
     ready: dependenciesResolved,
     blocked_kind: dependenciesResolved ? null : "deps",
     blocking_on: blockingOn,

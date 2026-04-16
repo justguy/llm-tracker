@@ -86,3 +86,145 @@ test("buildNextPayload uses effort and approval to break ties among ready tasks"
   );
   assert.ok(payload.next[1].reason.some((reason) => reason.includes("requires approval")));
 });
+
+test("buildNextPayload prefers bounded actionable work over aggregate roadmap rows", () => {
+  const project = projectWithPriorities();
+  project.tasks = [
+    {
+      id: "rm-investor-demo-open",
+      title: "Investor Demo Open Work",
+      status: "in_progress",
+      placement: { swimlaneId: "ops", priorityId: "p0" },
+      dependencies: [],
+      context: {
+        tags: ["roadmap", "investor-demo-open"],
+        source_title: "Open Investor Demo Work",
+        task_count: 13,
+        completed_subtasks: 4,
+        open_subtasks: 9
+      }
+    },
+    {
+      id: "rm-parallel-execution",
+      title: "Parallel Execution",
+      status: "in_progress",
+      placement: { swimlaneId: "exec", priorityId: "p3" },
+      dependencies: [],
+      context: {
+        tags: ["roadmap", "parallel-execution"],
+        source_title: "Current Parallel Execution Status",
+        task_count: 5,
+        completed_subtasks: 2,
+        open_subtasks: 3
+      }
+    },
+    {
+      id: "t-017",
+      title: "Parallel execution branch/variant route-flow proof",
+      status: "in_progress",
+      placement: { swimlaneId: "exec", priorityId: "p3" },
+      dependencies: ["rm-parallel-execution"],
+      assignee: "codex",
+      references: [
+        "docs/PHALANX_ROADMAP.md:619",
+        "docs/references/PARALLEL_EXECUTION_BRANCH_VARIANT_ROUTE_FLOW_PROOF_CLAUDE_PROMPT.md:1"
+      ],
+      context: {
+        tags: ["parallel-execution", "branch-variants", "route-flow-proof"]
+      }
+    }
+  ];
+
+  const payload = buildNextPayload({
+    slug: "test-project",
+    data: project
+  });
+
+  assert.equal(payload.recommendedTaskId, "t-017");
+  assert.deepEqual(
+    payload.next.map((task) => task.id),
+    ["t-017", "rm-investor-demo-open", "rm-parallel-execution"]
+  );
+  assert.equal(payload.next[0].ready, true);
+  assert.equal(payload.next[0].aggregate, false);
+  assert.equal(payload.next[1].aggregate, true);
+  assert.ok(payload.next[1].reason.some((reason) => reason.includes("aggregate roadmap/container row")));
+});
+
+test("buildNextPayload honestly falls back to aggregate roadmap rows when no bounded task exists", () => {
+  const project = projectWithPriorities();
+  project.tasks = [
+    {
+      id: "rm-live-run-progress-surface",
+      title: "Live Run Progress",
+      status: "in_progress",
+      placement: { swimlaneId: "ops", priorityId: "p0" },
+      dependencies: [],
+      context: {
+        tags: ["roadmap", "live-run-progress-surface"],
+        source_title: "Next In-Line P0",
+        task_count: 11,
+        completed_subtasks: 10,
+        open_subtasks: 1
+      }
+    },
+    {
+      id: "rm-operator-trust",
+      title: "Operator Trust",
+      status: "not_started",
+      placement: { swimlaneId: "ops", priorityId: "p0" },
+      dependencies: [],
+      context: {
+        tags: ["roadmap", "operator-trust"],
+        source_title: "Operator Trust Queue",
+        task_count: 11,
+        completed_subtasks: 9,
+        open_subtasks: 2
+      }
+    }
+  ];
+
+  const payload = buildNextPayload({
+    slug: "test-project",
+    data: project
+  });
+
+  assert.equal(payload.recommendedTaskId, "rm-live-run-progress-surface");
+  assert.deepEqual(
+    payload.next.map((task) => task.id),
+    ["rm-live-run-progress-surface", "rm-operator-trust"]
+  );
+  assert.equal(payload.next[0].aggregate, true);
+});
+
+test("buildNextPayload prefers active bounded work over starting a new bounded task", () => {
+  const project = projectWithPriorities();
+  project.tasks = [
+    {
+      id: "t-in-progress",
+      title: "Continue active seam",
+      status: "in_progress",
+      placement: { swimlaneId: "exec", priorityId: "p3" },
+      dependencies: [],
+      assignee: "codex",
+      references: ["docs/plan.md:1-20"]
+    },
+    {
+      id: "t-not-started",
+      title: "Start a fresh task",
+      status: "not_started",
+      placement: { swimlaneId: "exec", priorityId: "p2" },
+      dependencies: []
+    }
+  ];
+
+  const payload = buildNextPayload({
+    slug: "test-project",
+    data: project
+  });
+
+  assert.deepEqual(
+    payload.next.map((task) => task.id),
+    ["t-in-progress", "t-not-started"]
+  );
+});
