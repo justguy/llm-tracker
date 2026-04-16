@@ -311,6 +311,17 @@ body {
   margin-top: 4px;
 }
 
+.project-title-multi {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--amber);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  max-width: min(64vw, 760px);
+}
+
 /* ─────── Header button cluster ─────── */
 .header-actions {
   display: flex;
@@ -767,6 +778,26 @@ body {
 .intel-action-btn:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.intel-inline-retry {
+  font-family: var(--font-mono);
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  color: var(--cyan);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-left: 10px;
+}
+
+.intel-inline-retry:hover,
+.intel-inline-retry:focus-visible {
+  border-color: var(--cyan);
+  outline: none;
 }
 
 .intel-snippets {

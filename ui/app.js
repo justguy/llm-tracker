@@ -1278,6 +1278,7 @@ function Header({
   activeSlug,
   setActive,
   project,
+  pinnedProjectNames,
   workspace,
   filter,
   setFilter,
@@ -1297,21 +1298,34 @@ function Header({
 }) {
   const meta = project?.data?.meta;
   const labelFor = (s) => projects?.[s]?.data?.meta?.name || s;
+  const multiPinned = Array.isArray(pinnedProjectNames) && pinnedProjectNames.length > 1;
+  const pinnedSummary = multiPinned ? pinnedProjectNames.join(" · ") : null;
 
   return html`
     <div class="app-header">
       <div>
         <div class="brand">LLM PROJECT TRACKER</div>
         <div class="project-select">
-          <${Dropdown}
-            value=${activeSlug}
-            options=${slugs}
-            onChange=${setActive}
-            renderLabel=${labelFor}
-            className="project-dropdown"
-          />
+          ${multiPinned
+            ? html`
+                <div
+                  class="project-title-multi"
+                  title=${`${pinnedSummary} — click any project pane to change the active project`}
+                >${pinnedSummary}</div>
+              `
+            : html`
+                <${Dropdown}
+                  value=${activeSlug}
+                  options=${slugs}
+                  onChange=${setActive}
+                  renderLabel=${labelFor}
+                  className="project-dropdown"
+                />
+              `}
         </div>
         <div class="project-meta">
+          ${multiPinned ? html`<span class="kv"><b>view</b>${pinnedProjectNames.length} pinned</span>` : null}
+          ${multiPinned && meta?.name ? html`<span class="kv"><b>active</b>${meta.name}</span>` : null}
           ${meta ? html`<span class="kv"><b>slug</b>${meta.slug}</span>` : null}
           ${meta ? html`<span class="kv"><b>swimlanes</b>${meta.swimlanes.length}</span>` : null}
           ${meta ? html`<span class="kv"><b>tasks</b>${project.data.tasks.length}</span>` : null}
@@ -1844,6 +1858,11 @@ function App() {
         onToggleDrawerPin=${onTogglePin}
       />`
     : null;
+  const validPinned = pinnedSlugs.filter((s) => projects[s]);
+  const paneSlugs = validPinned.length > 0 ? validPinned : [activeSlug];
+  const pinnedProjectNames = paneSlugs
+    .map((slug) => projects[slug]?.data?.meta?.name || slug)
+    .filter(Boolean);
 
   if (slugs.length === 0) {
     return html`
@@ -1883,6 +1902,7 @@ function App() {
           activeSlug=${activeSlug}
           setActive=${setActiveSlug}
           project=${active}
+          pinnedProjectNames=${pinnedProjectNames}
           workspace=${workspace}
           filter=${filter}
           setFilter=${setFilter}
@@ -1914,8 +1934,6 @@ function App() {
   }
 
   const derived = active.derived;
-  const validPinned = pinnedSlugs.filter((s) => projects[s]);
-  const paneSlugs = validPinned.length > 0 ? validPinned : [activeSlug];
   const solo = paneSlugs.length === 1 && validPinned.length === 1;
 
   return html`
@@ -1926,6 +1944,7 @@ function App() {
         activeSlug=${activeSlug}
         setActive=${setActiveSlug}
         project=${active}
+        pinnedProjectNames=${pinnedProjectNames}
         workspace=${workspace}
         filter=${filter}
         setFilter=${setFilter}

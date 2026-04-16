@@ -4,7 +4,8 @@ import { validProject } from "./fixtures.js";
 import {
   buildFuzzySearchPayload,
   buildSearchPayload,
-  setSemanticExtractorFactoryForTests
+  setSemanticExtractorFactoryForTests,
+  setSemanticRuntimeFactoriesForTests
 } from "../hub/search.js";
 
 function makeKeywordEmbedderFactory(keywords) {
@@ -20,6 +21,7 @@ function makeKeywordEmbedderFactory(keywords) {
 
 afterEach(() => {
   setSemanticExtractorFactoryForTests(null);
+  setSemanticRuntimeFactoriesForTests();
 });
 
 test("buildSearchPayload returns semantic matches from the local embedder", async () => {
@@ -99,4 +101,81 @@ test("buildFuzzySearchPayload returns approximate lexical matches", () => {
   });
   assert.equal(tagPayload.matches[0].id, "t2");
   assert.ok(tagPayload.matches[0].matchedOn.includes("tag") || tagPayload.matches[0].matchedOn.includes("notes"));
+});
+
+test("buildSearchPayload falls back to fuzzy matches when semantic runtime is unavailable", async () => {
+  setSemanticExtractorFactoryForTests(async () => {
+    throw new Error("onnxruntime native binding missing");
+  });
+
+  const project = validProject({
+    tasks: [
+      {
+        id: "t-017",
+        title: "Parallel execution branch/variant route-flow proof",
+        goal: "Prove the branch and route flow.",
+        status: "in_progress",
+        placement: { swimlaneId: "exec", priorityId: "p0" },
+        dependencies: []
+      }
+    ]
+  });
+  project.meta.rev = 22;
+
+  const payload = await buildSearchPayload({
+    slug: "test-project",
+    data: project,
+    query: "parallel route flow",
+    limit: 5,
+    workspace: "/tmp/search-test"
+  });
+
+  assert.equal(payload.mode, "semantic");
+  assert.equal(payload.backend, "fuzzy_fallback");
+  assert.match(payload.warning, /semantic search unavailable/i);
+  assert.equal(payload.matches[0].id, "t-017");
+});
+
+test("buildSearchPayload falls back from native backend to local wasm semantic runtime", async () => {
+  setSemanticRuntimeFactoriesForTests({
+    nativeFactory: async () => async () => {
+      throw new Error("onnxruntime-node native binding missing");
+    },
+    wasmFactory: makeKeywordEmbedderFactory(["parallel", "route", "flow", "investor"])
+  });
+
+  const project = validProject({
+    tasks: [
+      {
+        id: "t-017",
+        title: "Parallel execution branch/variant route-flow proof",
+        goal: "Prove the branch and route flow.",
+        status: "in_progress",
+        placement: { swimlaneId: "exec", priorityId: "p0" },
+        dependencies: []
+      },
+      {
+        id: "t-018",
+        title: "Investor demo cost surface",
+        goal: "Show cost savings honestly.",
+        status: "not_started",
+        placement: { swimlaneId: "ops", priorityId: "p1" },
+        dependencies: []
+      }
+    ]
+  });
+  project.meta.rev = 23;
+
+  const payload = await buildSearchPayload({
+    slug: "test-project",
+    data: project,
+    query: "parallel route flow",
+    limit: 5,
+    workspace: "/tmp/search-test"
+  });
+
+  assert.equal(payload.mode, "semantic");
+  assert.equal(payload.backend, "semantic");
+  assert.match(payload.warning, /local wasm runtime/i);
+  assert.equal(payload.matches[0].id, "t-017");
 });

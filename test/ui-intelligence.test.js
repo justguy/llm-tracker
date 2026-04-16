@@ -4,7 +4,8 @@ import {
   buildCardMetaFacts,
   buildTaskFactList,
   defaultChangedFromRev,
-  historyActionText
+  historyActionText,
+  isIntelModeLoading
 } from "../ui/lib/intelligence.js";
 
 test("defaultChangedFromRev clamps at zero", () => {
@@ -60,4 +61,11 @@ test("buildCardMetaFacts surfaces blocked deps, approvals, and task rev", () => 
   assert.equal(facts[0].value, "t-004");
   assert.equal(facts[1].value, "2 gates");
   assert.equal(facts[2].value, "r17");
+});
+
+test("isIntelModeLoading derives loading per mode from cache and errors", () => {
+  assert.equal(isIntelModeLoading({}, {}, "why"), true);
+  assert.equal(isIntelModeLoading({ why: { packType: "why" } }, {}, "why"), false);
+  assert.equal(isIntelModeLoading({}, { why: "request failed" }, "why"), false);
+  assert.equal(isIntelModeLoading({}, {}, null), false);
 });

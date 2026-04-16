@@ -6,6 +6,7 @@ import {
   buildTaskFactList,
   defaultChangedFromRev,
   humanizeValue,
+  isIntelModeLoading,
   toStringList
 } from "../lib/intelligence.js";
 
@@ -17,8 +18,20 @@ async function readJson(response) {
   }
 }
 
-async function fetchJson(path) {
-  const response = await fetch(path);
+async function fetchJson(path, { timeoutMs = 8000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(path, { signal: controller.signal });
+  } catch (error) {
+    clearTimeout(timer);
+    if (error?.name === "AbortError") {
+      throw new Error(`request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  }
+  clearTimeout(timer);
   const body = await readJson(response);
   if (!response.ok) {
     throw new Error(body.error || response.statusText || "request failed");
@@ -217,12 +230,11 @@ function renderTaskMode(mode, payload, onOpenTask) {
   const blockerReason = task.blocker_reason || null;
 
   return html`
-    ${goal ? html`<${Section} title="Goal"><p>${goal}</p></${Section}>` : null}
-    ${comment ? html`<${Section} title="Decision Note"><p>${comment}</p></${Section}>` : null}
-    ${blockerReason ? html`<${Section} title="Blocker Reason"><p>${blockerReason}</p></${Section}>` : null}
-    <${ContractSections} task=${task} />
     ${mode === "brief"
       ? html`
+          ${goal ? html`<${Section} title="Goal"><p>${goal}</p></${Section}>` : null}
+          ${comment ? html`<${Section} title="Decision Note"><p>${comment}</p></${Section}>` : null}
+          ${blockerReason ? html`<${Section} title="Blocker Reason"><p>${blockerReason}</p></${Section}>` : null}
           <div class="intel-grid">
             <${Section} title="Dependencies">
               <${TaskSummaryList} items=${payload.dependencies || []} empty="none" onOpenTask=${onOpenTask} />
@@ -244,6 +256,9 @@ function renderTaskMode(mode, payload, onOpenTask) {
       : null}
     ${mode === "why"
       ? html`
+          ${goal ? html`<${Section} title="Goal"><p>${goal}</p></${Section}>` : null}
+          ${comment ? html`<${Section} title="Decision Note"><p>${comment}</p></${Section}>` : null}
+          ${blockerReason ? html`<${Section} title="Blocker Reason"><p>${blockerReason}</p></${Section}>` : null}
           <${Section} title="Why Now">
             <${BulletList}
               items=${payload.why || []}
@@ -272,6 +287,7 @@ function renderTaskMode(mode, payload, onOpenTask) {
       : null}
     ${mode === "execute"
       ? html`
+          <${ContractSections} task=${task} />
           <${Section} title="Readiness">
             <${IntelligenceFacts} facts=${buildTaskFactList({
               ...task,
@@ -295,6 +311,9 @@ function renderTaskMode(mode, payload, onOpenTask) {
       : null}
     ${mode === "verify"
       ? html`
+          <${Section} title="Current Task State">
+            <${IntelligenceFacts} facts=${buildTaskFactList(task)} />
+          </${Section}>
           <${Section} title="Checks">
             <${BulletList}
               items=${payload.checks || []}
@@ -328,19 +347,19 @@ function renderTaskMode(mode, payload, onOpenTask) {
 }
 
 async function loadTaskPayload(slug, taskId, mode) {
-  return fetchJson(`/api/projects/${slug}/tasks/${taskId}/${mode}`);
+  return fetchJson(`/api/projects/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}/${mode}`);
 }
 
 async function loadProjectPayload(slug, mode, currentRev) {
   switch (mode) {
     case "next":
-      return fetchJson(`/api/projects/${slug}/next?limit=5`);
+      return fetchJson(`/api/projects/${encodeURIComponent(slug)}/next?limit=5`);
     case "blockers":
-      return fetchJson(`/api/projects/${slug}/blockers`);
+      return fetchJson(`/api/projects/${encodeURIComponent(slug)}/blockers`);
     case "changed":
-      return fetchJson(`/api/projects/${slug}/changed?fromRev=${defaultChangedFromRev(currentRev)}&limit=20`);
+      return fetchJson(`/api/projects/${encodeURIComponent(slug)}/changed?fromRev=${defaultChangedFromRev(currentRev)}&limit=20`);
     case "decisions":
-      return fetchJson(`/api/projects/${slug}/decisions?limit=20`);
+      return fetchJson(`/api/projects/${encodeURIComponent(slug)}/decisions?limit=20`);
     default:
       throw new Error(`Unknown project intelligence mode: ${mode}`);
   }
@@ -349,43 +368,58 @@ async function loadProjectPayload(slug, mode, currentRev) {
 export function TaskIntelligenceModal({ slug, task, initialMode = "brief", onOpenTask, onClose }) {
   const [mode, setMode] = useState(initialMode);
   const [cache, setCache] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [errors, setErrors] = useState({});
 
   useEscClose(onClose);
 
   useEffect(() => {
     setMode(initialMode);
     setCache({});
-    setError(null);
+    setErrors({});
   }, [slug, task?.id, initialMode]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!task?.id || cache[mode] || loading) return undefined;
+    if (!task?.id || cache[mode] || errors[mode]) return undefined;
 
-    setLoading(true);
     loadTaskPayload(slug, task.id, mode)
       .then((payload) => {
         if (!cancelled) {
           setCache((prev) => ({ ...prev, [mode]: payload }));
-          setError(null);
+          setErrors((prev) => {
+            const next = { ...prev };
+            delete next[mode];
+            return next;
+          });
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setErrors((prev) => ({ ...prev, [mode]: err.message }));
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [slug, task?.id, mode, cache, loading]);
+  }, [slug, task?.id, mode, cache, errors]);
 
   const payload = cache[mode];
   const summaryTask = payload?.task || task || {};
+  const error = errors[mode] || null;
+  const loading = isIntelModeLoading(cache, errors, mode);
+  const retry = () => {
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[mode];
+      return next;
+    });
+    setCache((prev) => {
+      const next = { ...prev };
+      delete next[mode];
+      return next;
+    });
+  };
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
@@ -401,7 +435,14 @@ export function TaskIntelligenceModal({ slug, task, initialMode = "brief", onOpe
             <${IntelligenceFacts} facts=${buildTaskFactList(summaryTask)} />
           </div>
           <${IntelligenceTabs} tabs=${TASK_INTEL_TABS} active=${mode} onSelect=${setMode} />
-          ${error ? html`<div class="settings-msg error">${error}</div>` : null}
+          ${error
+            ? html`
+                <div class="settings-msg error">
+                  <span>${error}</span>
+                  <button class="intel-inline-retry" onClick=${retry}>[RETRY]</button>
+                </div>
+              `
+            : null}
           ${loading && !payload ? html`<p class="muted">loading…</p>` : null}
           ${payload ? renderTaskMode(mode, payload, onOpenTask) : null}
         </div>
@@ -505,42 +546,45 @@ function renderProjectMode(mode, payload, onOpenTask, onPickTask) {
 export function ProjectIntelligenceModal({ slug, project, initialMode = "next", onOpenTask, onPickTask, onClose }) {
   const [mode, setMode] = useState(initialMode);
   const [cache, setCache] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [errors, setErrors] = useState({});
 
   useEscClose(onClose);
 
   useEffect(() => {
     setMode(initialMode);
     setCache({});
-    setError(null);
+    setErrors({});
   }, [slug, initialMode]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!slug || cache[mode] || loading) return undefined;
+    if (!slug || cache[mode] || errors[mode]) return undefined;
 
-    setLoading(true);
     loadProjectPayload(slug, mode, project?.data?.meta?.rev ?? null)
       .then((payload) => {
         if (!cancelled) {
           setCache((prev) => ({ ...prev, [mode]: payload }));
-          setError(null);
+          setErrors((prev) => {
+            const next = { ...prev };
+            delete next[mode];
+            return next;
+          });
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setErrors((prev) => ({ ...prev, [mode]: err.message }));
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [slug, mode, cache, loading, project?.data?.meta?.rev]);
+  }, [slug, mode, cache, errors, project?.data?.meta?.rev]);
 
   const payload = cache[mode];
+  const error = errors[mode] || null;
+  const loading = isIntelModeLoading(cache, errors, mode);
   const derived = project?.derived || {};
   const summaryFacts = [
     { label: "rev", value: project?.data?.meta?.rev ?? "-" },
@@ -548,6 +592,18 @@ export function ProjectIntelligenceModal({ slug, project, initialMode = "next", 
     { label: "tasks", value: derived.total ?? 0 },
     { label: "blocked", value: Object.keys(derived.blocked || {}).length, tone: "warn" }
   ];
+  const retry = () => {
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[mode];
+      return next;
+    });
+    setCache((prev) => {
+      const next = { ...prev };
+      delete next[mode];
+      return next;
+    });
+  };
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
@@ -563,7 +619,14 @@ export function ProjectIntelligenceModal({ slug, project, initialMode = "next", 
             <${IntelligenceFacts} facts=${summaryFacts} />
           </div>
           <${IntelligenceTabs} tabs=${PROJECT_INTEL_TABS} active=${mode} onSelect=${setMode} />
-          ${error ? html`<div class="settings-msg error">${error}</div>` : null}
+          ${error
+            ? html`
+                <div class="settings-msg error">
+                  <span>${error}</span>
+                  <button class="intel-inline-retry" onClick=${retry}>[RETRY]</button>
+                </div>
+              `
+            : null}
           ${loading && !payload ? html`<p class="muted">loading…</p>` : null}
           ${renderProjectMode(mode, payload, onOpenTask, onPickTask)}
         </div>

@@ -26,6 +26,11 @@ export function defaultChangedFromRev(currentRev, windowSize = 10) {
   return Math.max(0, currentRev - windowSize);
 }
 
+export function isIntelModeLoading(cache = {}, errors = {}, mode = null) {
+  if (!mode) return false;
+  return !cache?.[mode] && !errors?.[mode];
+}
+
 export function historyActionText(entry = {}) {
   if (entry.action === "undo") {
     return entry.undoOfRev ? `undo of rev ${entry.undoOfRev}` : "undo";

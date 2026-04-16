@@ -24,6 +24,8 @@ For this repo specifically:
 - if MCP prompts are available, start with `tracker_start_here` and use the workflow prompts instead of inventing your own tool order
 - remember the MCP daemon rule: read tools work directly from workspace files; write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) require the hub or daemon to be reachable
 - remind agents to use `/help`, `next`, `search` or `fuzzy-search`, `brief`, `why`, `decisions`, `execute`, `verify`, `blockers`, `changed`, and `pick` before they fall back to broad file reads
+- if `/search` returns a warning, treat that as a degraded local semantic runtime, not as a tracker-data failure; the hub now tries native semantic, then local WASM semantic, then fuzzy fallback
+- if `/search` returns `backend: "fuzzy_fallback"`, continue with the returned matches or call `fuzzy-search` explicitly instead of blaming tracker data
 - if a slug exists on disk but 404s from the hub, retry once first because the hub auto-reloads missing slugs on demand, then prefer `reload` before asking for a daemon restart
 - for metadata backfills on existing projects, prefer bounded active tasks before broad roadmap rows, verify with `next` / `brief` / `execute` / `verify` / `search`, and stop before commit or PR refresh unless the human explicitly asked for that step
 - do not call a patch that only adds `references[]`, `effort`, `related`, or `comment` a complete migration batch for active work; that is retrieval-only enrichment unless execution-contract fields were intentionally out of scope

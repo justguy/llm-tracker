@@ -76,6 +76,12 @@ export async function runQueryCommand(
 
   console.log(`  ${body.project}  rev ${body.rev ?? "?"}  ${heading}  generated ${body.generatedAt}`);
   console.log(`  query: ${body.query}`);
+  if (body.backend && body.backend !== body.mode) {
+    console.log(`  backend: ${body.backend}`);
+  }
+  if (body.warning) {
+    console.log(`  warning: ${body.warning}`);
+  }
   if (!body.matches || body.matches.length === 0) {
     console.log(`  no ${noMatchesLabel} matches`);
     return;

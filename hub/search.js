@@ -1,5 +1,6 @@
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
 const DEFAULT_LIMIT = 10;
@@ -7,8 +8,23 @@ const MAX_LIMIT = 50;
 const MIN_SEMANTIC_SCORE = 0.18;
 const MIN_FUZZY_SCORE = 0.22;
 const EMBEDDING_MODEL = process.env.LLM_TRACKER_EMBEDDING_MODEL || "Xenova/all-MiniLM-L6-v2";
+const ORT_SYMBOL = Symbol.for("onnxruntime");
+const SEARCH_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const TRANSFORMERS_WEB_MODULE = resolve(
+  SEARCH_ROOT,
+  "node_modules",
+  "@huggingface",
+  "transformers",
+  "dist",
+  "transformers.web.js"
+);
+const ONNXRUNTIME_WEB_DIST = resolve(SEARCH_ROOT, "node_modules", "onnxruntime-web", "dist");
+const WASM_FACTORY_FILE = "ort-wasm-simd-threaded.asyncify.mjs";
+const WASM_BINARY_FILE = "ort-wasm-simd-threaded.asyncify.wasm";
 
 let extractorFactoryOverride = null;
+let nativeExtractorFactoryOverride = null;
+let wasmExtractorFactoryOverride = null;
 let extractorPromise = null;
 let semanticActivated = false;
 
@@ -155,6 +171,7 @@ function emptyPayload({ slug, rev, query, mode, now, limit, model = null }) {
     mode,
     query,
     model,
+    backend: mode,
     matches: [],
     truncation: {
       applied: false,
@@ -163,6 +180,71 @@ function emptyPayload({ slug, rev, query, mode, now, limit, model = null }) {
       maxCount: limit
     }
   };
+}
+
+function contentTypeForFile(fileUrl) {
+  const pathname = typeof fileUrl === "string" ? fileUrl : fileUrl?.pathname || "";
+  if (pathname.endsWith(".wasm")) return "application/wasm";
+  if (pathname.endsWith(".mjs") || pathname.endsWith(".js")) return "text/javascript";
+  if (pathname.endsWith(".json")) return "application/json";
+  return "application/octet-stream";
+}
+
+function createLocalAwareFetch(baseFetch = globalThis.fetch?.bind(globalThis)) {
+  return async (input, init) => {
+    let url = null;
+    try {
+      url =
+        input instanceof URL
+          ? input
+          : typeof input === "string"
+            ? new URL(input)
+            : input?.url
+              ? new URL(input.url)
+              : null;
+    } catch {
+      url = null;
+    }
+
+    if (url?.protocol === "file:") {
+      const body = await readFile(fileURLToPath(url));
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": contentTypeForFile(url) }
+      });
+    }
+
+    if (!baseFetch) {
+      throw new Error("fetch is unavailable for semantic runtime setup");
+    }
+    return baseFetch(input, init);
+  };
+}
+
+function configureTransformersWasmEnv(env) {
+  if (!env?.backends?.onnx?.wasm) return;
+  env.fetch = createLocalAwareFetch(env.fetch || globalThis.fetch?.bind(globalThis));
+  env.backends.onnx.wasm.wasmPaths = {
+    mjs: pathToFileURL(resolve(ONNXRUNTIME_WEB_DIST, WASM_FACTORY_FILE)).href,
+    wasm: pathToFileURL(resolve(ONNXRUNTIME_WEB_DIST, WASM_BINARY_FILE)).href
+  };
+}
+
+function fullErrorMessage(error) {
+  const seen = new Set();
+  const parts = [];
+  let current = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    parts.push(current?.message || String(current));
+    current = current?.cause;
+  }
+  return parts.join(" :: ");
+}
+
+function isOnnxNativeBindingFailure(error) {
+  const message = fullErrorMessage(error);
+  return /onnxruntime-node|native binding|bindings file|could not locate the bindings file|dlopen|no native build|napi/i.test(message);
 }
 
 async function loadExtractorFactory() {
@@ -182,35 +264,99 @@ async function loadExtractorFactory() {
   return async ({ modelId }) => pipeline("feature-extraction", modelId);
 }
 
-async function getExtractor() {
+async function loadNativeExtractorFactory() {
+  if (extractorFactoryOverride) return extractorFactoryOverride;
+  if (nativeExtractorFactoryOverride) return nativeExtractorFactoryOverride;
+  return loadExtractorFactory();
+}
+
+async function loadWasmExtractorFactory() {
+  if (extractorFactoryOverride) return extractorFactoryOverride;
+  if (wasmExtractorFactoryOverride) return wasmExtractorFactoryOverride;
+
+  const onnxWebModule = await import("onnxruntime-web/webgpu");
+  globalThis[ORT_SYMBOL] = onnxWebModule.default || onnxWebModule;
+
+  const module = await import(pathToFileURL(TRANSFORMERS_WEB_MODULE).href);
+  configureTransformersWasmEnv(module.env);
+  const { pipeline } = module;
+  return async ({ modelId }) => pipeline("feature-extraction", modelId, { device: "wasm" });
+}
+
+async function initializeExtractor(factoryLoader) {
+  const factory = await factoryLoader();
+  const extractor = await factory({
+    modelId: EMBEDDING_MODEL,
+    task: "feature-extraction"
+  });
+  if (typeof extractor !== "function") {
+    throw new Error("semantic embedder factory must return a callable extractor");
+  }
+  return extractor;
+}
+
+async function getExtractorRuntime() {
   semanticActivated = true;
   if (!extractorPromise) {
     extractorPromise = (async () => {
-      const factory = await loadExtractorFactory();
-      const extractor = await factory({
-        modelId: EMBEDDING_MODEL,
-        task: "feature-extraction"
-      });
-      if (typeof extractor !== "function") {
-        throw new Error("semantic embedder factory must return a callable extractor");
+      try {
+        return {
+          extractor: await initializeExtractor(loadNativeExtractorFactory),
+          warning: null,
+          mode: "native"
+        };
+      } catch (error) {
+        if (!isOnnxNativeBindingFailure(error)) {
+          throw error;
+        }
+
+        return fallbackToWasmRuntime(error);
       }
-      return extractor;
     })();
   }
   return extractorPromise;
 }
 
-async function embedText(text) {
-  const extractor = await getExtractor();
-  const output = await extractor(text, { pooling: "mean", normalize: true });
-  return Array.from(output?.data || []);
+async function fallbackToWasmRuntime(nativeFailure) {
+  try {
+    return {
+      extractor: await initializeExtractor(loadWasmExtractorFactory),
+      warning: `semantic search is using the local wasm runtime because the native backend failed: ${nativeFailure.message}`,
+      mode: "wasm"
+    };
+  } catch (wasmError) {
+    wasmError.cause = wasmError.cause || nativeFailure;
+    throw wasmError;
+  }
 }
 
-async function ensureSemanticIndex({ workspace, slug, entry }) {
+async function embedText(text, runtime) {
+  try {
+    const output = await runtime.extractor(text, { pooling: "mean", normalize: true });
+    return {
+      vector: Array.from(output?.data || []),
+      runtime
+    };
+  } catch (error) {
+    if (runtime.mode !== "native" || !isOnnxNativeBindingFailure(error)) {
+      throw error;
+    }
+
+    const wasmRuntime = await fallbackToWasmRuntime(error);
+    extractorPromise = Promise.resolve(wasmRuntime);
+    const output = await wasmRuntime.extractor(text, { pooling: "mean", normalize: true });
+    return {
+      vector: Array.from(output?.data || []),
+      runtime: wasmRuntime
+    };
+  }
+}
+
+async function ensureSemanticIndex({ workspace, slug, entry, runtime }) {
   const key = cacheKey(workspace, slug);
   const rev = entry?.rev ?? entry?.data?.meta?.rev ?? null;
   const cached = semanticIndexCache.get(key);
-  if (cached && cached.rev === rev) return cached.items;
+  if (cached && cached.rev === rev) return { items: cached.items, runtime };
 
   const context = buildProjectTaskContext({ data: entry?.data });
   const tasks = (entry?.data?.tasks || []).map((task) => ({
@@ -220,15 +366,18 @@ async function ensureSemanticIndex({ workspace, slug, entry }) {
   }));
 
   const items = [];
+  let activeRuntime = runtime;
   for (const item of tasks) {
+    const embedded = await embedText(item.document, activeRuntime);
+    activeRuntime = embedded.runtime;
     items.push({
       ...item,
-      vector: await embedText(item.document)
+      vector: embedded.vector
     });
   }
 
   semanticIndexCache.set(key, { rev, items });
-  return items;
+  return { items, runtime: activeRuntime };
 }
 
 function queryState(rawQuery) {
@@ -309,6 +458,17 @@ export function clearSearchCachesForSlug(workspace, slug) {
 
 export function setSemanticExtractorFactoryForTests(factory) {
   extractorFactoryOverride = factory;
+  nativeExtractorFactoryOverride = null;
+  wasmExtractorFactoryOverride = null;
+  extractorPromise = null;
+  semanticActivated = false;
+  semanticIndexCache.clear();
+}
+
+export function setSemanticRuntimeFactoriesForTests({ nativeFactory = null, wasmFactory = null } = {}) {
+  extractorFactoryOverride = null;
+  nativeExtractorFactoryOverride = nativeFactory;
+  wasmExtractorFactoryOverride = wasmFactory;
   extractorPromise = null;
   semanticActivated = false;
   semanticIndexCache.clear();
@@ -317,7 +477,8 @@ export function setSemanticExtractorFactoryForTests(factory) {
 export async function primeSemanticIndex({ workspace, slug, entry }) {
   if (!semanticActivated || !entry?.data) return null;
   try {
-    await ensureSemanticIndex({ workspace, slug, entry });
+    const runtime = await getExtractorRuntime();
+    await ensureSemanticIndex({ workspace, slug, entry, runtime });
   } catch {
     // Search warm-up is best-effort. Query-time paths surface actual errors.
   }
@@ -340,11 +501,12 @@ export async function getSearchPayload({
   if (!state.raw) return emptyPayload({ slug, rev, query: "", mode: "semantic", now, limit: cappedLimit, model: EMBEDDING_MODEL });
 
   try {
-    const index = await ensureSemanticIndex({ workspace, slug, entry });
-    const queryVector = await embedText(state.raw);
-    const all = index
+    const runtime = await getExtractorRuntime();
+    const indexed = await ensureSemanticIndex({ workspace, slug, entry, runtime });
+    const embeddedQuery = await embedText(state.raw, indexed.runtime);
+    const all = indexed.items
       .map((item) => ({
-        ...summarizeResult(item.task, item.summary, cosineSimilarity(queryVector, item.vector))
+        ...summarizeResult(item.task, item.summary, cosineSimilarity(embeddedQuery.vector, item.vector))
       }))
       .filter((item) => item.score >= MIN_SEMANTIC_SCORE)
       .sort(sortMatches);
@@ -357,6 +519,8 @@ export async function getSearchPayload({
       mode: "semantic",
       query: state.raw,
       model: EMBEDDING_MODEL,
+      backend: "semantic",
+      ...(embeddedQuery.runtime.warning ? { warning: embeddedQuery.runtime.warning } : {}),
       matches,
       truncation: {
         applied: matches.length < all.length,
@@ -366,10 +530,19 @@ export async function getSearchPayload({
       }
     };
   } catch (error) {
+    const fallback = getFuzzyPayload({
+      slug,
+      entry,
+      query: state.raw,
+      limit: cappedLimit,
+      now
+    });
     return {
-      ok: false,
-      status: 503,
-      message: `semantic search unavailable: ${error.message}`
+      ...fallback,
+      mode: "semantic",
+      model: EMBEDDING_MODEL,
+      backend: "fuzzy_fallback",
+      warning: `semantic search unavailable: ${error.message}`
     };
   }
 }
@@ -401,6 +574,7 @@ export function getFuzzyPayload({
     generatedAt: now,
     mode: "fuzzy",
     query: state.raw,
+    backend: "fuzzy",
     matches,
     truncation: {
       applied: matches.length < all.length,
