@@ -121,6 +121,14 @@ function validatePatchGuardrails(existing, patch) {
   };
 }
 
+function latestRecordedRev(workspace, slug) {
+  const snapRev = maxRev(workspace, slug);
+  const historyRev = readHistory(workspace, slug).reduce((max, entry) => {
+    return Number.isInteger(entry?.rev) && entry.rev > max ? entry.rev : max;
+  }, 0);
+  return Math.max(snapRev, historyRev);
+}
+
 export class Store {
   constructor(workspace) {
     this.workspace = workspace;
@@ -525,11 +533,40 @@ export class Store {
         };
       }
 
-      // Write the snapshot as-is. chokidar's `add` event triggers ingest, which
-      // will either adopt the existing rev (cold-start resume path) or bump it
-      // if anything was changed between snapshot time and restore time.
-      atomicWriteJson(file, snap);
-      return { ok: true, slug, restoredFromRev: targetRev, file };
+      const newRev = latestRecordedRev(this.workspace, slug) + 1;
+      const newState = JSON.parse(JSON.stringify(snap));
+      newState.meta.rev = newRev;
+      newState.meta.updatedAt = new Date().toISOString();
+
+      const derived = deriveProject(newState);
+      const entry = {
+        data: newState,
+        derived,
+        path: file,
+        rev: newRev,
+        error: null,
+        notes: { ignored: [], warnings: [], appended: [], updated: [] }
+      };
+      this.projects.set(slug, entry);
+
+      try {
+        atomicWriteJson(file, newState);
+      } catch (e) {
+        this.projects.delete(slug);
+        return { ok: false, status: 500, message: `restore write failed: ${e.message}` };
+      }
+
+      writeSnapshot(this.workspace, slug, newRev, newState);
+      appendHistoryEntry(this.workspace, slug, {
+        rev: newRev,
+        ts: newState.meta.updatedAt,
+        action: "restore",
+        restoredFromRev: targetRev,
+        summary: [`restored project from snapshot rev ${targetRev}`]
+      });
+      clearErrorFile(this.workspace, slug);
+
+      return { ok: true, slug, restoredFromRev: targetRev, file, newRev };
     });
   }
 
@@ -539,15 +576,36 @@ export class Store {
       if (!existsSync(file)) {
         return { ok: false, status: 404, message: "project not found" };
       }
+      const current = this.projects.get(slug);
+      const priorEntry = current ? {
+        data: current.data ? JSON.parse(JSON.stringify(current.data)) : null,
+        derived: current.derived,
+        path: current.path,
+        rev: current.rev,
+        error: current.error,
+        notes: current.notes
+      } : null;
       try {
+        if (current) this.projects.delete(slug);
         unlinkSync(file);
       } catch (e) {
+        if (current && priorEntry) this.projects.set(slug, priorEntry);
         return { ok: false, status: 500, message: `delete failed: ${e.message}` };
       }
+      const deletedFromRev = Number.isInteger(current?.rev)
+        ? current.rev
+        : latestRecordedRev(this.workspace, slug);
+      const deletedRev = deletedFromRev + 1;
+      appendHistoryEntry(this.workspace, slug, {
+        rev: deletedRev,
+        ts: new Date().toISOString(),
+        action: "delete",
+        deletedFromRev,
+        summary: ["deleted project registration"]
+      });
       clearErrorFile(this.workspace, slug);
-      // chokidar fires unlink → store.remove() → broadcast REMOVE.
       // Snapshots and history are preserved for audit.
-      return { ok: true };
+      return { ok: true, deletedRev, deletedFromRev };
     });
   }
 
@@ -763,21 +821,26 @@ export class Store {
       undoOfRev: e.undoOfRev,
       redoOfRev: e.redoOfRev,
       rolledBackFrom: e.rolledBackFrom,
-      rolledBackTo: e.rolledBackTo
+      rolledBackTo: e.rolledBackTo,
+      deletedFromRev: e.deletedFromRev,
+      restoredFromRev: e.restoredFromRev
     }));
   }
 
   history(slug, { fromRev = 0, limit = 50 } = {}) {
     const entry = this.projects.get(slug);
-    if (!entry || !entry.data) return null;
-
     const all = readHistory(this.workspace, slug).filter((event) => event.rev > fromRev);
+    if ((!entry || !entry.data) && all.length === 0) return null;
     const clampedLimit = Math.max(1, Math.min(limit, 200));
     const events = all.slice(-clampedLimit);
+    const currentRev = entry?.rev ?? all.reduce((max, event) => {
+      return Number.isInteger(event?.rev) && event.rev > max ? event.rev : max;
+    }, 0);
     return {
       slug,
       fromRev,
-      currentRev: entry.rev,
+      currentRev,
+      deleted: !entry?.data,
       events,
       truncation: {
         applied: events.length < all.length,

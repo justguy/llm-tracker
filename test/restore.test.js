@@ -57,14 +57,28 @@ test("restoreProject rehydrates the latest snapshot after delete", async () => {
     const deleted = await store.deleteProject("test-project");
     assert.equal(deleted.ok, true);
     assert.equal(existsSync(file), false);
+    const afterDelete = store.history("test-project", { limit: 10 });
+    assert.equal(afterDelete.deleted, true);
+    assert.ok(afterDelete.events.some((entry) => entry.action === "delete"));
 
     const restored = await store.restoreProject("test-project");
     assert.equal(restored.ok, true);
     assert.ok(restored.restoredFromRev >= 1);
+    assert.ok(restored.newRev > deleted.deletedRev);
     assert.equal(existsSync(file), true);
 
     const reloaded = JSON.parse(readFileSync(file, "utf-8"));
     assert.equal(reloaded.meta.slug, "test-project");
+    assert.equal(reloaded.meta.rev, restored.newRev);
+
+    const revisions = store.revisions("test-project");
+    assert.ok(revisions.some((entry) => entry.action === "delete"));
+    assert.ok(
+      revisions.some(
+        (entry) =>
+          entry.action === "restore" && entry.restoredFromRev === restored.restoredFromRev
+      )
+    );
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
@@ -122,7 +136,8 @@ test("restoreProject honors an explicit rev from snapshots", async () => {
     assert.equal(restored.restoredFromRev, 1);
 
     const rehydrated = JSON.parse(readFileSync(file, "utf-8"));
-    assert.equal(rehydrated.meta.rev, 1);
+    assert.equal(rehydrated.meta.rev, restored.newRev);
+    assert.equal(rehydrated.meta.scratchpad || "", "");
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
@@ -166,6 +181,12 @@ test("restore endpoint + CLI round-trip through the running hub", async () => {
     assert.equal(del.status, 200);
     assert.equal(existsSync(join(workspace, "trackers", "test-project.json")), false);
 
+    const deletedHistory = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/history`);
+    assert.equal(deletedHistory.status, 200);
+    const deletedHistoryBody = await deletedHistory.json();
+    assert.equal(deletedHistoryBody.deleted, true);
+    assert.ok(deletedHistoryBody.events.some((entry) => entry.action === "delete"));
+
     const restore = runCli(["restore", "test-project", "--path", workspace, "--port", String(port)]);
     assert.equal(restore.status, 0, restore.stderr || restore.stdout);
     assert.match(restore.stdout, /Restored test-project/);
@@ -175,6 +196,12 @@ test("restore endpoint + CLI round-trip through the running hub", async () => {
     assert.equal(read.status, 200);
     const body = await read.json();
     assert.equal(body.data.meta.slug, "test-project");
+
+    const history = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/history`);
+    assert.equal(history.status, 200);
+    const historyBody = await history.json();
+    assert.ok(historyBody.events.some((entry) => entry.action === "delete"));
+    assert.ok(historyBody.events.some((entry) => entry.action === "restore"));
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

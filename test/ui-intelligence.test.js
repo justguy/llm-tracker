@@ -14,7 +14,9 @@ test("defaultChangedFromRev clamps at zero", () => {
   assert.equal(defaultChangedFromRev(18, 10), 8);
 });
 
-test("historyActionText reports undo, redo, and rollback events", () => {
+test("historyActionText reports delete, restore, undo, redo, and rollback events", () => {
+  assert.equal(historyActionText({ action: "delete", deletedFromRev: 14 }), "delete after rev 14");
+  assert.equal(historyActionText({ action: "restore", restoredFromRev: 7 }), "restore from rev 7");
   assert.equal(historyActionText({ action: "undo", undoOfRev: 14 }), "undo of rev 14");
   assert.equal(historyActionText({ action: "redo", redoOfRev: 14 }), "redo of rev 14");
   assert.equal(historyActionText({ rolledBackTo: 7 }), "rollback to rev 7");

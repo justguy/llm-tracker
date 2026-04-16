@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { randomBytes } from "node:crypto";
 import { readFileSync, existsSync, writeFileSync, renameSync, readdirSync } from "node:fs";
 import { join, extname, dirname } from "node:path";
 import { createRequire } from "node:module";
@@ -12,6 +13,8 @@ import { Store, slugFromFile } from "./store.js";
 
 const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const UI_SESSION_COOKIE = "llm_tracker_ui_session";
+const UI_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 const MAX_SCRATCHPAD_LEN = 5000;
 const MAX_COMMENT_LEN = 500;
@@ -20,6 +23,32 @@ const MAX_BLOCKER_REASON_LEN = 2000;
 function isLocalOrigin(origin) {
   if (!origin) return false;
   return LOCAL_ORIGIN_RE.test(origin);
+}
+
+function requestOrigin(req) {
+  const host = req.headers.host;
+  if (!host) return null;
+  return `http://${host}`;
+}
+
+function isAllowedMutatingOrigin(req, origin) {
+  if (!origin) return false;
+  if (isLocalOrigin(origin)) return true;
+  return origin === requestOrigin(req);
+}
+
+function parseCookies(header) {
+  const out = {};
+  if (!header || typeof header !== "string") return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (!key) continue;
+    out[key] = decodeURIComponent(value);
+  }
+  return out;
 }
 
 function patchTaskEntries(patch) {
@@ -112,6 +141,7 @@ function snapshot(store) {
 export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   const store = new Store(workspace);
   const app = express();
+  const uiSessions = new Map();
 
   const bindHost = host || process.env.LLM_TRACKER_HOST || "127.0.0.1";
   const bearerToken =
@@ -119,20 +149,48 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       ? token
       : process.env.LLM_TRACKER_TOKEN || "";
 
+  const pruneUiSessions = () => {
+    const now = Date.now();
+    for (const [id, expiresAt] of uiSessions) {
+      if (expiresAt <= now) uiSessions.delete(id);
+    }
+  };
+
+  const issueUiSession = () => {
+    pruneUiSessions();
+    const id = randomBytes(24).toString("hex");
+    uiSessions.set(id, Date.now() + UI_SESSION_TTL_MS);
+    return id;
+  };
+
+  const hasValidUiSession = (req) => {
+    pruneUiSessions();
+    const cookies = parseCookies(req.headers.cookie);
+    const id = cookies[UI_SESSION_COOKIE];
+    if (!id) return false;
+    const expiresAt = uiSessions.get(id);
+    if (!expiresAt) return false;
+    if (expiresAt <= Date.now()) {
+      uiSessions.delete(id);
+      return false;
+    }
+    return true;
+  };
+
   // CSRF / cross-origin guard. The hub binds to loopback by default, but a
   // malicious web page in a local browser can still fire cross-origin POSTs
-  // at localhost. Reject any mutating request whose Origin/Referer is not
-  // loopback. Browser fetch always attaches Origin on cross-origin POST, so
-  // this is a strict check. CLI/MCP/curl requests usually have no Origin at
-  // all and are treated as trusted.
+  // at the hub. Reject any mutating request whose Origin/Referer is neither
+  // loopback nor the exact origin serving this request. Browser fetch always
+  // attaches Origin on cross-origin POST, so this is a strict check. CLI/MCP/
+  // curl requests usually have no Origin at all and are treated as trusted.
   app.use((req, res, next) => {
     if (SAFE_METHODS.has(req.method)) return next();
     const origin = req.headers.origin;
     if (origin) {
-      if (!isLocalOrigin(origin)) {
+      if (!isAllowedMutatingOrigin(req, origin)) {
         return res.status(403).json({
           error: "cross-origin request blocked",
-          hint: "Mutating requests must come from localhost or 127.0.0.1."
+          hint: "Mutating requests must come from this hub origin or a loopback origin."
         });
       }
       return next();
@@ -141,10 +199,10 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     if (referer) {
       try {
         const u = new URL(referer);
-        if (!isLocalOrigin(u.origin)) {
+        if (!isAllowedMutatingOrigin(req, u.origin)) {
           return res.status(403).json({
             error: "cross-origin request blocked",
-            hint: "Mutating requests must come from localhost or 127.0.0.1."
+            hint: "Mutating requests must come from this hub origin or a loopback origin."
           });
         }
       } catch {}
@@ -154,19 +212,22 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
   // Optional bearer-token guard. When LLM_TRACKER_TOKEN is set, every mutating
   // request must carry a matching Authorization: Bearer <token> header (or
-  // X-LLM-Tracker-Token). The UI, when same-origin, reads the token from the
-  // injected window global and adds it automatically (see index.html handler).
+  // X-LLM-Tracker-Token). Same-origin browser UI requests are also allowed via
+  // a short-lived HttpOnly session cookie minted from the UI shell route, so
+  // the raw bearer token never has to be exposed to page scripts.
   if (bearerToken) {
     app.use((req, res, next) => {
       if (SAFE_METHODS.has(req.method)) return next();
       const auth = req.headers.authorization || "";
       const m = /^Bearer\s+(.+)$/i.exec(auth);
       const x = req.headers["x-llm-tracker-token"];
-      if ((m && m[1] === bearerToken) || x === bearerToken) return next();
+      if ((m && m[1] === bearerToken) || x === bearerToken || hasValidUiSession(req)) {
+        return next();
+      }
       return res.status(401).json({
-        error: "missing or invalid bearer token",
+        error: "missing or invalid auth",
         hint:
-          "Set Authorization: Bearer $LLM_TRACKER_TOKEN (or X-LLM-Tracker-Token header) on mutating requests."
+          "Set Authorization: Bearer $LLM_TRACKER_TOKEN (or X-LLM-Tracker-Token header) on mutating requests, or load the browser UI from this hub origin first."
       });
     });
   }
@@ -268,7 +329,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   app.delete("/api/projects/:slug", async (req, res) => {
     const r = await store.deleteProject(req.params.slug);
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
-    res.json({ ok: true, slug: req.params.slug });
+    broadcast({ type: "REMOVE", slug: req.params.slug });
+    res.json({ ok: true, slug: req.params.slug, rev: r.deletedRev ?? null });
   });
 
   app.post("/api/projects/:slug/restore", async (req, res) => {
@@ -279,15 +341,24 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     }
     const result = await store.restoreProject(req.params.slug, { rev: parsedRev });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
-    const loaded = reloadProject(req.params.slug);
-    const rehydratedRev = store.get(req.params.slug)?.rev ?? null;
+    const entry = store.get(req.params.slug);
+    primeSemanticIndex({
+      workspace,
+      slug: req.params.slug,
+      entry
+    });
+    broadcast({
+      type: "UPDATE",
+      slug: req.params.slug,
+      project: projectPayload(req.params.slug, entry)
+    });
     res.json({
       ok: true,
       slug: req.params.slug,
       restoredFromRev: result.restoredFromRev,
-      rev: rehydratedRev,
+      rev: entry?.rev ?? result.newRev ?? null,
       file: result.file,
-      loaded: !!loaded?.ok
+      loaded: !!entry
     });
   });
 
@@ -496,14 +567,17 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     if (!existsSync(file) || !file.startsWith(uiDir)) return next();
     const type = MIME[extname(file)] || "application/octet-stream";
     res.setHeader("Content-Type", type);
-    // When a bearer token is active, inject it into the UI shell so
-    // same-origin browser fetches can authenticate. Cross-origin JS cannot
-    // read the HTML body under default SOP, so this does not leak the token.
     if (bearerToken && file.endsWith("index.html")) {
-      let html = readFileSync(file, "utf-8");
-      const snippet = `<script>window.__LLM_TRACKER_TOKEN=${JSON.stringify(bearerToken)};</script>`;
-      html = html.replace(/<head>/i, (match) => `${match}\n${snippet}`);
-      return res.send(html);
+      const existing = parseCookies(request.headers.cookie)[UI_SESSION_COOKIE];
+      const reuse = existing && uiSessions.get(existing) > Date.now();
+      const sessionId = reuse ? existing : issueUiSession();
+      res.setHeader(
+        "Set-Cookie",
+        `${UI_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(
+          UI_SESSION_TTL_MS / 1000
+        )}`
+      );
+      res.setHeader("Cache-Control", "no-store");
     }
     res.send(readFileSync(file));
   });
@@ -786,7 +860,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       console.log(`   Help:       ${url}/help`);
       console.log(`   README:     ${readmePath}`);
       if (bearerToken) {
-        console.log(`   Auth:       bearer token required for mutating requests`);
+        console.log(`   Auth:       bearer header or local UI session required for mutating requests`);
       }
       console.log("─────────────────────────────────────────────────────────");
       console.log(" Paste into your LLM to register a project:");

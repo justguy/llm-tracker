@@ -32,6 +32,12 @@ export function isIntelModeLoading(cache = {}, errors = {}, mode = null) {
 }
 
 export function historyActionText(entry = {}) {
+  if (entry.action === "delete") {
+    return entry.deletedFromRev ? `delete after rev ${entry.deletedFromRev}` : "delete";
+  }
+  if (entry.action === "restore") {
+    return entry.restoredFromRev ? `restore from rev ${entry.restoredFromRev}` : "restore";
+  }
   if (entry.action === "undo") {
     return entry.undoOfRev ? `undo of rev ${entry.undoOfRev}` : "undo";
   }

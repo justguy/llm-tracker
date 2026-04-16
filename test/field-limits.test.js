@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { Store, trackerPath } from "../hub/store.js";
 import { validProject } from "./fixtures.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -102,6 +103,35 @@ test("oversized task.comment in patch is rejected at the route layer", async () 
   }
 });
 
+test("oversized task.blocker_reason in patch is rejected at the route layer", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const big = "b".repeat(2100);
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tasks: { "t1": { blocker_reason: big } } })
+    });
+    assert.equal(res.status, 413);
+    const body = await res.json();
+    assert.equal(body.type, "field.too.large");
+    assert.match(body.field, /tasks\[t1\]\.blocker_reason/);
+    assert.equal(body.max, 2000);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("JSON body limit is enforced with machine-readable response", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();
@@ -133,6 +163,27 @@ test("JSON body limit is enforced with machine-readable response", async () => {
     assert.match(body.error || "", /too large|body/i);
   } finally {
     stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("oversized blocker_reason is rejected in store validation so file patch mode cannot bypass it", async () => {
+  const workspace = setupWorkspace();
+  try {
+    const store = new Store(workspace);
+    const file = trackerPath(workspace, "test-project");
+    writeFileSync(file, JSON.stringify(validProject(), null, 2));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      tasks: {
+        t1: { blocker_reason: "b".repeat(2100) }
+      }
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.match(res.message, /blocker_reason/);
+  } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
 });

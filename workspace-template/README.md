@@ -25,9 +25,9 @@ Before you write anything:
 ### Local auth model (read this before your first write)
 
 - The hub binds to `127.0.0.1` only by default. It is not reachable from other hosts.
-- Mutating requests (`POST` / `PUT` / `PATCH` / `DELETE`) with a non-loopback `Origin` or `Referer` header get `403`. CLI tools and MCP clients that send no `Origin` are allowed.
-- If the operator set `LLM_TRACKER_TOKEN`, every mutating request must carry `Authorization: Bearer <token>` (or `X-LLM-Tracker-Token: <token>`). The workspace `llm-tracker` CLI reads it from the same env var.
-- Default JSON body limit is 1 MB. Oversized `meta.scratchpad` (> 5000 chars) and `task.comment` (> 500 chars) are rejected before merge.
+- Mutating requests (`POST` / `PUT` / `PATCH` / `DELETE`) with an `Origin` or `Referer` that is neither loopback nor the exact hub origin serving that request get `403`. CLI tools and MCP clients that send no `Origin` are allowed.
+- If the operator set `LLM_TRACKER_TOKEN`, every mutating request must carry `Authorization: Bearer <token>` (or `X-LLM-Tracker-Token: <token>`). The workspace `llm-tracker` CLI reads it from the same env var. The browser UI authenticates via a short-lived HttpOnly same-origin session cookie; the raw token is not exposed to page JavaScript.
+- Default JSON body limit is 1 MB. Oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) are rejected before merge.
 - Deleted projects can be brought back by a human with `llm-tracker restore <slug>` or `POST /api/projects/<slug>/restore`. Agents must not call this unless explicitly asked.
 
 ### Supported topologies

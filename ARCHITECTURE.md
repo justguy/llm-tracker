@@ -7,7 +7,7 @@ Deep-dive on the internals. For the marketing hook and installation, see [README
 ## Pieces
 
 ```
-bin/llm-tracker.js       CLI entrypoint: init | run | daemon | mcp | status | blockers | changed | search | fuzzy | pick | next | since | rollback | link
+bin/llm-tracker.js       CLI entrypoint: init | run | daemon | mcp | status | blockers | changed | search | fuzzy | pick | next | since | rollback | restore | link
 bin/mcp-server.js        Stdio MCP server exposing the deterministic tracker surfaces as `tracker_*` tools
 bin/workspace-client.js  Shared workspace/port resolution + local hub HTTP client
 bin/commands/shared.js   Shared CLI helpers for hub-backed command modules
@@ -17,9 +17,9 @@ bin/commands/search.js   `llm-tracker search` semantic-search formatter + HTTP c
 bin/commands/fuzzy.js    `llm-tracker fuzzy` / `fuzzy-search` lexical-search formatter + HTTP client wrapper
 bin/commands/pick.js     `llm-tracker pick` / `claim` formatter + HTTP client wrapper
 bin/commands/next.js     `llm-tracker next` formatter + HTTP client wrapper
-hub/server.js            Express + WebSocket + chokidar wiring + vendor routes
+hub/server.js            Express + WebSocket + chokidar wiring + local auth/origin guards + vendor routes
 hub/routes/intelligence.js Registers deterministic task-intelligence routes
-hub/store.js             In-memory state, per-slug lock, applyPatch/applyMove/applyCollapse/rollback/deleteTask/deleteProject/symlinkProject
+hub/store.js             In-memory state, per-slug lock, applyPatch/applyMove/applyCollapse/rollback/deleteTask/deleteProject/restoreProject/symlinkProject
 hub/merge.js             Hub-authoritative merge: preserves task order, refuses deletions, keeps collapsed, drops updatedAt/rev
 hub/versioning.js        computeDelta (structured field-level diff), summarize, hasChanges
 hub/snapshots.js         Per-rev .snapshots/<slug>/<rev>.json + .history/<slug>.jsonl append-only log
@@ -64,7 +64,7 @@ workspace-template/      Copied on `init` into the workspace folder. README.md i
 ├── .runtime/daemon.json        # optional background-hub pid/port metadata
 ├── .runtime/daemon.log         # optional background-hub stdout/stderr
 ├── .snapshots/<slug>/<rev>.json # hub-managed full snapshot per rev (rollback source)
-└── .history/<slug>.jsonl       # append-only event log: {rev, ts, delta, summary}
+└── .history/<slug>.jsonl       # append-only event log: change/delete/restore/undo/redo/rollback events
 ```
 
 ---
@@ -112,7 +112,7 @@ Ordered by array index. Hub owns the order.
 | `effort`         | `xs`\|`s`\|`m`\|`l`\|`xl`\|null                |          | Optional sizing hint for deterministic ranking and agent planning. |
 | `related`        | array of task ids \| null                      |          | Optional soft links for future retrieval/search flows. |
 | `comment`        | string \| null (≤ 500 chars)                   |          | One free-form note per task. Rendered as a `[C]` badge with a hover popover. |
-| `blocker_reason` | string \| null                                 |          | One sentence when the LLM is stuck.                   |
+| `blocker_reason` | string \| null (≤ 2000 chars)                  |          | One sentence when the LLM is stuck.                   |
 | `definition_of_done` | array of strings \| null                   |          | Optional completion contract for future execution / verify flows. |
 | `constraints`    | array of strings \| null                       |          | Optional execution guardrails.                        |
 | `expected_changes` | array of strings \| null                     |          | Optional hint about files, modules, or artifacts likely to change. |
@@ -248,8 +248,9 @@ Design rule:
 - `GET /api/projects/:slug/fuzzy-search?q=<query>` runs deterministic fuzzy lexical matching without embeddings.
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
-- `GET /api/projects/:slug/history?fromRev=N&limit=50` returns the append-only revision log window, including rollback/undo/redo metadata.
+- `GET /api/projects/:slug/history?fromRev=N&limit=50` returns the append-only revision log window, including delete/restore/rollback/undo/redo metadata.
 - `POST /api/projects/:slug/pick` atomically claims a task under the hub lock. If `taskId` is omitted, the hub selects the top ready task from the deterministic `next` ranking. `POST /api/projects/:slug/claim` is an alias.
+- `POST /api/projects/:slug/restore` re-registers a deleted project from the latest snapshot (or an explicit rev) as a fresh audited rev.
 - `POST /api/projects/:slug/undo` restores the previous effective project state under the hub lock.
 - `POST /api/projects/:slug/redo` reapplies the most recent undo under the hub lock.
 
@@ -272,7 +273,9 @@ Every accepted write:
 
 1. Bumps `meta.rev` (monotonic integer, persisted in the file).
 2. Writes a full snapshot to `.snapshots/<slug>/<rev>.json`.
-3. Appends `{rev, ts, delta, summary}` to `.history/<slug>.jsonl`.
+3. Appends an event to `.history/<slug>.jsonl`.
+
+Normal change events carry `{rev, ts, delta, summary}`. Administrative events such as `delete`, `restore`, `undo`, `redo`, and `rollback` add action-specific metadata such as `deletedFromRev`, `restoredFromRev`, `undoOfRev`, `redoOfRev`, `rolledBackFrom`, and `rolledBackTo`.
 
 The **delta** is a structured field-level diff:
 
@@ -388,7 +391,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects`                                     | GET    | List of projects with derived counts.                      |
 | `/api/projects/:slug`                               | GET    | Full project state.                                        |
 | `/api/projects/:slug`                               | PUT    | Create or replace a project (full body).                   |
-| `/api/projects/:slug`                               | DELETE | Remove the tracker file. Snapshots/history preserved.      |
+| `/api/projects/:slug`                               | DELETE | Remove the tracker file and append a `delete` history event. |
 | `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 tasks for agent pickup.  |
 | `/api/projects/:slug/search`                        | GET    | Semantic local-model task search for feature questions.    |
 | `/api/projects/:slug/fuzzy-search`                  | GET    | Deterministic fuzzy lexical task search.                   |
@@ -399,9 +402,10 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug/decisions`                     | GET    | Recent decision notes from task comments.                 |
 | `/api/projects/:slug/blockers`                      | GET    | Structural blockers: blocked tasks plus their blockers.    |
 | `/api/projects/:slug/changed`                       | GET    | Changed tasks since `fromRev`, grouped by task.            |
-| `/api/projects/:slug/history`                       | GET    | Recent revision-log window with rollback/undo/redo metadata. |
+| `/api/projects/:slug/history`                       | GET    | Recent revision-log window with delete/restore/rollback/undo/redo metadata. |
 | `/api/projects/:slug/pick`                          | POST   | Atomic task claim. Defaults to the top ready task.         |
 | `/api/projects/:slug/claim`                         | POST   | Alias for `/pick`.                                         |
+| `/api/projects/:slug/restore`                       | POST   | Restore a deleted project from snapshots as a fresh rev.   |
 | `/api/projects/:slug/undo`                          | POST   | Restore the previous effective project state.              |
 | `/api/projects/:slug/redo`                          | POST   | Reapply the most recent undo.                              |
 | `/api/projects/:slug/patch`                         | POST   | Partial update merged with existing state.                 |
@@ -418,7 +422,14 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/README.md`                                        | GET    | Serve the workspace README.                                |
 | `/ws`                                               | WS     | WebSocket: SNAPSHOT on connect, UPDATE/ERROR/REMOVE on change. |
 
-All errors return JSON: `{error, type?, hint?}`. Body limit: 16 MB.
+All errors return JSON: `{error, type?, hint?}`. Default body limit: 1 MB (override with `LLM_TRACKER_BODY_LIMIT`).
+
+### Local auth and origin model
+
+- The hub binds to `127.0.0.1` by default. Override with `LLM_TRACKER_HOST` if you intentionally want a different host bind.
+- Mutating requests are rejected with `403` unless they are either origin-less (CLI / MCP / curl), loopback-origin, or exactly same-origin with the host that served the request.
+- When `LLM_TRACKER_TOKEN` is set, mutating requests must send `Authorization: Bearer <token>` (or `X-LLM-Tracker-Token`) unless they come from the browser UI's short-lived HttpOnly same-origin session.
+- The raw bearer token is not injected into `index.html`.
 
 ---
 
@@ -517,7 +528,7 @@ Creating a second accidental workspace is the wrong fix because it forks the sou
 
 ### Body parsing & error format
 
-Express JSON body limit is **16 MB**. Any body-parser failure (too-large, malformed JSON) is handled by a custom error middleware that returns `{error, type, hint}` instead of Express's default HTML error page — so LLMs always get a machine-readable response.
+Express JSON body limit is **1 MB** by default and can be overridden with `LLM_TRACKER_BODY_LIMIT`. Route-level guards reject oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) before merge. Any body-parser failure (too-large, malformed JSON) is handled by a custom error middleware that returns `{error, type, hint}` instead of Express's default HTML error page — so LLMs always get a machine-readable response.
 
 ### Cold-start resume
 

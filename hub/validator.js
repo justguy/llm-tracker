@@ -88,7 +88,7 @@ const schema = {
             type: ["string", "null"],
             maxLength: 500
           },
-          blocker_reason: { type: ["string", "null"] },
+          blocker_reason: { type: ["string", "null"], maxLength: 2000 },
           definition_of_done: {
             type: ["array", "null"],
             items: { type: "string" }
