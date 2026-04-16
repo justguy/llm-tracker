@@ -9,7 +9,6 @@ import { cmdChanged } from "./commands/changed.js";
 import { cmdDecisions } from "./commands/decisions.js";
 import { cmdExecute } from "./commands/execute.js";
 import { cmdFuzzy } from "./commands/fuzzy.js";
-import { startMcpServer } from "./mcp-server.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
 import { cmdReload } from "./commands/reload.js";
@@ -520,7 +519,6 @@ async function main() {
   if (cmd === "rollback") return cmdRollback(args);
   if (cmd === "since") return cmdSince(args);
   if (cmd === "link") return cmdLink(args);
-  if (cmd === "mcp") return startMcpServer({ workspace: args.flags.path, portFlag: args.flags.port });
   if (cmd === "daemon") return cmdDaemon(args);
   if (cmd === "help" || args.flags.help) {
     console.log(`llm-tracker — file-system-as-database project tracker
@@ -534,7 +532,6 @@ Usage:
   llm-tracker daemon restart [--path <dir>] [--port N] Restart the background daemon
   llm-tracker daemon status [--path <dir>]             Show daemon status
   llm-tracker daemon logs [--path <dir>] [--lines N]   Print recent daemon logs
-  llm-tracker mcp [--path <dir>] [--port N]            Start the stdio MCP server
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
   llm-tracker reload [<slug>] [--json]                 Reload one or all trackers from disk (requires hub)
   llm-tracker brief <slug> <taskId> [--json]           Print a task brief pack (requires hub)
@@ -565,6 +562,10 @@ Port priority (first match wins):
   4. Default ${DEFAULT_PORT}
 `);
     return;
+  }
+  if (cmd) {
+    console.error(`Unknown command "${cmd}". Use 'llm-tracker help'.`);
+    process.exit(1);
   }
   if (daemonFlag) return cmdDaemonStart(args);
   return cmdRun(args);
