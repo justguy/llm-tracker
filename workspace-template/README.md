@@ -169,6 +169,45 @@ Tasks are ordered by array index. Hub owns the order.
 
 Prefer `references[]` for new data. Legacy `reference` remains valid for backward compatibility and is normalized alongside `references[]` when the hub builds ranked `next` responses.
 
+### 4.3a Migrating older trackers
+
+If this workspace or tracker file started on `v0.1.1` or any pre-`0.2.0` setup:
+
+- you do **not** need a bulk schema rewrite
+- old tracker files remain valid
+- legacy `reference` still works
+- legacy `status: "partial"` is normalized to `in_progress`
+
+When backfilling older tasks, write only author-owned metadata:
+
+- `references[]`
+- `effort`
+- `related`
+- `comment`
+- `definition_of_done`
+- `constraints`
+- `expected_changes`
+- `allowed_paths`
+- `approval_required_for`
+
+Do **not** write derived fields:
+
+- `ready`
+- `blocked_kind`
+- `blocking_on`
+- `requires_approval`
+- `lastTouchedRev`
+- `updatedAt`
+- `rev`
+
+Backfill active tasks first:
+
+- `in_progress`
+- `p0` / `p1`
+- blocked tasks missing context
+
+Skip low-value bulk rewrites of old completed tasks unless humans still ask about them.
+
 ### 4.4 Canonical example
 
 ```json

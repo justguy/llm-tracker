@@ -317,6 +317,8 @@ Two write modes:
 
 Full schema, merge semantics, field ownership, versioning, rollback, and the whole LLM-facing contract → **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 
+Migrating an older `0.1.x` workspace or tracker set to the `0.2.0` contract, including agent backfill guidance for the new fields → **[MIGRATING.md](./MIGRATING.md)**.
+
 ---
 
 ## How it looks under the hood
