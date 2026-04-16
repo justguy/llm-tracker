@@ -8,10 +8,12 @@ import { cmdBrief } from "./commands/brief.js";
 import { cmdChanged } from "./commands/changed.js";
 import { cmdDecisions } from "./commands/decisions.js";
 import { cmdExecute } from "./commands/execute.js";
+import { cmdFuzzy } from "./commands/fuzzy.js";
 import { startMcpServer } from "./mcp-server.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
 import { cmdReload } from "./commands/reload.js";
+import { cmdSearch } from "./commands/search.js";
 import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
 import { DEFAULT_PORT, httpRequest, resolvePort, resolveWorkspace } from "./workspace-client.js";
@@ -510,6 +512,8 @@ async function main() {
   if (cmd === "verify") return cmdVerify(args, { resolveWorkspace, httpRequest });
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
+  if (cmd === "search") return cmdSearch(args, { resolveWorkspace, httpRequest });
+  if (cmd === "fuzzy" || cmd === "fuzzy-search") return cmdFuzzy(args, { resolveWorkspace, httpRequest });
   if (cmd === "reload") return cmdReload(args, { resolveWorkspace, httpRequest });
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
   if (cmd === "next") return cmdNext(args, { resolveWorkspace, httpRequest });
@@ -540,6 +544,8 @@ Usage:
   llm-tracker verify <slug> <taskId> [--json]          Print a deterministic verification pack (requires hub)
   llm-tracker blockers <slug> [--json]                 Print structurally blocked tasks (requires hub)
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
+  llm-tracker search <slug> <query> [--json] [--limit N] Semantic task search with local embeddings (requires hub)
+  llm-tracker fuzzy|fuzzy-search <slug> <query> [--json] [--limit N]  Fuzzy lexical task search (requires hub)
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)
   llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)

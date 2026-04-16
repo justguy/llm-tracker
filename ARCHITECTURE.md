@@ -7,12 +7,14 @@ Deep-dive on the internals. For the marketing hook and installation, see [README
 ## Pieces
 
 ```
-bin/llm-tracker.js       CLI entrypoint: init | run | daemon | mcp | status | blockers | changed | pick | next | since | rollback | link
+bin/llm-tracker.js       CLI entrypoint: init | run | daemon | mcp | status | blockers | changed | search | fuzzy | pick | next | since | rollback | link
 bin/mcp-server.js        Stdio MCP server exposing the deterministic tracker surfaces as `tracker_*` tools
 bin/workspace-client.js  Shared workspace/port resolution + local hub HTTP client
 bin/commands/shared.js   Shared CLI helpers for hub-backed command modules
 bin/commands/blockers.js `llm-tracker blockers` formatter + HTTP client wrapper
 bin/commands/changed.js  `llm-tracker changed` formatter + HTTP client wrapper
+bin/commands/search.js   `llm-tracker search` semantic-search formatter + HTTP client wrapper
+bin/commands/fuzzy.js    `llm-tracker fuzzy` / `fuzzy-search` lexical-search formatter + HTTP client wrapper
 bin/commands/pick.js     `llm-tracker pick` / `claim` formatter + HTTP client wrapper
 bin/commands/next.js     `llm-tracker next` formatter + HTTP client wrapper
 hub/server.js            Express + WebSocket + chokidar wiring + vendor routes
@@ -29,6 +31,7 @@ hub/changed.js           Changed-task payload builder from append-only history
 hub/pick.js              Atomic pick/claim selection + response shaping
 hub/references.js        Shared reference + effort normalization helpers
 hub/next.js              Deterministic next-task ranking + shortlist payload builder
+hub/search.js            Semantic `/search` + deterministic `/fuzzy-search` builders
 hub/snippets.js          Reference parsing + cached snippet extraction under .runtime/
 hub/briefs.js            Deterministic task brief pack builder
 hub/why.js               Deterministic task rationale pack builder
@@ -193,6 +196,8 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 - `tracker_projects_status`
 - `tracker_project_status`
 - `tracker_next`
+- `tracker_search`
+- `tracker_fuzzy_search`
 - `tracker_brief`
 - `tracker_why`
 - `tracker_decisions`
@@ -218,6 +223,7 @@ Prompts:
 
 - `tracker_start_here`
 - `tracker_pick_next`
+- `tracker_search_project`
 - `tracker_task_context`
 - `tracker_execute_task`
 - `tracker_verify_task`
@@ -238,6 +244,8 @@ Design rule:
 - `GET /api/projects/:slug/decisions?limit=20` returns recent decision notes derived from task comments in deterministic order.
 - `GET /api/projects/:slug/tasks/:taskId/execute` returns the action pack: readiness, explicit contract fields, references, snippets, and recent task history.
 - `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources.
+- `GET /api/projects/:slug/search?q=<query>` runs semantic local-model search through `@huggingface/transformers` + `Xenova/all-MiniLM-L6-v2`.
+- `GET /api/projects/:slug/fuzzy-search?q=<query>` runs deterministic fuzzy lexical matching without embeddings.
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
 - `GET /api/projects/:slug/history?fromRev=N&limit=50` returns the append-only revision log window, including rollback/undo/redo metadata.
@@ -382,6 +390,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug`                               | PUT    | Create or replace a project (full body).                   |
 | `/api/projects/:slug`                               | DELETE | Remove the tracker file. Snapshots/history preserved.      |
 | `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 tasks for agent pickup.  |
+| `/api/projects/:slug/search`                        | GET    | Semantic local-model task search for feature questions.    |
+| `/api/projects/:slug/fuzzy-search`                  | GET    | Deterministic fuzzy lexical task search.                   |
 | `/api/projects/:slug/tasks/:taskId/brief`           | GET    | Focused task-context brief pack.                          |
 | `/api/projects/:slug/tasks/:taskId/why`             | GET    | Focused task-rationale pack.                              |
 | `/api/projects/:slug/tasks/:taskId/execute`         | GET    | Focused execution pack.                                   |

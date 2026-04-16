@@ -43,13 +43,14 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **Hub enforces** — task array order, task existence (no accidental deletion), human UI state (`meta.swimlanes[i].collapsed`), version stamps (`updatedAt`, `rev`).
 - **You write freely** — `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
+- **When the human asks a feature-shaped or fuzzy question**, prefer `GET /api/projects/<slug>/search?q=...` for semantic search or `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic lexical matching before rereading the full tracker.
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
 - **When you need the task rationale**, prefer `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
 - **When you need prior decision memory**, prefer `GET /api/projects/<slug>/decisions` or `llm-tracker decisions <slug>`.
 - **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
-- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
+- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
 - MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
 - If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
 - If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
@@ -269,7 +270,7 @@ The shortlist is deterministic and capped at 5 tasks:
 
 Use this instead of scanning the whole tracker just to choose work.
 
-If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
+If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
 
 Daemon rule:
 
@@ -288,6 +289,7 @@ Helpful MCP prompts:
 
 - `tracker_start_here`
 - `tracker_pick_next`
+- `tracker_search_project`
 - `tracker_task_context`
 - `tracker_execute_task`
 - `tracker_verify_task`
@@ -300,6 +302,8 @@ Related deterministic reads:
 - `GET /api/projects/<slug>/decisions?limit=20` for the current project's recent decision notes
 - `GET /api/projects/<slug>/tasks/<taskId>/execute` for one deterministic execution pack: readiness, guardrails, expected changes, references, and snippets
 - `GET /api/projects/<slug>/tasks/<taskId>/verify` for one deterministic verification pack: explicit checks plus real evidence sources from tracker state, history, references, and snippets
+- `GET /api/projects/<slug>/search?q=<query>` for semantic local-model search when the question is feature-shaped rather than task-id-shaped
+- `GET /api/projects/<slug>/fuzzy-search?q=<query>` for deterministic fuzzy lexical fallback when you want approximate string matching without embeddings
 - `GET /api/projects/<slug>/blockers` for structural blockers and what is blocking them
 - `GET /api/projects/<slug>/changed?fromRev=<n>&limit=20` for changed tasks since a rev, without replaying raw history yourself
 - `GET /api/projects/<slug>/history?limit=50` for the append-only revision log with structured rollback/undo/redo metadata
@@ -330,6 +334,28 @@ The brief pack is deterministic and capped:
 - up to 3 recent history entries for that task
 
 Use this before broad repo reads. The intended flow is `/help` → `next` → `brief`/`why` → `execute` → `pick` → `verify`.
+
+### 6.2b Answering fuzzy feature questions
+
+When the human asks "what about the feature with the..." or you need to recover a task from concept-language instead of a task id, call:
+
+```bash
+curl "http://localhost:<PORT>/api/projects/<slug>/search?q=<query>"
+curl "http://localhost:<PORT>/api/projects/<slug>/fuzzy-search?q=<query>"
+```
+
+or:
+
+```bash
+llm-tracker search <slug> <query>
+llm-tracker fuzzy-search <slug> <query>
+```
+
+If MCP is configured, the matching tools are `tracker_search` and `tracker_fuzzy_search`.
+
+- `search` is semantic local-model search backed by `@huggingface/transformers` and `Xenova/all-MiniLM-L6-v2`
+- `fuzzy-search` is deterministic lexical fallback
+- use the returned task ids to pivot into `brief` or `why`
 
 ### 6.3 Understanding why a task exists
 
@@ -675,6 +701,8 @@ Error shape:
 | `llm-tracker verify <slug> <taskId> [--json]`             | Deterministic verification checklist with tracker-backed evidence.             |    **yes**   |
 | `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
 | `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
+| `llm-tracker search <slug> <query> [--json] [--limit N]` | Semantic local-model search for feature-oriented questions.                  |    **yes**   |
+| `llm-tracker fuzzy-search <slug> <query> [--json] [--limit N]` | Deterministic fuzzy lexical search.                                      |    **yes**   |
 | `llm-tracker reload [<slug>] [--json]`                    | Reload one or all tracker files from disk into the running hub.               |    **yes**   |
 | `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
 | `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |

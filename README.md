@@ -4,13 +4,15 @@
 
 [![npm](https://img.shields.io/npm/v/llm-tracker.svg)](https://www.npmjs.com/package/llm-tracker)
 [![CI](https://github.com/justguy/llm-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/justguy/llm-tracker/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-amber.svg)](LICENSE)
+[![License: Apache%202.0](https://img.shields.io/badge/License-Apache%202.0-amber.svg)](LICENSE)
 
 Stop forcing your LLMs to re-read and rewrite massive architecture files just to update a status. `llm-tracker` is a **100 % local** mission-control center that bridges the gap between complex agentic workflows and human oversight.
 
 It's a file-system-as-database tracker. Your LLMs update project states with tiny HTTP or file-based patches, and the local hub renders a live, **Bloomberg-terminal-style** priority matrix so you can see exactly what your agents are doing at a glance.
 
 When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker. The ranking prefers bounded actionable work over aggregate roadmap/container rows, and prefers continuing active bounded work over starting a fresh bounded task.
+
+When a human or agent asks "what about the feature with the..." instead of naming a task id, the hub now exposes both `GET /api/projects/<slug>/search?q=...` for local embedding-backed semantic search and `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic fuzzy lexical matching. The UI keeps the existing exact board filter and adds a separate `[FUZZY]` mode that highlights deterministic fuzzy matches in context.
 
 When an agent already knows the task id and needs focused context, it can now make one call to `npx llm-tracker brief <slug> <task-id>` or `GET /api/projects/<slug>/tasks/<taskId>/brief` and get a capped pack instead of rereading the tracker, docs, and code by hand.
 
@@ -22,11 +24,11 @@ When an agent needs the current contract for a running hub, it should call `GET 
 
 If your coding client supports MCP, `npx llm-tracker mcp --path ~/.llm-tracker` exposes deterministic `tracker_*` tools plus preloadable resources and prompts so agents can stop shelling out to `curl` and stop reopening the README by hand. MCP read tools and resources work directly from workspace files; MCP write tools still require the hub or daemon to be running.
 
-The UI now exposes the same deterministic loop for humans: header actions for `[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, and `[DECISIONS]`, hover task actions for `[READ]`, `[WHY]`, `[EXEC]`, and `[VERIFY]`, project-shortlist `[PICK]` actions that jump straight into execution context, a live `/help` contract panel, plus real `[UNDO]`, `[REDO]`, and revision history.
+The UI now exposes the same deterministic loop for humans: header actions for `[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, and `[DECISIONS]`, hover task actions for `[READ]`, `[WHY]`, `[EXEC]`, and `[VERIFY]`, project-shortlist `[PICK]` actions that jump straight into execution context, a live `/help` contract panel, an exact board filter plus deterministic `[FUZZY]` highlight mode, plus real `[UNDO]`, `[REDO]`, and revision history.
 
 ## Why use llm-tracker?
 
-🔒 **100 % Local & Secure** — the hub makes zero external calls. It doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine.
+🔒 **100 % Local & Secure** — the core hub doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine. Semantic `/search` uses a local embedding model and only reaches out once if the model is not already cached on disk.
 
 💸 **Massive Token Savings** — no full-file rewrites. LLMs send surgical JSON patches (often <100 bytes) and pull changes since their last rev, keeping context windows small and API costs low.
 
@@ -146,6 +148,8 @@ npx llm-tracker status --json       # machine-readable
 npx llm-tracker help                     # local CLI usage help
 npx llm-tracker blockers <slug>        # structural blockers and what they are waiting on
 npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
+npx llm-tracker search <slug> <query>  # semantic local-model search (requires hub)
+npx llm-tracker fuzzy-search <slug> <query>  # deterministic fuzzy lexical search (requires hub)
 npx llm-tracker pick <slug> [task-id] --assignee codex  # atomic claim, defaults to top ready task
 npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + alternatives
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
@@ -171,7 +175,7 @@ Full flag reference: `npx llm-tracker help`.
 
 The MCP server is intentionally thin.
 
-- Read tools (`tracker_help`, `tracker_projects`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`) load the same workspace files and deterministic payload builders used by the HTTP/CLI layer. They do **not** require the daemon.
+- Read tools (`tracker_help`, `tracker_projects`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`) load the same workspace files and deterministic payload builders used by the HTTP/CLI layer. They do **not** require the daemon.
 - Write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) call the running hub so locking, revisioning, and live reconciliation stay authoritative. They **do** require the hub or daemon to be reachable.
 - Resources provide preloadable read-only context:
   - `tracker://help`
@@ -182,6 +186,7 @@ The MCP server is intentionally thin.
 - Prompts provide thin workflow guidance without duplicating the business logic in the tools:
   - `tracker_start_here`
   - `tracker_pick_next`
+  - `tracker_search_project`
   - `tracker_task_context`
   - `tracker_execute_task`
   - `tracker_verify_task`
@@ -195,6 +200,7 @@ Recommended MCP tool flow:
 - `tracker_projects_status`
 - `tracker_project_status`
 - `tracker_next`
+- `tracker_search` or `tracker_fuzzy_search`
 - `tracker_brief` or `tracker_why`
 - `tracker_execute`
 - `tracker_history`
@@ -271,7 +277,22 @@ For task pickup, prefer the atomic claim flow over hand-built status patches:
 - `POST /api/projects/:slug/pick`
 - `npx llm-tracker pick <slug> [task-id] --assignee <model>`
 
+For feature-oriented or fuzzy questions, prefer:
+
+- `GET /api/projects/:slug/search?q=<query>`
+- `npx llm-tracker search <slug> <query>`
+- `GET /api/projects/:slug/fuzzy-search?q=<query>`
+- `npx llm-tracker fuzzy-search <slug> <query>`
+
 Legacy compatibility: if an older patch or tracker file still uses `status: "partial"`, the hub normalizes it to `in_progress` on ingest and writes back the canonical value.
+
+### Semantic search stack
+
+- Semantic `/search` uses [`@huggingface/transformers`](https://github.com/huggingface/transformers.js) in the local Node.js hub.
+- The default embedding model is [`Xenova/all-MiniLM-L6-v2`](https://huggingface.co/Xenova/all-MiniLM-L6-v2).
+- Both are Apache-2.0 licensed.
+- The first semantic query may download the model into the local Hugging Face cache; after that, query embedding and cosine ranking stay local.
+- `/fuzzy-search` remains the deterministic lexical fallback when you want approximate string matching without loading embeddings.
 
 Two write modes:
 
@@ -340,4 +361,4 @@ Workflow files: [`.github/workflows/release-please.yml`](./.github/workflows/rel
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE).

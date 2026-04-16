@@ -13,6 +13,8 @@ const READ_TOOL_NAMES = [
   "tracker_projects_status",
   "tracker_project_status",
   "tracker_next",
+  "tracker_search",
+  "tracker_fuzzy_search",
   "tracker_brief",
   "tracker_why",
   "tracker_decisions",
@@ -306,6 +308,22 @@ export function listPrompts() {
       ]
     },
     {
+      name: "tracker_search_project",
+      description: "Search a project when the question is fuzzy or feature-oriented instead of task-id-oriented.",
+      arguments: [
+        {
+          name: "slug",
+          description: "Project slug",
+          required: true
+        },
+        {
+          name: "query",
+          description: "Feature or concept to search for",
+          required: true
+        }
+      ]
+    },
+    {
       name: "tracker_execute_task",
       description: "Prepare an execution pass for one task with the deterministic pack.",
       arguments: [
@@ -390,6 +408,17 @@ export function getPrompt(workspace, name, args = {}) {
           "Avoid rereading the whole tracker unless the bounded packs are insufficient."
         ].join("\n")
       );
+    case "tracker_search_project": {
+      const query = typeof args.query === "string" && args.query.trim() ? args.query.trim() : "<query>";
+      return makePrompt(
+        `Search ${slug} for feature-oriented or fuzzy questions like "${query}".`,
+        [
+          `Start with \`tracker_search\` for \`${slug}\` and query \`${query}\` when you want semantic search over task meaning and nearby concepts.`,
+          `If you want deterministic lexical matching instead, call \`tracker_fuzzy_search\` for \`${slug}\` and \`${query}\`.`,
+          "Use the returned matches to choose a task id, then follow up with `tracker_brief` or `tracker_why` instead of rereading the whole tracker."
+        ].join("\n")
+      );
+    }
     case "tracker_execute_task":
       return makePrompt(
         `Prepare to execute ${slug}/${taskId} with deterministic guardrails.`,

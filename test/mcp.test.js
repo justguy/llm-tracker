@@ -11,6 +11,7 @@ import { validProject } from "./fixtures.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const BIN = join(__dirname, "..", "bin", "llm-tracker.js");
+const FAKE_EMBEDDER = join(__dirname, "helpers", "fake-embedder.mjs");
 
 function setupWorkspace(prefix = "llm-tracker-mcp-") {
   const ws = mkdtempSync(join(tmpdir(), prefix));
@@ -155,9 +156,10 @@ class McpClient {
   }
 }
 
-function startMcp(workspace, extraArgs = []) {
+function startMcp(workspace, extraArgs = [], options = {}) {
   const child = spawn(process.execPath, [BIN, "mcp", "--path", workspace, ...extraArgs], {
-    stdio: ["pipe", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe"],
+    ...options
   });
   child.stderr.resume();
   return new McpClient(child);
@@ -184,6 +186,8 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
     assert.ok(names.includes("tracker_project_status"));
     assert.ok(names.includes("tracker_projects_status"));
     assert.ok(names.includes("tracker_next"));
+    assert.ok(names.includes("tracker_search"));
+    assert.ok(names.includes("tracker_fuzzy_search"));
     assert.ok(names.includes("tracker_history"));
     assert.ok(names.includes("tracker_pick"));
     assert.ok(names.includes("tracker_undo"));
@@ -249,6 +253,7 @@ test("MCP prompts expose tracker workflows and operational guidance", async () =
     assert.ok(names.includes("tracker_start_here"));
     assert.ok(names.includes("tracker_pick_next"));
     assert.ok(names.includes("tracker_task_context"));
+    assert.ok(names.includes("tracker_search_project"));
     assert.ok(names.includes("tracker_execute_task"));
     assert.ok(names.includes("tracker_verify_task"));
     assert.ok(names.includes("tracker_patch_write"));
@@ -327,6 +332,57 @@ test("tracker_next returns deterministic ranking over stdio MCP", async () => {
     assert.equal(payload.recommendedTaskId, "t1");
     assert.equal(payload.next[0].id, "t1");
     assert.equal(payload.next[1].id, "t2");
+  } finally {
+    await client.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_search and tracker_fuzzy_search return semantic and fuzzy matches over MCP", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-search-");
+  const tracker = validProject({
+    tasks: [
+      {
+        id: "t-017",
+        title: "Parallel execution branch/variant route-flow proof",
+        status: "in_progress",
+        placement: { swimlaneId: "exec", priorityId: "p0" },
+        dependencies: [],
+        context: { tags: ["parallel-execution"] }
+      },
+      {
+        id: "t-018",
+        title: "Investor demo cost surface",
+        status: "not_started",
+        placement: { swimlaneId: "ops", priorityId: "p1" },
+        dependencies: [],
+        context: { tags: ["investor-demo", "cost"] }
+      }
+    ]
+  });
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(tracker, null, 2));
+
+  const client = startMcp(workspace, [], {
+    env: { ...process.env, LLM_TRACKER_EMBEDDER_MODULE: FAKE_EMBEDDER }
+  });
+  try {
+    await client.initialize();
+
+    const exact = await client.request("tools/call", {
+      name: "tracker_search",
+      arguments: { slug: "test-project", query: "route flow proof" }
+    });
+    const exactPayload = JSON.parse(exact.result.content[0].text);
+    assert.equal(exactPayload.mode, "semantic");
+    assert.equal(exactPayload.matches[0].id, "t-017");
+
+    const fuzzy = await client.request("tools/call", {
+      name: "tracker_fuzzy_search",
+      arguments: { slug: "test-project", query: "paralel route" }
+    });
+    const fuzzyPayload = JSON.parse(fuzzy.result.content[0].text);
+    assert.equal(fuzzyPayload.mode, "fuzzy");
+    assert.equal(fuzzyPayload.matches[0].id, "t-017");
   } finally {
     await client.close();
     rmSync(workspace, { recursive: true, force: true });

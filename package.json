@@ -23,7 +23,7 @@
   "bugs": {
     "url": "https://github.com/justguy/llm-tracker/issues"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "justguy",
   "keywords": [
     "llm",
@@ -41,6 +41,7 @@
     "dashboard"
   ],
   "dependencies": {
+    "@huggingface/transformers": "^4.1.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "chokidar": "^3.6.0",

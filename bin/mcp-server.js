@@ -9,6 +9,7 @@ import { getChangedPayload } from "../hub/changed.js";
 import { getDecisionsPayload } from "../hub/decisions.js";
 import { getExecutePayload } from "../hub/execute.js";
 import { getNextPayload } from "../hub/next.js";
+import { getFuzzyPayload, getSearchPayload } from "../hub/search.js";
 import { listProjectEntries, loadProjectEntry, readWorkspaceHelp } from "../hub/project-loader.js";
 import { readHistory } from "../hub/snapshots.js";
 import { getVerifyPayload } from "../hub/verify.js";
@@ -64,11 +65,11 @@ function loadReadableEntry(workspace, slug) {
   return { ok: true, entry };
 }
 
-function readToolPayload(getter, workspace, slug, extra = {}) {
+async function readToolPayload(getter, workspace, slug, extra = {}) {
   const loaded = loadReadableEntry(workspace, slug);
   if (!loaded.ok) return loaded.result;
 
-  const payload = getter({
+  const payload = await getter({
     workspace,
     slug,
     entry: loaded.entry,
@@ -250,6 +251,42 @@ function createTools(workspace, portFlag) {
           nonEmptyString(args.slug),
           { limit: clampInt(args.limit, { fallback: 5, min: 1, max: 5 }) }
         )
+    },
+    {
+      name: "tracker_search",
+      description: "Search tasks semantically with local embeddings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" },
+          query: { type: "string", description: "Search query" },
+          limit: { type: "integer", minimum: 1, maximum: 50 }
+        },
+        required: ["slug", "query"]
+      },
+      handler: async (args = {}) =>
+        readToolPayload(getSearchPayload, workspace, nonEmptyString(args.slug), {
+          query: nonEmptyString(args.query),
+          limit: clampInt(args.limit, { fallback: 10, min: 1, max: 50 })
+        })
+    },
+    {
+      name: "tracker_fuzzy_search",
+      description: "Search tasks with deterministic fuzzy lexical matching.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" },
+          query: { type: "string", description: "Search query" },
+          limit: { type: "integer", minimum: 1, maximum: 50 }
+        },
+        required: ["slug", "query"]
+      },
+      handler: async (args = {}) =>
+        readToolPayload(getFuzzyPayload, workspace, nonEmptyString(args.slug), {
+          query: nonEmptyString(args.query),
+          limit: clampInt(args.limit, { fallback: 10, min: 1, max: 50 })
+        })
     },
     {
       name: "tracker_brief",

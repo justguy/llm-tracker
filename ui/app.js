@@ -325,7 +325,7 @@ function FilterToggles({ counts, statusFilters, toggleStatus, blockedCount, open
 
 // ─────── Card / Cell / Matrix ───────
 
-function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onSaveComment, onOpenTask }) {
+function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart, onDragEnd, onDelete, onSaveComment, onOpenTask }) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
   const cardFacts = buildCardMetaFacts(task, blockedBy || []);
@@ -340,7 +340,13 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onS
   const extraKeys = Object.keys(ctx).filter(
     (k) => k !== "tags" && k !== "notes" && k !== "files_touched"
   );
-  const classes = ["card", `status-${task.status}`, dragging ? "dragging" : ""].join(" ");
+  const classes = [
+    "card",
+    `status-${task.status}`,
+    dragging ? "dragging" : "",
+    searchMatch ? "fuzzy-hit" : "",
+    fuzzyActive && !searchMatch ? "fuzzy-dim" : ""
+  ].join(" ");
 
   return html`
     <div
@@ -442,13 +448,16 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onS
         ${references.length > 1
           ? html`<${Badge} kind="tag" title=${references.join("\n")}>refs · ${references.length}</${Badge}>`
           : null}
+        ${searchMatch && Number.isFinite(searchMatch.score)
+          ? html`<${Badge} kind="tag" title=${`Fuzzy match ${searchMatch.score.toFixed(3)}`}>match · ${searchMatch.score.toFixed(2)}</${Badge}>`
+          : null}
         ${tags.map((t) => html`<${Badge} kind="tag">${t}</${Badge}>`)}
       </div>
     </div>
   `;
 }
 
-function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, dragState, setDragState, onDrop, onDeleteTask, onSaveComment, onOpenTask }) {
+function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, dragState, setDragState, onDrop, onDeleteTask, onSaveComment, onOpenTask }) {
   const ref = useRef(null);
   const [over, setOver] = useState(false);
 
@@ -518,6 +527,8 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
             key=${t.id}
             task=${t}
             blockedBy=${blocked[t.id]}
+            searchMatch=${fuzzyMatchMap?.get(t.id) || null}
+            fuzzyActive=${!!(fuzzyQuery && fuzzyQuery.trim())}
             dragging=${dragState.taskId === t.id}
             onDragStart=${(e, task) => {
               e.dataTransfer.effectAllowed = "move";
@@ -535,7 +546,7 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
   `;
 }
 
-function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onToggleCollapse, onDeleteTask, onSaveComment, onOpenTask }) {
+function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, onMove, onToggleCollapse, onDeleteTask, onSaveComment, onOpenTask }) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
   const priorities = project.data.meta.priorities;
@@ -630,6 +641,8 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onT
             filterQuery=${filterQuery}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}
+            fuzzyQuery=${fuzzyQuery}
+            fuzzyMatchMap=${fuzzyMatchMap}
             dragState=${dragState}
             setDragState=${setDragState}
             onDrop=${onMove}
@@ -744,6 +757,8 @@ function ProjectPane({
   onFocus,
   onTogglePin,
   filter,
+  searchMode,
+  fuzzyMatchMap,
   statusFilters,
   blockFilters,
   onMove,
@@ -800,9 +815,11 @@ function ProjectPane({
       ${data
         ? html`<${Matrix}
             project=${project}
-            filterQuery=${filter}
+            filterQuery=${searchMode === "filter" ? filter : ""}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}
+            fuzzyQuery=${searchMode === "fuzzy" ? filter : ""}
+            fuzzyMatchMap=${fuzzyMatchMap}
             onMove=${(args) => onMove(slug, args)}
             onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
             onDeleteTask=${(task) => onDeleteTask(slug, task)}
@@ -1264,6 +1281,9 @@ function Header({
   workspace,
   filter,
   setFilter,
+  searchMode,
+  onSearchModeChange,
+  searchMeta,
   theme,
   onToggleTheme,
   onOpenHelp,
@@ -1356,12 +1376,28 @@ function Header({
           <button class="icon-btn" onClick=${onOpenSettings} title="Settings">[SETTINGS]</button>
           <button class="icon-btn" onClick=${onOpenHelp} title="Help">[?]</button>
         </div>
-        <input
-          class="filter-input"
-          value=${filter}
-          onInput=${(e) => setFilter(e.currentTarget.value)}
-          placeholder="Filter tasks — title, id, tag"
-        />
+        <div class="search-controls">
+          <input
+            class="filter-input"
+            value=${filter}
+            onInput=${(e) => setFilter(e.currentTarget.value)}
+            placeholder=${searchMode === "fuzzy" ? "Fuzzy search — approximate title, id, tag" : "Filter tasks — title, id, tag"}
+          />
+          <div class="search-mode-tabs">
+            <button
+              class=${`search-mode-tab ${searchMode === "filter" ? "active" : ""}`}
+              onClick=${() => onSearchModeChange("filter")}
+              title="Current exact board filter"
+            >[FILTER]</button>
+            <button
+              class=${`search-mode-tab ${searchMode === "fuzzy" ? "active" : ""}`}
+              onClick=${() => onSearchModeChange("fuzzy")}
+              title="Approximate lexical search that keeps the board intact"
+              disabled=${!project?.slug}
+            >[FUZZY]</button>
+          </div>
+        </div>
+        ${searchMeta ? html`<div class=${`search-meta ${searchMeta.kind || ""}`}>${searchMeta.text}</div>` : null}
         ${workspace ? html`<div class="workspace-path">WORKSPACE · ${workspace.workspace}</div>` : null}
       </div>
     </div>
@@ -1375,6 +1411,14 @@ function App() {
   const [projects, setProjects] = useState({});
   const [activeSlug, setActiveSlug] = useState(null);
   const [filter, setFilter] = useState("");
+  const [searchMode, setSearchMode] = useState("filter");
+  const [fuzzyState, setFuzzyState] = useState({
+    slug: null,
+    query: "",
+    matches: [],
+    loading: false,
+    error: null
+  });
   const [wsUp, setWsUp] = useState(false);
   const [theme, setTheme] = useState(initialSettings.theme || "dark");
   const [drawerOpen, setDrawerOpen] = useState(!!initialSettings.drawerPinned);
@@ -1424,6 +1468,66 @@ function App() {
   useEffect(() => {
     fetch("/api/workspace").then((r) => r.json()).then(setWorkspace).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (searchMode !== "fuzzy" || !activeSlug || !filter.trim()) {
+      setFuzzyState((prev) => ({
+        ...prev,
+        slug: activeSlug,
+        query: filter,
+        matches: [],
+        loading: false,
+        error: null
+      }));
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      setFuzzyState((prev) => ({
+        ...prev,
+        slug: activeSlug,
+        query: filter,
+        loading: true,
+        error: null
+      }));
+
+      fetch(`/api/projects/${activeSlug}/fuzzy-search?q=${encodeURIComponent(filter)}&limit=12`, {
+        signal: controller.signal
+      })
+        .then(async (response) => {
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || response.statusText || "request failed");
+          return body;
+        })
+        .then((payload) => {
+          setFuzzyState({
+            slug: activeSlug,
+            query: filter,
+            matches: payload.matches || [],
+            model: payload.model || null,
+            loading: false,
+            error: null
+          });
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setFuzzyState({
+            slug: activeSlug,
+            query: filter,
+            matches: [],
+            model: null,
+            loading: false,
+            error: error.message
+          });
+        });
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchMode, activeSlug, filter]);
 
   useEffect(() => {
     let ws;
@@ -1596,6 +1700,22 @@ function App() {
 
   const slugs = Object.keys(projects).sort();
   const active = activeSlug ? projects[activeSlug] : null;
+  const fuzzyMatchMap = useMemo(
+    () => new Map((fuzzyState.matches || []).map((match) => [match.id, match])),
+    [fuzzyState.matches]
+  );
+  const searchMeta = useMemo(() => {
+    if (searchMode !== "fuzzy") return null;
+    if (!filter.trim()) {
+      return { kind: "muted", text: "FUZZY · deterministic lexical highlight mode keeps the board intact and marks near matches in context." };
+    }
+    if (fuzzyState.loading) return { kind: "muted", text: `FUZZY · searching "${filter}"…` };
+    if (fuzzyState.error) return { kind: "error", text: `FUZZY · ${fuzzyState.error}` };
+    return {
+      kind: fuzzyState.matches.length > 0 ? "ok" : "muted",
+      text: `FUZZY · ${fuzzyState.matches.length} hit${fuzzyState.matches.length === 1 ? "" : "s"} for "${filter}"`
+    };
+  }, [searchMode, filter, fuzzyState]);
 
   useEffect(() => {
     if (projectIntel && !projects[projectIntel.slug]) {
@@ -1766,6 +1886,9 @@ function App() {
           workspace=${workspace}
           filter=${filter}
           setFilter=${setFilter}
+          searchMode=${searchMode}
+          onSearchModeChange=${setSearchMode}
+          searchMeta=${searchMeta}
           theme=${theme}
           onToggleTheme=${onToggleTheme}
           onOpenHelp=${() => setHelpOpen(true)}
@@ -1806,6 +1929,9 @@ function App() {
         workspace=${workspace}
         filter=${filter}
         setFilter=${setFilter}
+        searchMode=${searchMode}
+        onSearchModeChange=${setSearchMode}
+        searchMeta=${searchMeta}
         theme=${theme}
         onToggleTheme=${onToggleTheme}
         onOpenHelp=${() => setHelpOpen(true)}
@@ -1841,6 +1967,8 @@ function App() {
             onFocus=${setActiveSlug}
             onTogglePin=${onTogglePinProject}
             filter=${filter}
+            searchMode=${searchMode}
+            fuzzyMatchMap=${fuzzyMatchMap}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}
             onMove=${onMove}

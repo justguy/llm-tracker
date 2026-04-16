@@ -216,6 +216,44 @@ body {
   justify-content: center;
 }
 
+.search-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.search-mode-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.search-mode-tab {
+  font-family: var(--font-mono);
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  color: var(--white-dim);
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.search-mode-tab:hover,
+.search-mode-tab:focus-visible,
+.search-mode-tab.active {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  outline: none;
+}
+
+.search-mode-tab:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .filter-input {
   width: 100%;
   background: var(--bg);
@@ -240,6 +278,21 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.14em;
   font-size: 10px;
+}
+
+.search-meta {
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.search-meta.ok {
+  color: var(--cyan);
+}
+
+.search-meta.error {
+  color: var(--red);
 }
 
 .workspace-path {
@@ -1801,6 +1854,15 @@ body {
 .card-subfact.warn {
   border-color: rgba(255, 179, 71, 0.35);
   color: var(--amber);
+}
+
+.card.fuzzy-hit {
+  border-color: rgba(0, 229, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.18), 0 0 18px rgba(0, 229, 255, 0.12);
+}
+
+.card.fuzzy-dim {
+  opacity: 0.38;
 }
 
 .card-footer {

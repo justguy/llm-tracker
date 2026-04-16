@@ -4,6 +4,7 @@ import { getChangedPayload } from "../changed.js";
 import { getDecisionsPayload } from "../decisions.js";
 import { getExecutePayload } from "../execute.js";
 import { getNextPayload } from "../next.js";
+import { getFuzzyPayload, getSearchPayload } from "../search.js";
 import { getVerifyPayload } from "../verify.js";
 import { getWhyPayload } from "../why.js";
 
@@ -14,6 +15,9 @@ function clampLimit(value, fallback, max) {
 }
 
 export function registerIntelligenceRoutes(app, { workspace, store }) {
+  const queryValue = (value) => (Array.isArray(value) ? value[0] : value);
+  const requireQuery = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
+
   const pickHandler = async (req, res) => {
     const body = req.body || {};
     const result = await store.pickTask(req.params.slug, {
@@ -38,6 +42,45 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
     });
     res.json(payload);
   });
+
+  app.get("/api/projects/:slug/search", async (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const query = requireQuery(queryValue(req.query.q));
+    if (!query) return res.status(400).json({ error: "q is required" });
+
+    const result = await getSearchPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      query,
+      limit: clampLimit(req.query.limit, 10, 50)
+    });
+    if (result?.ok === false) {
+      return res.status(result.status || 503).json({ error: result.message });
+    }
+    res.json(result);
+  });
+
+  const fuzzyHandler = (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const query = requireQuery(queryValue(req.query.q));
+    if (!query) return res.status(400).json({ error: "q is required" });
+
+    const result = getFuzzyPayload({
+      slug: req.params.slug,
+      entry,
+      query,
+      limit: clampLimit(req.query.limit, 10, 50)
+    });
+    res.json(result);
+  };
+
+  app.get("/api/projects/:slug/fuzzy", fuzzyHandler);
+  app.get("/api/projects/:slug/fuzzy-search", fuzzyHandler);
 
   app.get("/api/projects/:slug/tasks/:taskId/brief", (req, res) => {
     const entry = store.get(req.params.slug);

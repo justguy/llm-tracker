@@ -7,6 +7,7 @@ import cors from "cors";
 import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
+import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
 import { Store, slugFromFile } from "./store.js";
 
 const MIME = {
@@ -469,6 +470,14 @@ export async function startHub({ workspace, port, uiDir }) {
       return;
     }
     const result = store.ingest(filePath, raw);
+    if (result?.ok && result?.slug) {
+      const entry = store.get(result.slug);
+      primeSemanticIndex({
+        workspace,
+        slug: result.slug,
+        entry
+      });
+    }
     if (broadcastUpdate && result?.slug && result?.event) {
       broadcast({
         type: result.event,
@@ -529,6 +538,8 @@ export async function startHub({ workspace, port, uiDir }) {
     .on("change", (filePath) => ingestTrackerFile(filePath))
     .on("unlink", (filePath) => {
       if (!isTrackerFile(filePath)) return;
+      const slug = slugFromFile(filePath);
+      if (slug) clearSearchCachesForSlug(workspace, slug);
       const r = store.remove(filePath);
       if (r) broadcast({ type: "REMOVE", slug: r.slug });
     });
