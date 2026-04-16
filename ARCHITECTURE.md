@@ -40,6 +40,9 @@ hub/progress.js          Counts, pct, blocked-by derivation
 hub/status.js            Terminal dashboard (used by `llm-tracker status`)
 ui/index.html            Import map + mount
 ui/app.js                Preact + htm components: Matrix, Cell, Card, Drawer, HelpModal, SettingsModal, FilterToggles, Dropdown
+ui/modals/history.js     Revision-history modal wired to /history and rollback
+ui/modals/intelligence.js Project + task intelligence modals for next/blockers/changed/decisions and brief/why/execute/verify
+ui/lib/intelligence.js   Shared UI helpers for project/task intelligence state and labels
 ui/styles.css            Bloomberg-terminal palette, dark (default) + light theme
 workspace-template/      Copied on `init` into the workspace folder. README.md is the LLM-facing contract.
 ```

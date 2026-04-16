@@ -22,6 +22,8 @@ When an agent needs the current contract for a running hub, it should call `GET 
 
 If your coding client supports MCP, `npx llm-tracker mcp --path ~/.llm-tracker` exposes deterministic `tracker_*` tools plus preloadable resources and prompts so agents can stop shelling out to `curl` and stop reopening the README by hand. MCP read tools and resources work directly from workspace files; MCP write tools still require the hub or daemon to be running.
 
+The UI now exposes the same deterministic loop for humans: header actions for `[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, and `[DECISIONS]`, hover task actions for `[READ]`, `[WHY]`, `[EXEC]`, and `[VERIFY]`, plus real `[UNDO]`, `[REDO]`, and revision history.
+
 ## Why use llm-tracker?
 
 🔒 **100 % Local & Secure** — the hub makes zero external calls. It doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine.

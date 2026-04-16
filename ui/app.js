@@ -1,6 +1,8 @@
 import { render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { html } from "htm/preact";
+import { HistoryModal } from "./modals/history.js";
+import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
 
 const STATUS_ORDER = ["complete", "in_progress", "not_started", "deferred"];
 
@@ -322,9 +324,17 @@ function FilterToggles({ counts, statusFilters, toggleStatus, blockedCount, open
 
 // ─────── Card / Cell / Matrix ───────
 
-function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onSaveComment }) {
+function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onSaveComment, onOpenTask }) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
+  const approvals = Array.isArray(task.approval_required_for)
+    ? task.approval_required_for.filter((value) => typeof value === "string" && value.trim())
+    : [];
+  const references = Array.isArray(task.references) && task.references.length
+    ? task.references
+    : task.reference
+      ? [task.reference]
+      : [];
   const extraKeys = Object.keys(ctx).filter(
     (k) => k !== "tags" && k !== "notes" && k !== "files_touched"
   );
@@ -369,29 +379,54 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onS
       ${extraKeys.length > 0
         ? html`<div class="card-context"><b>${extraKeys[0]}:</b> ${String(ctx[extraKeys[0]])}</div>`
         : null}
+      <div class="card-intel-actions">
+        ${[
+          ["brief", "[READ]"],
+          ["why", "[WHY]"],
+          ["execute", "[EXEC]"],
+          ["verify", "[VERIFY]"]
+        ].map(([mode, label]) => html`
+          <button
+            key=${mode}
+            class="card-intel-btn"
+            title=${`${label.replaceAll("[", "").replaceAll("]", "")} ${task.id}`}
+            onMouseDown=${(e) => e.stopPropagation()}
+            onClick=${(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onOpenTask && onOpenTask(task, mode);
+            }}
+          >${label}</button>
+        `)}
+      </div>
       <${CommentBadge}
         comment=${task.comment}
         onSave=${(value) => onSaveComment && onSaveComment(task.id, value)}
       />
       <div class="card-footer">
         <${Badge} kind=${`status-${task.status}`}>${task.status.replace("_", " ")}</${Badge}>
+        ${task.effort ? html`<${Badge} kind="tag" title=${`Estimated effort ${task.effort}`}>effort · ${task.effort}</${Badge}>` : null}
         ${blockedBy && blockedBy.length > 0
           ? html`<${Badge} kind="blocked" title=${`Blocked by ${blockedBy.join(", ")}`}>blocked · ${blockedBy.length}</${Badge}>`
           : null}
+        ${approvals.length > 0
+          ? html`<${Badge} kind="blocked" title=${`Requires approval for ${approvals.join(", ")}`}>approval · ${approvals.length}</${Badge}>`
+          : null}
         ${task.assignee ? html`<${Badge} kind="assignee">${task.assignee}</${Badge}>` : null}
-        ${task.reference
+        ${references[0]
           ? html`<button
               class="card-reference"
-              title=${`Copy reference: ${task.reference}`}
+              title=${`Copy reference: ${references[0]}`}
               onMouseDown=${(e) => e.stopPropagation()}
               onClick=${(e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                if (navigator.clipboard) {
-                  navigator.clipboard.writeText(task.reference).catch(() => {});
-                }
+                copyText(references[0]).catch(() => {});
               }}
-            >${task.reference}</button>`
+            >${references[0]}</button>`
+          : null}
+        ${references.length > 1
+          ? html`<${Badge} kind="tag" title=${references.join("\n")}>refs · ${references.length}</${Badge}>`
           : null}
         ${tags.map((t) => html`<${Badge} kind="tag">${t}</${Badge}>`)}
       </div>
@@ -399,7 +434,7 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onS
   `;
 }
 
-function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, dragState, setDragState, onDrop, onDeleteTask, onSaveComment }) {
+function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, dragState, setDragState, onDrop, onDeleteTask, onSaveComment, onOpenTask }) {
   const ref = useRef(null);
   const [over, setOver] = useState(false);
 
@@ -478,6 +513,7 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
             onDragEnd=${() => setDragState({ taskId: null })}
             onDelete=${onDeleteTask}
             onSaveComment=${onSaveComment}
+            onOpenTask=${onOpenTask}
           />
         `
       )}
@@ -485,7 +521,7 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
   `;
 }
 
-function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onToggleCollapse, onDeleteTask, onSaveComment }) {
+function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onToggleCollapse, onDeleteTask, onSaveComment, onOpenTask }) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
   const priorities = project.data.meta.priorities;
@@ -585,6 +621,7 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onT
             onDrop=${onMove}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
+            onOpenTask=${onOpenTask}
           />
         `
       )}
@@ -699,6 +736,7 @@ function ProjectPane({
   onToggleCollapse,
   onDeleteTask,
   onSaveComment,
+  onOpenTask,
   scratchpadExpanded,
   onToggleScratchpad,
   onSaveScratchpad
@@ -755,6 +793,7 @@ function ProjectPane({
             onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
             onDeleteTask=${(task) => onDeleteTask(slug, task)}
             onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
+            onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
           />`
         : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
     </section>
@@ -1045,121 +1084,6 @@ function SettingsModal({ onClose, theme, onToggleTheme, drawerPinned, onToggleDr
   `;
 }
 
-// ─────── History modal ───────
-function summaryItemText(it) {
-  switch (it?.kind) {
-    case "added": return `+ ${it.id} "${it.title || ""}" (${it.status || "?"})`;
-    case "removed": return `− ${it.id} removed`;
-    case "status": return `${it.id} → ${it.to}`;
-    case "placement": return `${it.id} moved`;
-    case "assignee": return `${it.id} assignee: ${it.to ?? "—"}`;
-    case "edit": return `${it.id} edited (${(it.keys || []).join(", ")})`;
-    case "meta": return `meta.${it.key} updated`;
-    case "reorder": return `reorder (${it.total} tasks)`;
-    default: return JSON.stringify(it);
-  }
-}
-
-function HistoryModal({ slug, onClose }) {
-  const [entries, setEntries] = useState(null);
-  const [error, setError] = useState(null);
-  const [rollingBack, setRollingBack] = useState(null);
-
-  const load = async () => {
-    try {
-      const res = await fetch(`/api/projects/${slug}/revisions`);
-      if (!res.ok) throw new Error(res.statusText);
-      const body = await res.json();
-      const recent = [...(body.revisions || [])].sort((a, b) => b.rev - a.rev).slice(0, 10);
-      setEntries(recent);
-      setError(null);
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  useEffect(() => { load(); }, [slug]);
-
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const rollbackTo = async (rev) => {
-    const ok = window.confirm(
-      `Roll back to rev ${rev}?\n\nThe current state becomes a new rev on top of this rollback — nothing is discarded, you can undo the rollback the same way.`
-    );
-    if (!ok) return;
-    setRollingBack(rev);
-    try {
-      const res = await fetch(`/api/projects/${slug}/rollback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: rev })
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || res.statusText);
-      }
-      await load();
-    } catch (e) {
-      alert(`Rollback failed: ${e.message}`);
-    }
-    setRollingBack(null);
-  };
-
-  return html`
-    <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal history-modal" onClick=${(e) => e.stopPropagation()}>
-        <div class="modal-header">
-          <span class="brand">[HISTORY] · ${slug}</span>
-          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
-        </div>
-        <div class="modal-body">
-          ${error
-            ? html`<div class="settings-msg error">failed to load: ${error}</div>`
-            : entries === null
-              ? html`<p class="muted">loading…</p>`
-              : entries.length === 0
-                ? html`<p class="muted">no history yet.</p>`
-                : html`<ul class="history-list">
-                    ${entries.map((e, idx) => {
-                      const shown = (e.summary || []).slice(0, 3);
-                      const rest = (e.summary || []).length - shown.length;
-                      return html`
-                        <li key=${e.rev} class="history-entry">
-                          <div class="history-meta">
-                            <span class="history-rev">rev ${e.rev}</span>
-                            <span class="history-ts">${new Date(e.ts).toLocaleString()}</span>
-                            ${e.rolledBackTo !== undefined
-                              ? html`<span class="badge">rolled back to ${e.rolledBackTo}</span>`
-                              : null}
-                          </div>
-                          <ul class="history-gist">
-                            ${shown.length === 0
-                              ? html`<li class="muted">no structured changes</li>`
-                              : shown.map((it, i) => html`<li key=${i}>${summaryItemText(it)}</li>`)}
-                            ${rest > 0 ? html`<li class="muted">…and ${rest} more</li>` : null}
-                          </ul>
-                          <div class="history-actions">
-                            <button
-                              class="icon-btn"
-                              disabled=${idx === 0 || rollingBack !== null}
-                              onClick=${() => rollbackTo(e.rev)}
-                              title=${idx === 0 ? "This is the current revision" : `Roll back to rev ${e.rev}`}
-                            >${rollingBack === e.rev ? "[ROLLING BACK…]" : idx === 0 ? "[CURRENT]" : "[UNDO TO HERE]"}</button>
-                          </div>
-                        </li>
-                      `;
-                    })}
-                  </ul>`}
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 // ─────── Overview drawer ───────
 function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSelect, onDelete, pinnedSlugs, onTogglePinProject }) {
   useEffect(() => {
@@ -1293,7 +1217,9 @@ function Header({
   onOpenDrawer,
   onOpenSettings,
   onOpenHistory,
+  onOpenIntel,
   onUndo,
+  onRedo,
   onDeleteProject
 }) {
   const meta = project?.data?.meta;
@@ -1325,10 +1251,40 @@ function Header({
         <div class="header-actions">
           <button
             class="icon-btn"
+            onClick=${() => onOpenIntel("next")}
+            disabled=${!project?.slug}
+            title="Deterministic next-task shortlist"
+          >[NEXT]</button>
+          <button
+            class="icon-btn"
+            onClick=${() => onOpenIntel("blockers")}
+            disabled=${!project?.slug}
+            title="Blocked tasks and blockers"
+          >[BLOCKERS]</button>
+          <button
+            class="icon-btn"
+            onClick=${() => onOpenIntel("changed")}
+            disabled=${!project?.slug}
+            title="Recent changed tasks"
+          >[CHANGED]</button>
+          <button
+            class="icon-btn"
+            onClick=${() => onOpenIntel("decisions")}
+            disabled=${!project?.slug}
+            title="Recent decision notes"
+          >[DECISIONS]</button>
+          <button
+            class="icon-btn"
             onClick=${onUndo}
             disabled=${!project?.rev || project.rev < 2}
-            title=${project?.rev >= 2 ? `Undo (rev ${project.rev} → ${project.rev - 1})` : "Nothing to undo"}
+            title=${project?.rev >= 2 ? "Undo the most recent effective change" : "Nothing to undo"}
           >[UNDO]</button>
+          <button
+            class="icon-btn"
+            onClick=${onRedo}
+            disabled=${!project?.slug}
+            title="Redo the latest undo if available"
+          >[REDO]</button>
           <button
             class="icon-btn"
             onClick=${onOpenHistory}
@@ -1381,6 +1337,8 @@ function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [projectIntel, setProjectIntel] = useState(null);
+  const [taskIntel, setTaskIntel] = useState(null);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
 
@@ -1510,6 +1468,22 @@ function App() {
     if (!drawerPinned) setDrawerOpen(false);
   };
 
+  const onOpenTaskIntel = (slug, taskOrId, initialMode = "brief") => {
+    if (!slug || !taskOrId) return;
+    const projectTasks = projects[slug]?.data?.tasks || [];
+    const task = typeof taskOrId === "string"
+      ? projectTasks.find((item) => item.id === taskOrId) || { id: taskOrId, title: taskOrId }
+      : taskOrId;
+    if (!task?.id) return;
+    setActiveSlug(slug);
+    setTaskIntel({ slug, task, initialMode });
+  };
+
+  const onOpenProjectIntel = (initialMode = "next") => {
+    if (!activeSlug) return;
+    setProjectIntel({ slug: activeSlug, initialMode });
+  };
+
   const onToggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
   const onTogglePin = () => setDrawerPinned((p) => !p);
@@ -1546,6 +1520,18 @@ function App() {
 
   const slugs = Object.keys(projects).sort();
   const active = activeSlug ? projects[activeSlug] : null;
+
+  useEffect(() => {
+    if (projectIntel && !projects[projectIntel.slug]) {
+      setProjectIntel(null);
+    }
+  }, [projectIntel, projects]);
+
+  useEffect(() => {
+    if (taskIntel && !projects[taskIntel.slug]) {
+      setTaskIntel(null);
+    }
+  }, [taskIntel, projects]);
 
   const onDeleteTask = async (slug, task) => {
     if (!slug) return;
@@ -1584,24 +1570,32 @@ function App() {
   };
 
   const onUndo = async () => {
-    if (!active || !active.rev || active.rev < 2) return;
-    const targetRev = active.rev - 1;
+    if (!activeSlug || !active || !active.rev || active.rev < 2) return;
     const ok = window.confirm(
-      `Undo last change?\n\nRolls rev ${active.rev} back to the state at rev ${targetRev}.\nNo redo — you can undo again to go further back.`
+      `Undo the most recent effective change for ${activeSlug}?`
     );
     if (!ok) return;
     try {
-      const res = await fetch(`/api/projects/${activeSlug}/rollback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: targetRev })
-      });
+      const res = await fetch(`/api/projects/${activeSlug}/undo`, { method: "POST" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(`Undo failed: ${body.error || res.statusText}`);
       }
     } catch (e) {
       alert(`Undo failed: ${e.message}`);
+    }
+  };
+
+  const onRedo = async () => {
+    if (!activeSlug) return;
+    try {
+      const res = await fetch(`/api/projects/${activeSlug}/redo`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(`Redo failed: ${body.error || res.statusText}`);
+      }
+    } catch (e) {
+      alert(`Redo failed: ${e.message}`);
     }
   };
 
@@ -1622,6 +1616,24 @@ function App() {
   const helpEl = helpOpen ? html`<${HelpModal} workspace=${workspace} onClose=${() => setHelpOpen(false)} />` : null;
   const historyEl = historyOpen && activeSlug
     ? html`<${HistoryModal} slug=${activeSlug} onClose=${() => setHistoryOpen(false)} />`
+    : null;
+  const projectIntelEl = projectIntel
+    ? html`<${ProjectIntelligenceModal}
+        slug=${projectIntel.slug}
+        project=${projects[projectIntel.slug]}
+        initialMode=${projectIntel.initialMode}
+        onOpenTask=${(taskId, mode) => onOpenTaskIntel(projectIntel.slug, taskId, mode)}
+        onClose=${() => setProjectIntel(null)}
+      />`
+    : null;
+  const taskIntelEl = taskIntel
+    ? html`<${TaskIntelligenceModal}
+        slug=${taskIntel.slug}
+        task=${taskIntel.task}
+        initialMode=${taskIntel.initialMode}
+        onOpenTask=${(taskId, mode) => onOpenTaskIntel(taskIntel.slug, taskId, mode)}
+        onClose=${() => setTaskIntel(null)}
+      />`
     : null;
 
   const shellPinned = drawerOpen && drawerPinned;
@@ -1683,7 +1695,9 @@ function App() {
           onOpenDrawer=${() => setDrawerOpen(true)}
           onOpenSettings=${() => setSettingsOpen(true)}
           onOpenHistory=${() => setHistoryOpen(true)}
+          onOpenIntel=${onOpenProjectIntel}
           onUndo=${onUndo}
+          onRedo=${onRedo}
           onDeleteProject=${onDeleteProject}
         />
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
@@ -1693,6 +1707,8 @@ function App() {
         ${helpEl}
         ${settingsEl}
         ${historyEl}
+        ${projectIntelEl}
+        ${taskIntelEl}
       </div>
     `;
   }
@@ -1719,7 +1735,9 @@ function App() {
         onOpenDrawer=${() => setDrawerOpen(true)}
         onOpenSettings=${() => setSettingsOpen(true)}
         onOpenHistory=${() => setHistoryOpen(true)}
+        onOpenIntel=${onOpenProjectIntel}
         onUndo=${onUndo}
+        onRedo=${onRedo}
         onDeleteProject=${onDeleteProject}
       />
       <div class="banner-row">
@@ -1752,6 +1770,7 @@ function App() {
             onToggleCollapse=${onToggleCollapse}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
+            onOpenTask=${onOpenTaskIntel}
             scratchpadExpanded=${!!scratchpadExpanded[s]}
             onToggleScratchpad=${onToggleScratchpad}
             onSaveScratchpad=${onSaveScratchpad}
@@ -1763,6 +1782,8 @@ function App() {
       ${helpEl}
       ${settingsEl}
       ${historyEl}
+      ${projectIntelEl}
+      ${taskIntelEl}
     </div>
   `;
 }
