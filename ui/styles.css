@@ -479,6 +479,16 @@ body {
 }
 .copy-block:hover .copy-btn { background: var(--amber); color: var(--bg); }
 
+.contract-block {
+  max-height: min(44vh, 360px);
+  overflow: auto;
+}
+
+.contract-block code {
+  max-height: min(44vh, 360px);
+  overflow: auto;
+}
+
 .intel-modal {
   max-width: min(1040px, calc(100vw - 40px));
 }
@@ -669,6 +679,41 @@ body {
   padding: 2px 6px;
   border: 1px solid var(--hairline-strong);
   color: var(--muted);
+}
+
+.intel-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.intel-action-btn {
+  font-family: var(--font-mono);
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  color: var(--cyan);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.intel-action-btn.warn {
+  color: var(--amber);
+  border-color: rgba(255, 179, 71, 0.45);
+}
+
+.intel-action-btn:hover,
+.intel-action-btn:focus-visible {
+  border-color: currentColor;
+  outline: none;
+}
+
+.intel-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .intel-snippets {
@@ -1723,6 +1768,39 @@ body {
 .card-intel-btn:focus-visible {
   border-color: var(--cyan);
   outline: none;
+}
+
+.card-subfacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.card-subfact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid var(--hairline-strong);
+  color: var(--white-dim);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.card-subfact b {
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.card-subfact.ok {
+  border-color: rgba(0, 200, 83, 0.35);
+  color: var(--green);
+}
+
+.card-subfact.warn {
+  border-color: rgba(255, 179, 71, 0.35);
+  color: var(--amber);
 }
 
 .card-footer {

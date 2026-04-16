@@ -187,6 +187,7 @@ function ContractSections({ task = {} }) {
   const constraints = toStringList(task.constraints);
   const expectedChanges = toStringList(task.expected_changes);
   const allowedPaths = toStringList(task.allowed_paths);
+  const approvals = toStringList(task.approval_required_for || task.requires_approval);
 
   return html`
     <div class="intel-grid">
@@ -201,6 +202,9 @@ function ContractSections({ task = {} }) {
       </${Section}>
       <${Section} title="Allowed Paths">
         <${CodeList} items=${allowedPaths} empty="none" />
+      </${Section}>
+      <${Section} title="Approvals">
+        <${BulletList} items=${approvals} empty="none" />
       </${Section}>
     </div>
   `;
@@ -258,7 +262,10 @@ function renderTaskMode(mode, payload, onOpenTask) {
           <${Section} title="References">
             <${ReferenceList} items=${payload.references || []} />
           </${Section}>
-          <${Section} title="Recent History">
+          <${Section}
+            title="Recent History"
+            subtitle=${payload.truncation?.history ? `${payload.truncation.history.returned} shown` : null}
+          >
             <${HistoryList} items=${payload.recentHistory || []} />
           </${Section}>
         `
@@ -403,7 +410,7 @@ export function TaskIntelligenceModal({ slug, task, initialMode = "brief", onOpe
   `;
 }
 
-function renderProjectMode(mode, payload, onOpenTask) {
+function renderProjectMode(mode, payload, onOpenTask, onPickTask) {
   if (!payload) return null;
 
   if (mode === "next") {
@@ -418,6 +425,14 @@ function renderProjectMode(mode, payload, onOpenTask) {
                 <span class=${`badge status-${item.status}`}>${humanizeValue(item.status)}</span>
               </div>
               <${IntelligenceFacts} facts=${buildTaskFactList(item)} />
+              <div class="intel-inline-actions">
+                <button class="intel-action-btn" onClick=${() => onOpenTask && onOpenTask(item.id, "brief")}>[READ]</button>
+                <button
+                  class="intel-action-btn warn"
+                  onClick=${() => onPickTask && onPickTask(item.id)}
+                  disabled=${!onPickTask}
+                >[PICK]</button>
+              </div>
               <${BulletList} items=${item.reason || []} empty="no ranking notes" />
             </li>
           `)}
@@ -465,7 +480,10 @@ function renderProjectMode(mode, payload, onOpenTask) {
   }
 
   return html`
-    <${Section} title="Decision Memory">
+    <${Section}
+      title="Decision Memory"
+      subtitle=${payload.truncation?.decisions ? `${payload.truncation.decisions.returned} shown` : null}
+    >
       <ul class="intel-task-list">
         ${(payload.decisions || []).map((item) => html`
           <li key=${item.id} class="intel-task-list-item">
@@ -484,7 +502,7 @@ function renderProjectMode(mode, payload, onOpenTask) {
   `;
 }
 
-export function ProjectIntelligenceModal({ slug, project, initialMode = "next", onOpenTask, onClose }) {
+export function ProjectIntelligenceModal({ slug, project, initialMode = "next", onOpenTask, onPickTask, onClose }) {
   const [mode, setMode] = useState(initialMode);
   const [cache, setCache] = useState({});
   const [loading, setLoading] = useState(false);
@@ -547,7 +565,7 @@ export function ProjectIntelligenceModal({ slug, project, initialMode = "next", 
           <${IntelligenceTabs} tabs=${PROJECT_INTEL_TABS} active=${mode} onSelect=${setMode} />
           ${error ? html`<div class="settings-msg error">${error}</div>` : null}
           ${loading && !payload ? html`<p class="muted">loading…</p>` : null}
-          ${renderProjectMode(mode, payload, onOpenTask)}
+          ${renderProjectMode(mode, payload, onOpenTask, onPickTask)}
         </div>
       </div>
     </div>

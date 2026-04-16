@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildCardMetaFacts,
   buildTaskFactList,
   defaultChangedFromRev,
   historyActionText
@@ -41,4 +42,22 @@ test("buildTaskFactList surfaces readiness, approvals, and freshness", () => {
   assert.equal(facts.find((fact) => fact.label === "ready")?.value, "no");
   assert.equal(facts.find((fact) => fact.label === "approval")?.value, "new dependency");
   assert.equal(facts.find((fact) => fact.label === "last_touch")?.value, "rev 12");
+});
+
+test("buildCardMetaFacts surfaces blocked deps, approvals, and task rev", () => {
+  const facts = buildCardMetaFacts(
+    {
+      approval_required_for: ["breaking API change", "new dependency"],
+      rev: 17
+    },
+    ["t-004"]
+  );
+
+  assert.deepEqual(
+    facts.map((fact) => fact.label),
+    ["deps", "approval", "rev"]
+  );
+  assert.equal(facts[0].value, "t-004");
+  assert.equal(facts[1].value, "2 gates");
+  assert.equal(facts[2].value, "r17");
 });

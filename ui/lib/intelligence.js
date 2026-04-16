@@ -78,3 +78,28 @@ export function buildTaskFactList(task = {}) {
 
   return facts;
 }
+
+export function buildCardMetaFacts(task = {}, blockedBy = []) {
+  const facts = [];
+  const approvals = toStringList(task.approval_required_for);
+
+  if (blockedBy.length > 0) {
+    facts.push({ label: "deps", value: blockedBy.join(", "), tone: "warn" });
+  } else {
+    facts.push({ label: "ready", value: "open", tone: "ok" });
+  }
+
+  if (approvals.length > 0) {
+    facts.push({
+      label: "approval",
+      value: approvals.length === 1 ? approvals[0] : `${approvals.length} gates`,
+      tone: "warn"
+    });
+  }
+
+  if (Number.isInteger(task.rev)) {
+    facts.push({ label: "rev", value: `r${task.rev}` });
+  }
+
+  return facts;
+}

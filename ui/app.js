@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { html } from "htm/preact";
+import { buildCardMetaFacts } from "./lib/intelligence.js";
 import { HistoryModal } from "./modals/history.js";
 import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
 
@@ -327,6 +328,7 @@ function FilterToggles({ counts, statusFilters, toggleStatus, blockedCount, open
 function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onSaveComment, onOpenTask }) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
+  const cardFacts = buildCardMetaFacts(task, blockedBy || []);
   const approvals = Array.isArray(task.approval_required_for)
     ? task.approval_required_for.filter((value) => typeof value === "string" && value.trim())
     : [];
@@ -399,6 +401,18 @@ function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onS
           >${label}</button>
         `)}
       </div>
+      ${cardFacts.length > 0
+        ? html`
+            <div class="card-subfacts">
+              ${cardFacts.map((fact) => html`
+                <span key=${`${fact.label}:${fact.value}`} class=${`card-subfact ${fact.tone || ""}`}>
+                  <b>${fact.label}</b>
+                  <span>${fact.value}</span>
+                </span>
+              `)}
+            </div>
+          `
+        : null}
       <${CommentBadge}
         comment=${task.comment}
         onSave=${(value) => onSaveComment && onSaveComment(task.id, value)}
@@ -807,7 +821,7 @@ function HelpModal({ workspace, onClose }) {
   const wsPath = workspace?.workspace || "~/.llm-tracker";
 
   const promptFile =
-    "Read " + readme + " and register this project as <slug>.\n\n" +
+    "Read http://localhost:" + port + "/help (or " + readme + " on disk) and register this project as <slug>.\n\n" +
     "WORKSPACE IS AT: " + wsPath + "\n" +
     "Every path you read or write MUST begin with that absolute path. " +
     "Do NOT create a new .llm-tracker/ folder anywhere else. " +
@@ -822,7 +836,7 @@ function HelpModal({ workspace, onClose }) {
     "Read the tracker only at decision points (claiming next task, resolving a blocker). Writes are fire-and-forget.";
 
   const promptHttp =
-    "Read " + readme + " for the contract, then use HTTP-only (no file paths, no fs writes).\n\n" +
+    "Read http://localhost:" + port + "/help for the live contract, then use HTTP-only (no file paths, no fs writes).\n\n" +
     "IMPORTANT — ALWAYS use --data-binary @file.json, never inline -d '...'.\n" +
     "Inline curl -d strips newlines and corrupts JSON bodies that contain quotes, " +
     "newlines, or special characters. Write the body to a file first, then send it with " +
@@ -847,6 +861,9 @@ function HelpModal({ workspace, onClose }) {
 
   const [mode, setMode] = useState("file");
   const [copied, setCopied] = useState(false);
+  const [liveHelp, setLiveHelp] = useState("");
+  const [helpError, setHelpError] = useState(null);
+  const [helpCopied, setHelpCopied] = useState(false);
   const activePrompt = mode === "file" ? promptFile : promptHttp;
 
   const copy = async () => {
@@ -857,6 +874,15 @@ function HelpModal({ workspace, onClose }) {
     } catch {}
   };
 
+  const copyHelp = async () => {
+    if (!liveHelp) return;
+    try {
+      await navigator.clipboard.writeText(liveHelp);
+      setHelpCopied(true);
+      setTimeout(() => setHelpCopied(false), 1800);
+    } catch {}
+  };
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
@@ -864,6 +890,19 @@ function HelpModal({ workspace, onClose }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    fetch("/help")
+      .then((response) => {
+        if (!response.ok) throw new Error(response.statusText);
+        return response.text();
+      })
+      .then((text) => {
+        setLiveHelp(text);
+        setHelpError(null);
+      })
+      .catch((error) => setHelpError(error.message));
+  }, []);
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
@@ -903,6 +942,20 @@ function HelpModal({ workspace, onClose }) {
               <button class="copy-btn">${copied ? "[COPIED]" : "[COPY]"}</button>
             </div>
             <p class="muted">Replace <code>${"<slug>"}</code> with the project ID you want (lowercase, dash-separated).</p>
+          </section>
+
+          <section>
+            <h3>Live Contract (/help)</h3>
+            ${helpError
+              ? html`<p class="muted">failed to load /help: ${helpError}</p>`
+              : liveHelp
+                ? html`
+                    <div class="copy-block contract-block" onClick=${copyHelp}>
+                      <code class="copy-block-text">${liveHelp}</code>
+                      <button class="copy-btn">${helpCopied ? "[COPIED]" : "[COPY]"}</button>
+                    </div>
+                  `
+                : html`<p class="muted">loading /help…</p>`}
           </section>
 
           <section>
@@ -1484,6 +1537,29 @@ function App() {
     setProjectIntel({ slug: activeSlug, initialMode });
   };
 
+  const onPickTask = async (slug, taskId = null) => {
+    if (!slug) return;
+    try {
+      const res = await fetch(`/api/projects/${slug}/pick`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(taskId ? { taskId } : {})
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(`Pick failed: ${body.error || res.statusText}`);
+        return;
+      }
+      const pickedId = body.task?.id || body.pickedTaskId || taskId;
+      if (pickedId) {
+        setProjectIntel(null);
+        onOpenTaskIntel(slug, pickedId, "execute");
+      }
+    } catch (e) {
+      alert(`Pick failed: ${e.message}`);
+    }
+  };
+
   const onToggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
   const onTogglePin = () => setDrawerPinned((p) => !p);
@@ -1623,6 +1699,7 @@ function App() {
         project=${projects[projectIntel.slug]}
         initialMode=${projectIntel.initialMode}
         onOpenTask=${(taskId, mode) => onOpenTaskIntel(projectIntel.slug, taskId, mode)}
+        onPickTask=${(taskId) => onPickTask(projectIntel.slug, taskId)}
         onClose=${() => setProjectIntel(null)}
       />`
     : null;
