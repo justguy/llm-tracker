@@ -26,7 +26,9 @@ Before you write anything:
 
 - The hub binds to `127.0.0.1` only by default. It is not reachable from other hosts.
 - Mutating requests (`POST` / `PUT` / `PATCH` / `DELETE`) with an `Origin` or `Referer` that is neither loopback nor the exact hub origin serving that request get `403`. CLI tools and MCP clients that send no `Origin` are allowed.
+- WebSocket upgrades to `/ws` use the same origin gate. Cross-origin browser tabs are rejected with `403`, so other sites cannot subscribe to tracker broadcasts.
 - If the operator set `LLM_TRACKER_TOKEN`, every mutating request must carry `Authorization: Bearer <token>` (or `X-LLM-Tracker-Token: <token>`). The workspace `llm-tracker` CLI reads it from the same env var. The browser UI authenticates via a short-lived HttpOnly same-origin session cookie; the raw token is not exposed to page JavaScript.
+- If the operator set `LLM_TRACKER_TOKEN`, `/ws` also requires that bearer token header (or `X-LLM-Tracker-Token`) unless the upgrade request carries the browser UI's short-lived same-origin session cookie.
 - Default JSON body limit is 1 MB. Oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) are rejected before merge.
 - Deleted projects can be brought back by a human with `llm-tracker restore <slug>` or `POST /api/projects/<slug>/restore`. Agents must not call this unless explicitly asked.
 
@@ -112,7 +114,9 @@ If any is "no" or "unsure," ask the human before proceeding.
 
 - **Array order in `tasks[]`** — hub preserves its own order regardless of what you submit. Reorder happens only through the UI's drag endpoint.
 - **Deletion** — missing task IDs are kept, not deleted. To archive, set `status: "deferred"`. Deletion is human-only via the UI.
+- **Tombstones** — when a human deletes a task, the id is recorded in `meta.deleted_tasks`. Any incoming write that tries to re-add that id is dropped with an `ignored` note. Pick a **new id** if you really need to reopen the work.
 - **`meta.swimlanes[i].collapsed`** — human UI state. Hub always keeps the existing value; your submissions for this field are dropped.
+- **`meta.deleted_tasks`** — hub-owned tombstone list. Any value you submit is ignored.
 - **`updatedAt`, `rev`** — hub-owned, monotonic. Any value you submit is ignored and overwritten.
 
 ### Workflow
@@ -138,6 +142,7 @@ Two top-level keys: `meta` and `tasks`.
 | `scratchpad` | string                            |          | Status banner to the human.                                                |
 | `updatedAt`  | ISO string \| null                |          | **Hub-owned.**                                                             |
 | `rev`        | integer \| null                   |          | **Hub-owned.** Monotonic.                                                  |
+| `deleted_tasks` | array of task ids \| null       |          | **Hub-owned.** Tombstones for human-deleted tasks — incoming writes that re-add any id listed here are refused. |
 
 ### 4.2 Swimlane
 

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
-import { readFileSync, existsSync, writeFileSync, renameSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, existsSync, writeFileSync, renameSync, readdirSync, realpathSync } from "node:fs";
 import { join, extname, dirname } from "node:path";
 import { createRequire } from "node:module";
 import express from "express";
@@ -10,6 +10,11 @@ import { buildTrackerErrorBody } from "./error-payload.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
 import { Store, slugFromFile } from "./store.js";
+
+// Watcher tuning: ignore obviously-irrelevant paths anywhere in the tree. The
+// main trackers/ watcher uses native events and is already depth:0, but these
+// patterns defend against accidental deep recursion via linked repo paths.
+const WATCHER_IGNORED = /(^|[\\/])(node_modules|\.git|\.llm-tracker|\.runtime|\.snapshots|\.history)([\\/]|$)/;
 
 const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -270,8 +275,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     });
   });
 
-  let reloadProject = () => ({ ok: false, status: 503, message: "hub not ready" });
-  let reloadAllProjects = () => ({ reloaded: [], errors: [] });
+  let reloadProject = async () => ({ ok: false, status: 503, message: "hub not ready" });
+  let reloadAllProjects = async () => ({ reloaded: [], errors: [] });
 
   app.put("/api/settings", (req, res) => {
     const body = req.body || {};
@@ -301,14 +306,14 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     });
   });
 
-  app.get("/api/projects", (_req, res) => {
-    reloadAllProjects({ broadcastUpdate: false });
+  app.get("/api/projects", async (_req, res) => {
+    await reloadAllProjects({ broadcastUpdate: false });
     res.json({ projects: store.list() });
   });
 
-  app.param("slug", (req, _res, next, slug) => {
+  app.param("slug", async (req, _res, next, slug) => {
     if (!slug || store.get(slug)) return next();
-    const result = reloadProject(slug, { broadcastUpdate: true });
+    const result = await reloadProject(slug, { broadcastUpdate: true });
     if (result?.ok) req.projectReloadedFromDisk = true;
     next();
   });
@@ -366,7 +371,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     const { target } = req.body || {};
     const r = await store.symlinkProject(req.params.slug, target);
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
-    const loaded = reloadProject(req.params.slug);
+    const loaded = await reloadProject(req.params.slug);
     if (!loaded?.ok) {
       return res.status(500).json({
         error: `symlink created but eager load failed: ${loaded?.message || "unknown error"}`,
@@ -384,8 +389,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     });
   });
 
-  app.post("/api/projects/:slug/reload", (req, res) => {
-    const result = reloadProject(req.params.slug);
+  app.post("/api/projects/:slug/reload", async (req, res) => {
+    const result = await reloadProject(req.params.slug);
     if (!result?.ok) return res.status(result?.status || 400).json({ error: result?.message || "reload failed" });
     res.json({
       ok: true,
@@ -396,8 +401,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     });
   });
 
-  app.post("/api/reload", (_req, res) => {
-    const result = reloadAllProjects();
+  app.post("/api/reload", async (_req, res) => {
+    const result = await reloadAllProjects();
     res.json({
       ok: result.errors.length === 0,
       reloaded: result.reloaded,
@@ -603,7 +608,27 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   });
 
   const httpServer = createServer(app);
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  // WebSocket upgrade guard. Matches the HTTP cross-origin policy: cross-origin
+  // browsers cannot open /ws, so a malicious page cannot subscribe to project
+  // broadcasts. When a bearer token is active, also require a valid
+  // Authorization: Bearer header OR a live UI session cookie.
+  const verifyWsClient = (info, done) => {
+    const origin = info.req.headers.origin;
+    if (origin && !isAllowedMutatingOrigin(info.req, origin)) {
+      return done(false, 403, "cross-origin websocket rejected");
+    }
+    if (bearerToken) {
+      const auth = info.req.headers.authorization || "";
+      const m = /^Bearer\s+(.+)$/i.exec(auth);
+      const x = info.req.headers["x-llm-tracker-token"];
+      if ((m && m[1] === bearerToken) || x === bearerToken || hasValidUiSession(info.req)) {
+        return done(true);
+      }
+      return done(false, 401, "auth required");
+    }
+    done(true);
+  };
+  const wss = new WebSocketServer({ server: httpServer, path: "/ws", verifyClient: verifyWsClient });
   const sockets = new Set();
   let shuttingDown = false;
 
@@ -625,18 +650,64 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
   const trackersDir = join(workspace, "trackers");
   const patchesDir = join(workspace, "patches");
-  // usePolling is required so symlinked trackers (Option C registration) pick
-  // up changes the LLM makes to the target file, which lives in a different
-  // directory than our native fsevents subscription.
+  // Main trackers watcher uses native filesystem events. depth:0 + the ignored
+  // pattern prevent recursion into node_modules / .git / hub-owned sibling
+  // directories even if the workspace lives next to them.
   const watcher = chokidar.watch(trackersDir, {
     ignoreInitial: true,
     depth: 0,
-    followSymlinks: true,
+    followSymlinks: false,
+    ignored: WATCHER_IGNORED,
+    awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 40 }
+  });
+
+  // Polling watcher for symlinked tracker targets outside the workspace
+  // (Option C registration). Native fsevents does not forward changes from
+  // outside the watched tree, so we poll only the individual target file —
+  // not its parent directory — to keep CPU cost bounded.
+  const linkedTargetsWatcher = chokidar.watch([], {
+    ignoreInitial: true,
+    followSymlinks: false,
     usePolling: true,
     interval: 300,
     binaryInterval: 500,
+    ignored: WATCHER_IGNORED,
     awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 40 }
   });
+
+  // slug → absolute target path currently polled via linkedTargetsWatcher
+  const linkedTargetsBySlug = new Map();
+  const linkedSlugByTarget = new Map();
+
+  const trackLinkedTarget = (slug) => {
+    const trackerFile = join(trackersDir, `${slug}.json`);
+    let real;
+    try {
+      const l = lstatSync(trackerFile);
+      if (!l.isSymbolicLink()) return;
+      real = realpathSync(trackerFile);
+    } catch {
+      return;
+    }
+    if (!real || real === trackerFile) return;
+    const existing = linkedTargetsBySlug.get(slug);
+    if (existing === real) return;
+    if (existing) {
+      linkedTargetsWatcher.unwatch(existing);
+      linkedSlugByTarget.delete(existing);
+    }
+    linkedTargetsWatcher.add(real);
+    linkedTargetsBySlug.set(slug, real);
+    linkedSlugByTarget.set(real, slug);
+  };
+
+  const untrackLinkedTarget = (slug) => {
+    const target = linkedTargetsBySlug.get(slug);
+    if (!target) return;
+    linkedTargetsWatcher.unwatch(target);
+    linkedTargetsBySlug.delete(slug);
+    linkedSlugByTarget.delete(target);
+  };
 
   // Patch-file watcher (bash-less write path): any file dropped into patches/
   // is applied via store.applyPatch using the slug from the filename prefix,
@@ -644,6 +715,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   const patchesWatcher = chokidar.watch(patchesDir, {
     ignoreInitial: true,
     depth: 0,
+    ignored: WATCHER_IGNORED,
     awaitWriteFinish: { stabilityThreshold: 120, pollInterval: 30 }
   });
 
@@ -704,7 +776,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     return true;
   };
 
-  const ingestTrackerFile = (filePath, { broadcastUpdate = true } = {}) => {
+  const ingestTrackerFile = async (filePath, { broadcastUpdate = true } = {}) => {
     if (!isTrackerFile(filePath)) return;
     const slug = slugFromFile(filePath);
     if (!slug) return;
@@ -714,7 +786,11 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     } catch {
       return;
     }
-    const result = store.ingest(filePath, raw);
+    // Ingestion must hold the per-slug lock so it serializes with HTTP patch,
+    // UI move/drag, undo/redo, rollback, and deleteTask paths. Otherwise a
+    // chokidar event firing mid-write could interleave with an in-flight
+    // mutation and clobber state.
+    const result = await store.ingestLocked(filePath, raw);
     if (result?.ok && result?.slug) {
       const entry = store.get(result.slug);
       primeSemanticIndex({
@@ -722,6 +798,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
         slug: result.slug,
         entry
       });
+      trackLinkedTarget(result.slug);
     }
     if (broadcastUpdate && result?.slug && result?.event) {
       broadcast({
@@ -733,13 +810,13 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     return result;
   };
 
-  reloadProject = (slug, { broadcastUpdate = true } = {}) => {
+  reloadProject = async (slug, { broadcastUpdate = true } = {}) => {
     const filePath = join(trackersDir, `${slug}.json`);
     if (!existsSync(filePath)) {
       return { ok: false, status: 404, message: "project not found on disk" };
     }
     return (
-      ingestTrackerFile(filePath, { broadcastUpdate }) || {
+      (await ingestTrackerFile(filePath, { broadcastUpdate })) || {
         ok: false,
         status: 404,
         message: "project not found on disk"
@@ -747,7 +824,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     );
   };
 
-  reloadAllProjects = ({ broadcastUpdate = true } = {}) => {
+  reloadAllProjects = async ({ broadcastUpdate = true } = {}) => {
     const files = existsSync(trackersDir)
       ? readdirSync(trackersDir)
           .filter((name) => isTrackerFile(name))
@@ -757,7 +834,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     const reloaded = [];
     const errors = [];
     for (const filePath of files) {
-      const result = ingestTrackerFile(filePath, { broadcastUpdate });
+      const result = await ingestTrackerFile(filePath, { broadcastUpdate });
       if (!result) continue;
       if (result.ok) {
         reloaded.push({
@@ -776,7 +853,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     return { reloaded, errors };
   };
 
-  reloadAllProjects({ broadcastUpdate: false });
+  await reloadAllProjects({ broadcastUpdate: false });
 
   watcher
     .on("add", (filePath) => ingestTrackerFile(filePath))
@@ -784,10 +861,27 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     .on("unlink", (filePath) => {
       if (!isTrackerFile(filePath)) return;
       const slug = slugFromFile(filePath);
-      if (slug) clearSearchCachesForSlug(workspace, slug);
+      if (slug) {
+        clearSearchCachesForSlug(workspace, slug);
+        untrackLinkedTarget(slug);
+      }
       const r = store.remove(filePath);
       if (r) broadcast({ type: "REMOVE", slug: r.slug });
     });
+
+  linkedTargetsWatcher.on("change", (targetPath) => {
+    const slug = linkedSlugByTarget.get(targetPath);
+    if (!slug) return;
+    const trackerFile = join(trackersDir, `${slug}.json`);
+    if (existsSync(trackerFile)) ingestTrackerFile(trackerFile);
+  });
+  linkedTargetsWatcher.on("unlink", (targetPath) => {
+    const slug = linkedSlugByTarget.get(targetPath);
+    if (!slug) return;
+    // Target deleted out from under us — clear tracking; the symlink in
+    // trackers/ is now dangling and the next read will surface that.
+    untrackLinkedTarget(slug);
+  });
 
   const shutdown = async () => {
     if (shuttingDown) return;
@@ -795,6 +889,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
     try {
       await watcher.close();
+    } catch {}
+    try {
+      await linkedTargetsWatcher.close();
     } catch {}
     try {
       await patchesWatcher.close();
@@ -839,6 +936,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       httpServer.off("listening", onListening);
       try {
         await watcher.close();
+      } catch {}
+      try {
+        await linkedTargetsWatcher.close();
       } catch {}
       try {
         await patchesWatcher.close();

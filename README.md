@@ -509,7 +509,9 @@ The hub is a local service. It ships three layers that matter if another process
 
 - **Loopback binding** — by default the listener binds to `127.0.0.1`, so other hosts on the LAN cannot reach it. Override with `LLM_TRACKER_HOST=0.0.0.0` if you consciously want LAN access.
 - **Cross-origin guard** — every mutating request (`POST` / `PUT` / `PATCH` / `DELETE`) must either have no `Origin` header (trusted CLI / `curl` / MCP context) or carry an origin that exactly matches the hub origin serving that request. Loopback origins are always allowed too. Anything else returns `403`, so browser CSRF stays blocked even if you deliberately expose the hub on a LAN IP.
+- **WebSocket guard** — `/ws` uses the same origin policy. Cross-origin browser upgrades are rejected with `403`, so a malicious page cannot subscribe to tracker broadcasts from another site.
 - **Optional bearer token** — set `LLM_TRACKER_TOKEN=<secret>` before starting the hub and every mutating request must include `Authorization: Bearer <secret>` (or `X-LLM-Tracker-Token: <secret>`). The CLI picks the token up from the same env var automatically. The browser UI gets a short-lived HttpOnly same-origin session cookie when it loads `index.html`, so the raw secret is never injected into page JavaScript.
+- **WebSocket auth when tokenized** — when `LLM_TRACKER_TOKEN` is set, `/ws` also requires `Authorization: Bearer <secret>` (or `X-LLM-Tracker-Token`) unless the request carries the UI's short-lived same-origin session cookie.
 
 Body-size hardening:
 
@@ -541,12 +543,14 @@ curl -X POST http://localhost:4400/api/projects/<slug>/restore \
 - `undo` — reverse the last accepted revision on a **currently registered** project.
 - `rollback` — set a registered project back to any prior rev as a new, auditable rev.
 
+Tombstones — when a human deletes a task (via the UI `[×]` button or `DELETE /api/projects/<slug>/tasks/<taskId>`), the id is recorded in `meta.deleted_tasks`. This hub-owned list blocks stale LLM writes from silently resurrecting the deleted task. Rolling back to a rev that predates the deletion clears the tombstone.
+
 ## Windows support
 
 The hub runs on Windows, but a few paths need extra care:
 
 - **Symlinking repo-local trackers (`llm-tracker link`, Option C)** — `symlinkSync` requires either Developer Mode (Settings → Privacy & security → For developers) or running the shell as Administrator. If you hit `EPERM` / `EACCES`, fall back to `PUT /api/projects/<slug>` (Option B) instead — it has no filesystem-privilege requirements.
-- **File watchers** — chokidar polling is enabled by default for linked targets, so symlinked files outside the workspace still get change events. Native filesystem events are not relied on for this path.
+- **File watchers** — the main `trackers/` watcher uses native filesystem events. Polling is enabled only for symlinked targets that live outside the workspace, and only on the specific target files — not their parent directories — so CPU cost stays bounded even when a target lives deep inside a repo.
 - **Line endings** — tracker JSON is written with `\n` on all platforms. Leave core.autocrlf to your preference in the repo itself; the hub never rewrites linked files for EOL.
 - **Paths** — Windows absolute paths (`C:\Users\...`) work everywhere an absolute path is expected.
 - **LAN access** — if you override `LLM_TRACKER_HOST`, open the UI through the real host or IP you bound for. Browser writes remain same-origin only; a page loaded from some other site still gets `403`.

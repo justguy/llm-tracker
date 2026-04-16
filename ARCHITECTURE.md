@@ -84,6 +84,7 @@ Every tracker JSON has two top-level keys: `meta` and `tasks`. The minimal "Day 
 | `scratchpad` | string (≤ 5000 chars)             |          | LLM's status banner to the human. Rendered above the matrix, collapsed by default, editable inline. |
 | `updatedAt`  | ISO string \| null                |          | **Hub-owned.**                                                     |
 | `rev`        | integer \| null                   |          | **Hub-owned.** Monotonic, bumps on every accepted change.          |
+| `deleted_tasks` | array of task ids \| null      |          | **Hub-owned.** Tombstones for human-deleted task ids. Incoming writes that try to re-add a listed id are dropped in merge. Rolling back to a rev that predates the deletion clears the tombstone. |
 
 **Swimlane object:**
 
@@ -428,7 +429,9 @@ All errors return JSON: `{error, type?, hint?}`. Default body limit: 1 MB (overr
 
 - The hub binds to `127.0.0.1` by default. Override with `LLM_TRACKER_HOST` if you intentionally want a different host bind.
 - Mutating requests are rejected with `403` unless they are either origin-less (CLI / MCP / curl), loopback-origin, or exactly same-origin with the host that served the request.
+- WebSocket upgrades to `/ws` use the same origin gate, so cross-origin browser tabs cannot subscribe to tracker broadcasts.
 - When `LLM_TRACKER_TOKEN` is set, mutating requests must send `Authorization: Bearer <token>` (or `X-LLM-Tracker-Token`) unless they come from the browser UI's short-lived HttpOnly same-origin session.
+- When `LLM_TRACKER_TOKEN` is set, `/ws` also requires that bearer token header (or `X-LLM-Tracker-Token`) unless the upgrade request carries the UI's short-lived same-origin session cookie.
 - The raw bearer token is not injected into `index.html`.
 
 ---
@@ -502,9 +505,14 @@ First match wins:
 
 `atomicWriteJson(file, data)` writes to a temp file and `rename`s it into place. A naive `renameSync(tmp, file)` on top of a symlink **replaces the symlink with a regular file** — killing Option C's whole point. The hub resolves the symlink first with `realpathSync` and renames onto the real target, so the symlink survives any number of writes and the rev stamps flow through to the original file in the user's repo.
 
-### Polling-based file watching
+### Scoped file watching
 
-Chokidar uses native fsevents on macOS, which subscribes to directory events. When a tracker file in `trackers/` is a symlink to a file in a **different directory** (Option C), writes to the target file fire OS events in *that* other directory — which fsevents on the trackers dir does not see. The hub therefore runs chokidar with `usePolling: true, interval: 300`: `stat()` every ~300 ms picks up changes to target files regardless of where they live. For a local tool watching a handful of files, polling overhead is negligible.
+Chokidar uses native fsevents on macOS and `inotify` on Linux, which subscribes to directory events. The hub uses two watchers to keep CPU cost bounded:
+
+- **Main watcher** on `trackers/` with native events (no polling), `depth: 0`, and an `ignored` pattern that excludes `node_modules`, `.git`, `.llm-tracker`, `.runtime`, `.snapshots`, and `.history` in case the workspace lives near any of those.
+- **Linked-targets watcher** — a dedicated polling watcher that only watches the specific absolute paths of linked symlink targets (Option C). When `trackers/<slug>.json` is a symlink pointing outside the workspace, the hub resolves the target with `realpathSync` and adds only that file to the polling watcher (`interval: 300`). Writes to the target file fire in its own directory — which the `trackers/` native watcher cannot see — but the per-target poller catches them without polling the whole repo the target happens to live in.
+
+This means the hub never polls directories it does not own and never walks into `node_modules` or `.git` trees, even when an agent symlinks a tracker from deep inside a repo.
 
 To reduce reliance on watcher timing, the hub also:
 
@@ -537,6 +545,7 @@ On hub start, each tracker file's `meta.rev` is compared against the snapshot at
 ### Concurrency
 
 - **Per-slug write lock** — `store.withLock(slug, fn)` serializes all mutations to a project: HTTP patches, UI drags, collapses, rollbacks, deletions. Two simultaneous requests to the same slug run sequentially; different slugs run in parallel.
+- **File-watcher ingest is also locked** — `store.ingestLocked(filePath, rawContents)` wraps `ingest` in the same per-slug queue, so chokidar events from the main watcher, the linked-targets poller, and the patches watcher all serialize with HTTP-driven writes instead of racing them.
 - **In-memory-first for structure-changing ops** — `rollback`, `deleteTask`, `applyCollapse` update in-memory state *before* writing the file. The chokidar re-ingest from that write sees matching state and no-ops. This avoids the merge layer (which is designed to protect against LLM accidents) from clobbering legitimate hub-initiated changes.
 
 ### What's deliberately NOT implemented

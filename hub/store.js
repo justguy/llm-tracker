@@ -210,6 +210,12 @@ export class Store {
     return this.projects.get(slug) || null;
   }
 
+  async ingestLocked(filePath, rawContents) {
+    const slug = slugFromFile(filePath);
+    if (!slug) return { ok: false, reason: "not-a-tracker" };
+    return this.withLock(slug, () => this.ingest(filePath, rawContents));
+  }
+
   ingest(filePath, rawContents) {
     const slug = slugFromFile(filePath);
     if (!slug) return { ok: false, reason: "not-a-tracker" };
@@ -450,6 +456,15 @@ export class Store {
           t.dependencies = t.dependencies.filter((d) => d !== taskId);
         }
       }
+
+      // Tombstone the deleted id so a later full-file write from a stale LLM
+      // context cannot silently resurrect it. The list is hub-owned; merge.js
+      // strips incoming meta.deleted_tasks and refuses to re-add tombstoned ids.
+      const tombstones = Array.isArray(newState.meta.deleted_tasks)
+        ? [...newState.meta.deleted_tasks]
+        : [];
+      if (!tombstones.includes(taskId)) tombstones.push(taskId);
+      newState.meta.deleted_tasks = tombstones;
 
       const baseRev = current.rev;
       const newRev = baseRev + 1;

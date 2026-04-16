@@ -11,10 +11,17 @@ export function mergeProject(existing, incoming) {
 
   const merged = JSON.parse(JSON.stringify(existing));
 
+  // Tombstone list of task ids the human has explicitly deleted. Hub-owned —
+  // incoming writes cannot set or clear it, and incoming task updates that
+  // target a tombstoned id are dropped with a warning.
+  const tombstones = new Set(
+    Array.isArray(existing?.meta?.deleted_tasks) ? existing.meta.deleted_tasks : []
+  );
+
   // ── meta ─────────────────────────────────────────────────────────
   if (incoming && incoming.meta) {
     for (const [k, v] of Object.entries(incoming.meta)) {
-      if (k === "updatedAt" || k === "rev") {
+      if (k === "updatedAt" || k === "rev" || k === "deleted_tasks") {
         notes.ignored.push(`meta.${k} is hub-owned`);
         continue;
       }
@@ -70,11 +77,16 @@ export function mergeProject(existing, incoming) {
       }
     }
     for (const inc of incomingArr) {
-      if (!existingIds.has(inc.id)) {
-        const defaulted = { dependencies: [], ...inc };
-        next.push(defaulted);
-        notes.appended.push(inc.id);
+      if (existingIds.has(inc.id)) continue;
+      if (tombstones.has(inc.id)) {
+        notes.ignored.push(
+          `task ${inc.id} was deleted by a human; refusing to resurrect (pick a new id if you need to reopen the work)`
+        );
+        continue;
       }
+      const defaulted = { dependencies: [], ...inc };
+      next.push(defaulted);
+      notes.appended.push(inc.id);
     }
     merged.tasks = next;
   }

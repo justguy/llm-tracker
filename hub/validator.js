@@ -42,7 +42,12 @@ const schema = {
           }
         },
         scratchpad: { type: "string", maxLength: 5000 },
-        updatedAt: { type: ["string", "null"] }
+        updatedAt: { type: ["string", "null"] },
+        deleted_tasks: {
+          type: ["array", "null"],
+          items: { type: "string", minLength: 1 },
+          uniqueItems: true
+        }
       }
     },
     tasks: {
