@@ -211,7 +211,7 @@ test("daemon stop force-kills a process that ignores SIGTERM", () => {
   }
 });
 
-test("help output documents daemon commands, reload, retrieval and execution packs, and the --daemon flag", () => {
+test("help output documents daemon commands, MCP, reload, retrieval and execution packs, and the --daemon flag", () => {
   const res = runCli(["help"]);
   assert.equal(res.status, 0, res.stderr || res.stdout);
   assert.match(res.stdout, /--daemon/);
@@ -219,6 +219,7 @@ test("help output documents daemon commands, reload, retrieval and execution pac
   assert.match(res.stdout, /daemon stop/);
   assert.match(res.stdout, /daemon restart/);
   assert.match(res.stdout, /daemon logs/);
+  assert.match(res.stdout, /llm-tracker mcp/);
   assert.match(res.stdout, /reload \[\<slug\>\]/);
   assert.match(res.stdout, /brief <slug> <taskId>/);
   assert.match(res.stdout, /why <slug> <taskId>/);

@@ -2,27 +2,19 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import {
-  closeSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync
-} from "node:fs";
-import { homedir } from "node:os";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, writeFileSync } from "node:fs";
 import { cmdBlockers } from "./commands/blockers.js";
 import { cmdBrief } from "./commands/brief.js";
 import { cmdChanged } from "./commands/changed.js";
 import { cmdDecisions } from "./commands/decisions.js";
 import { cmdExecute } from "./commands/execute.js";
+import { startMcpServer } from "./mcp-server.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
 import { cmdReload } from "./commands/reload.js";
 import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
+import { DEFAULT_PORT, httpRequest, resolvePort, resolveWorkspace } from "./workspace-client.js";
 import { startHub } from "../hub/server.js";
 import { loadProjects, renderDashboard, renderProject, renderJson } from "../hub/status.js";
 import {
@@ -34,21 +26,6 @@ import {
   writeDaemonMeta
 } from "../hub/runtime.js";
 
-function loadWorkspaceSettings(workspace) {
-  const file = join(workspace, "settings.json");
-  if (!existsSync(file)) return {};
-  try {
-    return JSON.parse(readFileSync(file, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-function validPort(n) {
-  const p = parseInt(n, 10);
-  return !isNaN(p) && p >= 1 && p <= 65535 ? p : null;
-}
-
 function validLineCount(n) {
   const count = parseInt(n, 10);
   return !isNaN(count) && count >= 1 && count <= 5000 ? count : null;
@@ -58,8 +35,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PKG_ROOT = resolve(__dirname, "..");
 
-const DEFAULT_WORKSPACE = join(homedir(), ".llm-tracker");
-const DEFAULT_PORT = 4400;
 const DAEMON_READY_TIMEOUT_MS = 5000;
 const DAEMON_STOP_TIMEOUT_MS = 5000;
 const DAEMON_FORCE_STOP_TIMEOUT_MS = 2000;
@@ -76,23 +51,6 @@ function parseArgs(argv) {
     }
   }
   return args;
-}
-
-function resolveWorkspace(flag) {
-  const fromFlag = flag || process.env.LLM_TRACKER_HOME;
-  return resolve(fromFlag || DEFAULT_WORKSPACE);
-}
-
-function resolvePort(workspace, flagPort) {
-  const wsSettings = loadWorkspaceSettings(workspace);
-  const daemonStatus = getDaemonStatus(workspace);
-  return (
-    validPort(flagPort) ||
-    validPort(process.env.LLM_TRACKER_PORT) ||
-    validPort(wsSettings.port) ||
-    (daemonStatus.running ? validPort(daemonStatus.meta?.port) : null) ||
-    DEFAULT_PORT
-  );
 }
 
 function copyTree(src, dst) {
@@ -192,28 +150,6 @@ function cmdInit(args) {
   console.log(" Start in background: npx llm-tracker --daemon");
   console.log(" UI help modal has one-click copy-paste prompts for both modes.");
   console.log("─────────────────────────────────────────────────────────");
-}
-
-async function httpRequest(workspace, portFlag, method, path, body) {
-  const port = resolvePort(workspace, portFlag);
-  const url = `http://localhost:${port}${path}`;
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined
-    });
-    const text = await res.text();
-    let json;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = { raw: text };
-    }
-    return { status: res.status, body: json };
-  } catch (e) {
-    return { status: 0, body: { error: e.message } };
-  }
 }
 
 async function cmdLink(args) {
@@ -580,6 +516,7 @@ async function main() {
   if (cmd === "rollback") return cmdRollback(args);
   if (cmd === "since") return cmdSince(args);
   if (cmd === "link") return cmdLink(args);
+  if (cmd === "mcp") return startMcpServer({ workspace: args.flags.path, portFlag: args.flags.port });
   if (cmd === "daemon") return cmdDaemon(args);
   if (cmd === "help" || args.flags.help) {
     console.log(`llm-tracker — file-system-as-database project tracker
@@ -593,6 +530,7 @@ Usage:
   llm-tracker daemon restart [--path <dir>] [--port N] Restart the background daemon
   llm-tracker daemon status [--path <dir>]             Show daemon status
   llm-tracker daemon logs [--path <dir>] [--lines N]   Print recent daemon logs
+  llm-tracker mcp [--path <dir>] [--port N]            Start the stdio MCP server
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
   llm-tracker reload [<slug>] [--json]                 Reload one or all trackers from disk (requires hub)
   llm-tracker brief <slug> <taskId> [--json]           Print a task brief pack (requires hub)

@@ -7,7 +7,9 @@ Deep-dive on the internals. For the marketing hook and installation, see [README
 ## Pieces
 
 ```
-bin/llm-tracker.js       CLI entrypoint: init | run | daemon | status | blockers | changed | pick | next | since | rollback | link
+bin/llm-tracker.js       CLI entrypoint: init | run | daemon | mcp | status | blockers | changed | pick | next | since | rollback | link
+bin/mcp-server.js        Stdio MCP server exposing the deterministic tracker surfaces as `tracker_*` tools
+bin/workspace-client.js  Shared workspace/port resolution + local hub HTTP client
 bin/commands/shared.js   Shared CLI helpers for hub-backed command modules
 bin/commands/blockers.js `llm-tracker blockers` formatter + HTTP client wrapper
 bin/commands/changed.js  `llm-tracker changed` formatter + HTTP client wrapper
@@ -20,6 +22,7 @@ hub/merge.js             Hub-authoritative merge: preserves task order, refuses 
 hub/versioning.js        computeDelta (structured field-level diff), summarize, hasChanges
 hub/snapshots.js         Per-rev .snapshots/<slug>/<rev>.json + .history/<slug>.jsonl append-only log
 hub/runtime.js           Workspace runtime helpers (.runtime/, daemon pid/log metadata)
+hub/project-loader.js    Direct workspace project/help loader for read-only surfaces outside the hub
 hub/task-metadata.js     Shared normalized task summary helpers used by deterministic retrieval
 hub/blockers.js          Structural blocker payload builder
 hub/changed.js           Changed-task payload builder from append-only history
@@ -177,6 +180,29 @@ Ranking currently favors:
 Aggregate/container rows are detected structurally from roadmap/subtask metadata. They remain in the shortlist as an honest fallback when no finer-grained executable task exists, but they do not block bounded child tasks and they do not outrank them.
 
 Approval requirements are treated as a penalty, not a hard exclusion, so near-ready work still appears in the shortlist.
+
+## MCP layer
+
+`llm-tracker mcp --path <workspace>` exposes the same deterministic surfaces as stdio MCP tools:
+
+- `tracker_help`
+- `tracker_projects`
+- `tracker_next`
+- `tracker_brief`
+- `tracker_why`
+- `tracker_decisions`
+- `tracker_execute`
+- `tracker_verify`
+- `tracker_blockers`
+- `tracker_changed`
+- `tracker_pick`
+- `tracker_reload`
+
+Design rule:
+
+- read tools load the workspace files directly and call the same deterministic payload builders as HTTP/CLI
+- write tools (`tracker_pick`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
+- `/help`, CLI, and MCP must stay in sync when agent-facing behavior changes
 
 ### Companion surfaces
 

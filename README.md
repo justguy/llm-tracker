@@ -20,6 +20,8 @@ When an agent is ready to act or validate work, it can now call `npx llm-tracker
 
 When an agent needs the current contract for a running hub, it should call `GET /help` first instead of guessing write modes or endpoints.
 
+If your coding client supports MCP, `npx llm-tracker mcp --path ~/.llm-tracker` exposes the same deterministic surfaces as `tracker_*` tools so agents can stop shelling out to `curl`.
+
 ## Why use llm-tracker?
 
 🔒 **100 % Local & Secure** — the hub makes zero external calls. It doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine.
@@ -89,8 +91,10 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 - It serves the workspace `README.md`
 - For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
 - Agents should read `/help` before using write paths or task-intelligence endpoints
+- If MCP is configured, agents should prefer `tracker_help` first, then `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_pick`, and `tracker_reload`
 - Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, `decisions` to recall prior decisions, and `execute` / `verify` to close the work loop before broad file reads
 - If you change agent-facing behavior, update the workspace template so `/help` stays accurate
+- If you change agent-facing behavior, update the MCP tool layer so the `tracker_*` tools stay aligned with HTTP and CLI behavior
 
 ---
 
@@ -153,12 +157,36 @@ npx llm-tracker daemon status             # show pid / port / log path
 npx llm-tracker daemon stop               # stop the background hub
 npx llm-tracker daemon restart            # restart the same background hub
 npx llm-tracker daemon logs --lines 80    # print recent daemon logs
+npx llm-tracker mcp --path ~/.llm-tracker # start the stdio MCP server for agent clients
 
 # For LLMs talking to the running hub
 curl http://localhost:4400/help           # current workspace agent contract
 ```
 
 Full flag reference: `npx llm-tracker help`.
+
+### MCP
+
+The MCP server is intentionally thin. Read tools load the same workspace files and deterministic payload builders used by the HTTP/CLI layer; write tools like `tracker_pick` and `tracker_reload` call the running hub so locking and live reconciliation stay authoritative.
+
+Recommended MCP tool flow:
+
+- `tracker_help`
+- `tracker_projects`
+- `tracker_next`
+- `tracker_brief` or `tracker_why`
+- `tracker_execute`
+- `tracker_pick`
+- `tracker_verify`
+
+Example MCP command:
+
+```json
+{
+  "command": "npx",
+  "args": ["llm-tracker", "mcp", "--path", "/Users/you/.llm-tracker"]
+}
+```
 
 ## Background daemon
 

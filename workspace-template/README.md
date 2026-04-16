@@ -6,6 +6,8 @@ Writes are **frequent and tiny**. Reads are **rare and only at decision points**
 
 If the hub is running and you can make one HTTP call, prefer `GET /help` first. It serves this exact contract for the active workspace.
 
+If your client supports MCP, prefer the `tracker_*` MCP tools over ad hoc `curl` once they are configured. The intended first call is still the same: `tracker_help`.
+
 ---
 
 ## 0. The rule that prevents the most common failure
@@ -47,6 +49,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
+- **When MCP is configured**, prefer `tracker_help`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_pick`, and `tracker_reload` over raw `curl`.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
 - **On failure**, read `<slug>.errors.json` (file mode) or the JSON response body (HTTP mode). Both are structured `{error, type, hint}` with a precise path pointer.
@@ -262,6 +265,8 @@ The shortlist is deterministic and capped at 5 tasks:
 - active bounded work ranks ahead of starting a fresh bounded task
 
 Use this instead of scanning the whole tracker just to choose work.
+
+If MCP is configured, the matching tools are `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_pick`, and `tracker_reload`.
 
 Related deterministic reads:
 
@@ -630,6 +635,7 @@ Error shape:
 | `llm-tracker daemon restart [--path <dir>] [--port N]`    | Restart the background hub on the same workspace.                             |     no       |
 | `llm-tracker daemon status [--path <dir>]`                | Show background-hub pid / port / log path.                                    |     no       |
 | `llm-tracker daemon logs [--path <dir>] [--lines N]`      | Print recent background-hub logs.                                             |     no       |
+| `llm-tracker mcp [--path <dir>] [--port N]`               | Start the stdio MCP server exposing `tracker_*` tools.                        |     no       |
 | `GET /help`                                               | Fetch the current workspace agent contract over HTTP.                         |     no       |
 | `llm-tracker status`                                      | Dashboard of all projects.                                                    |     no       |
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |
@@ -690,6 +696,7 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 
 - **Never create a new `.llm-tracker/` folder outside the workspace** (§0).
 - If the hub is running, read `/help` before guessing contract details.
+- If MCP is configured, use `tracker_help` before guessing the contract and prefer the `tracker_*` tools over handwritten `curl`.
 - If you know the task id, read `brief` before broad repo reads.
 - If you need to explain or justify work, read `why` before guessing intent from raw fields.
 - If the human asks what was already decided, read `decisions` instead of scanning every task comment manually.
