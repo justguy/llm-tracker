@@ -49,7 +49,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
-- **When MCP is configured**, prefer `tracker_help`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_pick`, and `tracker_reload` over raw `curl`.
+- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
 - **On failure**, read `<slug>.errors.json` (file mode) or the JSON response body (HTTP mode). Both are structured `{error, type, hint}` with a precise path pointer.
@@ -266,7 +266,7 @@ The shortlist is deterministic and capped at 5 tasks:
 
 Use this instead of scanning the whole tracker just to choose work.
 
-If MCP is configured, the matching tools are `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_pick`, and `tracker_reload`.
+If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
 
 Related deterministic reads:
 
@@ -277,7 +277,10 @@ Related deterministic reads:
 - `GET /api/projects/<slug>/tasks/<taskId>/verify` for one deterministic verification pack: explicit checks plus real evidence sources from tracker state, history, references, and snippets
 - `GET /api/projects/<slug>/blockers` for structural blockers and what is blocking them
 - `GET /api/projects/<slug>/changed?fromRev=<n>&limit=20` for changed tasks since a rev, without replaying raw history yourself
+- `GET /api/projects/<slug>/history?limit=50` for the append-only revision log with structured rollback/undo/redo metadata
 - `POST /api/projects/<slug>/pick` to atomically claim work once you know what to do next
+- `POST /api/projects/<slug>/undo` to restore the previous effective project state
+- `POST /api/projects/<slug>/redo` to reapply the most recent undo
 
 ### 6.2 Getting task context in one call
 

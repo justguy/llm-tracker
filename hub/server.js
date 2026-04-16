@@ -203,6 +203,24 @@ export async function startHub({ workspace, port, uiDir }) {
     res.json({ slug: req.params.slug, revisions });
   });
 
+  app.get("/api/projects/:slug/history", (req, res) => {
+    const limitRaw = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+    const fromRevRaw = Array.isArray(req.query.fromRev) ? req.query.fromRev[0] : req.query.fromRev;
+    const limit = limitRaw === undefined ? 50 : parseInt(limitRaw, 10);
+    const fromRev = fromRevRaw === undefined ? 0 : parseInt(fromRevRaw, 10);
+
+    if (isNaN(limit) || limit < 1 || limit > 200) {
+      return res.status(400).json({ error: "limit must be an integer between 1 and 200" });
+    }
+    if (isNaN(fromRev) || fromRev < 0) {
+      return res.status(400).json({ error: "fromRev must be a non-negative integer" });
+    }
+
+    const history = store.history(req.params.slug, { fromRev, limit });
+    if (!history) return res.status(404).json({ error: "project not found" });
+    res.json(history);
+  });
+
   app.post("/api/projects/:slug/rollback", async (req, res) => {
     const { to } = req.body || {};
     const toRev = parseInt(to, 10);
@@ -218,6 +236,30 @@ export async function startHub({ workspace, port, uiDir }) {
       project: projectPayload(req.params.slug, entry)
     });
     res.json({ ok: true, from: r.from, to: r.to, newRev: r.newRev });
+  });
+
+  app.post("/api/projects/:slug/undo", async (req, res) => {
+    const result = await store.undo(req.params.slug);
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    const entry = store.get(req.params.slug);
+    broadcast({
+      type: "UPDATE",
+      slug: req.params.slug,
+      project: projectPayload(req.params.slug, entry)
+    });
+    res.json({ ok: true, from: result.from, to: result.to, newRev: result.newRev, action: "undo" });
+  });
+
+  app.post("/api/projects/:slug/redo", async (req, res) => {
+    const result = await store.redo(req.params.slug);
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    const entry = store.get(req.params.slug);
+    broadcast({
+      type: "UPDATE",
+      slug: req.params.slug,
+      project: projectPayload(req.params.slug, entry)
+    });
+    res.json({ ok: true, from: result.from, to: result.to, newRev: result.newRev, action: "redo" });
   });
 
   app.post("/api/projects/:slug/patch", async (req, res) => {
@@ -264,21 +306,8 @@ export async function startHub({ workspace, port, uiDir }) {
   });
 
   app.get("/api/history/:slug", (req, res) => {
-    const file = join(workspace, ".history", `${req.params.slug}.jsonl`);
-    if (!existsSync(file)) return res.json({ lines: [] });
-    const lines = readFileSync(file, "utf-8")
-      .split("\n")
-      .filter(Boolean)
-      .slice(-50)
-      .map((l) => {
-        try {
-          return JSON.parse(l);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-    res.json({ lines });
+    const history = store.history(req.params.slug, { fromRev: 0, limit: 50 });
+    res.json({ lines: history?.events || [] });
   });
 
   // Vendor UI deps resolved from the hub's node_modules (works for local dev

@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+import { validProject } from "./fixtures.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -159,6 +160,46 @@ test("daemon restart restarts the same workspace on the recorded port", async ()
 
     const health = await fetch(`http://localhost:${port}/api/workspace`);
     assert.equal(health.status, 200);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("history, undo, and redo endpoints work through the running hub", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const pick = await fetch(`http://localhost:${port}/api/projects/test-project/pick`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignee: "codex-live" })
+    });
+    assert.equal(pick.status, 200);
+
+    const history = await fetch(`http://localhost:${port}/api/projects/test-project/history?limit=5`);
+    assert.equal(history.status, 200);
+    const historyPayload = await history.json();
+    assert.ok(historyPayload.events.length >= 1);
+
+    const undo = await fetch(`http://localhost:${port}/api/projects/test-project/undo`, {
+      method: "POST"
+    });
+    assert.equal(undo.status, 200);
+    const undoPayload = await undo.json();
+    assert.equal(undoPayload.action, "undo");
+
+    const redo = await fetch(`http://localhost:${port}/api/projects/test-project/redo`, {
+      method: "POST"
+    });
+    assert.equal(redo.status, 200);
+    const redoPayload = await redo.json();
+    assert.equal(redoPayload.action, "redo");
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

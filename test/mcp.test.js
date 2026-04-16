@@ -176,13 +176,50 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
     const tools = await client.request("tools/list");
     const names = tools.result.tools.map((tool) => tool.name).sort();
     assert.ok(names.includes("tracker_help"));
+    assert.ok(names.includes("tracker_project_status"));
+    assert.ok(names.includes("tracker_projects_status"));
     assert.ok(names.includes("tracker_next"));
+    assert.ok(names.includes("tracker_history"));
     assert.ok(names.includes("tracker_pick"));
+    assert.ok(names.includes("tracker_undo"));
+    assert.ok(names.includes("tracker_redo"));
     assert.ok(names.includes("tracker_reload"));
 
     const help = await client.request("tools/call", { name: "tracker_help", arguments: {} });
     assert.equal(help.result.isError, false);
     assert.match(help.result.content[0].text, /Use tracker_help first/);
+  } finally {
+    await client.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_project_status and tracker_projects_status return status payloads over MCP", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-status-");
+  const tracker = validProject();
+  tracker.meta.scratchpad = "status banner";
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(tracker, null, 2));
+
+  const client = startMcp(workspace);
+  try {
+    await client.initialize();
+
+    const overall = await client.request("tools/call", {
+      name: "tracker_projects_status",
+      arguments: {}
+    });
+    const overallPayload = JSON.parse(overall.result.content[0].text);
+    assert.equal(overallPayload.projectCount, 1);
+    assert.equal(overallPayload.projects[0].slug, "test-project");
+
+    const project = await client.request("tools/call", {
+      name: "tracker_project_status",
+      arguments: { slug: "test-project" }
+    });
+    const projectPayload = JSON.parse(project.result.content[0].text);
+    assert.equal(projectPayload.project.slug, "test-project");
+    assert.equal(projectPayload.project.scratchpad, "status banner");
+    assert.equal(projectPayload.project.counts.not_started, 1);
   } finally {
     await client.close();
     rmSync(workspace, { recursive: true, force: true });
@@ -243,6 +280,56 @@ test("tracker_pick goes through the running hub from MCP", async () => {
       assert.equal(payload.pickedTaskId, "t1");
       assert.equal(payload.task.assignee, "codex-mcp");
       assert.equal(payload.task.status, "in_progress");
+    } finally {
+      await client.close();
+    }
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_history, tracker_undo, and tracker_redo work through MCP", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-history-");
+  const tracker = validProject();
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(tracker, null, 2));
+  const port = await findFreePort();
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const client = startMcp(workspace);
+    try {
+      await client.initialize();
+
+      const picked = await client.request("tools/call", {
+        name: "tracker_pick",
+        arguments: { slug: "test-project", assignee: "codex-mcp" }
+      });
+      const pickedPayload = JSON.parse(picked.result.content[0].text);
+      assert.equal(pickedPayload.task.status, "in_progress");
+
+      const history = await client.request("tools/call", {
+        name: "tracker_history",
+        arguments: { slug: "test-project", limit: 5 }
+      });
+      const historyPayload = JSON.parse(history.result.content[0].text);
+      assert.ok(historyPayload.events.length >= 1);
+
+      const undo = await client.request("tools/call", {
+        name: "tracker_undo",
+        arguments: { slug: "test-project" }
+      });
+      const undoPayload = JSON.parse(undo.result.content[0].text);
+      assert.equal(undoPayload.action, "undo");
+
+      const redo = await client.request("tools/call", {
+        name: "tracker_redo",
+        arguments: { slug: "test-project" }
+      });
+      const redoPayload = JSON.parse(redo.result.content[0].text);
+      assert.equal(redoPayload.action, "redo");
     } finally {
       await client.close();
     }

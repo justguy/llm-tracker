@@ -94,6 +94,59 @@ export class Store {
     this.locks = new Map();
   }
 
+  _restoreRevisionUnlocked(slug, current, toRev, historyMeta = {}) {
+    const snap = readSnapshot(this.workspace, slug, toRev);
+    if (!snap) {
+      return { ok: false, status: 404, message: `no snapshot for rev ${toRev}` };
+    }
+    if (!current || !current.data) {
+      return { ok: false, status: 404, message: "project not in memory" };
+    }
+
+    const baseRev = current.rev;
+    const newRev = baseRev + 1;
+
+    const newState = JSON.parse(JSON.stringify(snap));
+    newState.meta.rev = newRev;
+    newState.meta.updatedAt = new Date().toISOString();
+
+    const { ok, errors } = validateProject(newState);
+    if (!ok) {
+      return {
+        ok: false,
+        status: 500,
+        message: `snapshot validation failed: ${errors.join("; ")}`
+      };
+    }
+
+    const delta = computeDelta(current.data, newState);
+    const derived = deriveProject(newState);
+
+    this.projects.set(slug, {
+      data: newState,
+      derived,
+      path: current.path,
+      rev: newRev,
+      error: null,
+      notes: { ignored: [], warnings: [], appended: [], updated: [] }
+    });
+
+    writeSnapshot(this.workspace, slug, newRev, newState);
+    appendHistoryEntry(this.workspace, slug, {
+      rev: newRev,
+      ts: newState.meta.updatedAt,
+      delta,
+      summary: summarize(delta),
+      rolledBackFrom: baseRev,
+      rolledBackTo: toRev,
+      ...historyMeta
+    });
+
+    atomicWriteJson(current.path, newState);
+
+    return { ok: true, from: baseRev, to: toRev, newRev };
+  }
+
   list() {
     const out = [];
     for (const [slug, p] of this.projects) {
@@ -539,57 +592,53 @@ export class Store {
 
   async rollback(slug, toRev) {
     return this.withLock(slug, async () => {
-      const snap = readSnapshot(this.workspace, slug, toRev);
-      if (!snap) {
-        return { ok: false, status: 404, message: `no snapshot for rev ${toRev}` };
-      }
+      const current = this.projects.get(slug);
+      return this._restoreRevisionUnlocked(slug, current, toRev, { action: "rollback" });
+    });
+  }
+
+  async undo(slug) {
+    return this.withLock(slug, async () => {
       const current = this.projects.get(slug);
       if (!current || !current.data) {
         return { ok: false, status: 404, message: "project not in memory" };
       }
 
-      const baseRev = current.rev;
-      const newRev = baseRev + 1;
-
-      const newState = JSON.parse(JSON.stringify(snap));
-      newState.meta.rev = newRev;
-      newState.meta.updatedAt = new Date().toISOString();
-
-      const { ok, errors } = validateProject(newState);
-      if (!ok) {
-        return {
-          ok: false,
-          status: 500,
-          message: `snapshot validation failed: ${errors.join("; ")}`
-        };
+      const history = readHistory(this.workspace, slug);
+      const latest = history[history.length - 1];
+      if (!latest) {
+        return { ok: false, status: 409, message: "no history to undo" };
       }
 
-      const delta = computeDelta(current.data, newState);
-      const derived = deriveProject(newState);
+      const targetRev = Number.isInteger(latest.rolledBackFrom) ? latest.rolledBackFrom : current.rev - 1;
+      if (!Number.isInteger(targetRev) || targetRev < 1 || targetRev === current.rev) {
+        return { ok: false, status: 409, message: "no undo target available" };
+      }
 
-      // In-memory first so the chokidar event from the file write is a no-op.
-      this.projects.set(slug, {
-        data: newState,
-        derived,
-        path: current.path,
-        rev: newRev,
-        error: null,
-        notes: { ignored: [], warnings: [], appended: [], updated: [] }
+      return this._restoreRevisionUnlocked(slug, current, targetRev, {
+        action: "undo",
+        undoOfRev: current.rev
       });
+    });
+  }
 
-      writeSnapshot(this.workspace, slug, newRev, newState);
-      appendHistoryEntry(this.workspace, slug, {
-        rev: newRev,
-        ts: newState.meta.updatedAt,
-        delta,
-        summary: summarize(delta),
-        rolledBackFrom: baseRev,
-        rolledBackTo: toRev
+  async redo(slug) {
+    return this.withLock(slug, async () => {
+      const current = this.projects.get(slug);
+      if (!current || !current.data) {
+        return { ok: false, status: 404, message: "project not in memory" };
+      }
+
+      const history = readHistory(this.workspace, slug);
+      const latest = history[history.length - 1];
+      if (!latest || latest.action !== "undo" || !Number.isInteger(latest.undoOfRev)) {
+        return { ok: false, status: 409, message: "no undo available to redo" };
+      }
+
+      return this._restoreRevisionUnlocked(slug, current, latest.undoOfRev, {
+        action: "redo",
+        redoOfRev: latest.rev
       });
-
-      atomicWriteJson(current.path, newState);
-
-      return { ok: true, from: baseRev, to: toRev, newRev };
     });
   }
 
@@ -606,9 +655,33 @@ export class Store {
       rev: e.rev,
       ts: e.ts,
       summary: e.summary || [],
+      action: e.action || null,
+      undoOfRev: e.undoOfRev,
+      redoOfRev: e.redoOfRev,
       rolledBackFrom: e.rolledBackFrom,
       rolledBackTo: e.rolledBackTo
     }));
+  }
+
+  history(slug, { fromRev = 0, limit = 50 } = {}) {
+    const entry = this.projects.get(slug);
+    if (!entry || !entry.data) return null;
+
+    const all = readHistory(this.workspace, slug).filter((event) => event.rev > fromRev);
+    const clampedLimit = Math.max(1, Math.min(limit, 200));
+    const events = all.slice(-clampedLimit);
+    return {
+      slug,
+      fromRev,
+      currentRev: entry.rev,
+      events,
+      truncation: {
+        applied: events.length < all.length,
+        returned: events.length,
+        totalAvailable: all.length,
+        maxCount: clampedLimit
+      }
+    };
   }
 
   remove(filePath) {

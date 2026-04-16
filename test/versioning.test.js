@@ -166,6 +166,62 @@ test("rollback 404s for missing snapshot", async () => {
   }
 });
 
+test("undo restores the previous effective state and redo reapplies the undone state", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    await store.applyPatch("test-project", { tasks: { t1: { status: "in_progress" } } });
+    store.ingest(file, readFileSync(file, "utf-8"));
+    const rev2 = store.get("test-project").rev;
+
+    await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
+    store.ingest(file, readFileSync(file, "utf-8"));
+    const rev3 = store.get("test-project").rev;
+    assert.equal(JSON.parse(readFileSync(file, "utf-8")).tasks.find((t) => t.id === "t1").status, "complete");
+
+    const undo = await store.undo("test-project");
+    assert.equal(undo.ok, true);
+    assert.equal(undo.to, rev2);
+    assert.equal(undo.newRev, rev3 + 1);
+    assert.equal(JSON.parse(readFileSync(file, "utf-8")).tasks.find((t) => t.id === "t1").status, "in_progress");
+
+    const redo = await store.redo("test-project");
+    assert.equal(redo.ok, true);
+    assert.equal(redo.to, rev3);
+    assert.equal(redo.newRev, undo.newRev + 1);
+    assert.equal(JSON.parse(readFileSync(file, "utf-8")).tasks.find((t) => t.id === "t1").status, "complete");
+
+    const revisions = store.revisions("test-project");
+    assert.ok(revisions.some((entry) => entry.action === "undo"));
+    assert.ok(revisions.some((entry) => entry.action === "redo"));
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("redo requires the latest history event to be an undo", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const redo = await store.redo("test-project");
+    assert.equal(redo.ok, false);
+    assert.equal(redo.status, 409);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("getSince returns only events after fromRev", async () => {
   const ws = setupWorkspace();
   try {
@@ -206,6 +262,28 @@ test("revisions lists every recorded rev", async () => {
       revs.map((r) => r.rev).sort((a, b) => a - b),
       Array.from(new Set(revs.map((r) => r.rev))).sort((a, b) => a - b)
     );
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("history returns recent events with truncation metadata", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    await store.applyPatch("test-project", { tasks: { t1: { status: "in_progress" } } });
+    store.ingest(file, readFileSync(file, "utf-8"));
+    await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const history = store.history("test-project", { limit: 2 });
+    assert.equal(history.events.length, 2);
+    assert.equal(history.truncation.returned, 2);
+    assert.ok(history.truncation.totalAvailable >= 2);
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }

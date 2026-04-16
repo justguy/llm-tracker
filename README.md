@@ -91,7 +91,7 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 - It serves the workspace `README.md`
 - For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
 - Agents should read `/help` before using write paths or task-intelligence endpoints
-- If MCP is configured, agents should prefer `tracker_help` first, then `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_pick`, and `tracker_reload`
+- If MCP is configured, agents should prefer `tracker_help` first, then `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`
 - Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, `decisions` to recall prior decisions, and `execute` / `verify` to close the work loop before broad file reads
 - If you change agent-facing behavior, update the workspace template so `/help` stays accurate
 - If you change agent-facing behavior, update the MCP tool layer so the `tracker_*` tools stay aligned with HTTP and CLI behavior
@@ -172,11 +172,14 @@ The MCP server is intentionally thin. Read tools load the same workspace files a
 Recommended MCP tool flow:
 
 - `tracker_help`
-- `tracker_projects`
+- `tracker_projects_status`
+- `tracker_project_status`
 - `tracker_next`
 - `tracker_brief` or `tracker_why`
 - `tracker_execute`
+- `tracker_history`
 - `tracker_pick`
+- `tracker_undo` / `tracker_redo`
 - `tracker_verify`
 
 Example MCP command:

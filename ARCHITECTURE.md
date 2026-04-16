@@ -187,6 +187,8 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 
 - `tracker_help`
 - `tracker_projects`
+- `tracker_projects_status`
+- `tracker_project_status`
 - `tracker_next`
 - `tracker_brief`
 - `tracker_why`
@@ -195,13 +197,16 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 - `tracker_verify`
 - `tracker_blockers`
 - `tracker_changed`
+- `tracker_history`
 - `tracker_pick`
+- `tracker_undo`
+- `tracker_redo`
 - `tracker_reload`
 
 Design rule:
 
 - read tools load the workspace files directly and call the same deterministic payload builders as HTTP/CLI
-- write tools (`tracker_pick`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
+- write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
 - `/help`, CLI, and MCP must stay in sync when agent-facing behavior changes
 
 ### Companion surfaces
@@ -213,7 +218,10 @@ Design rule:
 - `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources.
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
+- `GET /api/projects/:slug/history?fromRev=N&limit=50` returns the append-only revision log window, including rollback/undo/redo metadata.
 - `POST /api/projects/:slug/pick` atomically claims a task under the hub lock. If `taskId` is omitted, the hub selects the top ready task from the deterministic `next` ranking. `POST /api/projects/:slug/claim` is an alias.
+- `POST /api/projects/:slug/undo` restores the previous effective project state under the hub lock.
+- `POST /api/projects/:slug/redo` reapplies the most recent undo under the hub lock.
 
 ### Brief packs and snippet cache
 
@@ -359,8 +367,11 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug/decisions`                     | GET    | Recent decision notes from task comments.                 |
 | `/api/projects/:slug/blockers`                      | GET    | Structural blockers: blocked tasks plus their blockers.    |
 | `/api/projects/:slug/changed`                       | GET    | Changed tasks since `fromRev`, grouped by task.            |
+| `/api/projects/:slug/history`                       | GET    | Recent revision-log window with rollback/undo/redo metadata. |
 | `/api/projects/:slug/pick`                          | POST   | Atomic task claim. Defaults to the top ready task.         |
 | `/api/projects/:slug/claim`                         | POST   | Alias for `/pick`.                                         |
+| `/api/projects/:slug/undo`                          | POST   | Restore the previous effective project state.              |
+| `/api/projects/:slug/redo`                          | POST   | Reapply the most recent undo.                              |
 | `/api/projects/:slug/patch`                         | POST   | Partial update merged with existing state.                 |
 | `/api/projects/:slug/move`                          | POST   | UI drag-drop: change task placement + array position.      |
 | `/api/projects/:slug/swimlane-collapse`             | POST   | Toggle `meta.swimlanes[i].collapsed`.                      |

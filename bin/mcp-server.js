@@ -9,6 +9,7 @@ import { getDecisionsPayload } from "../hub/decisions.js";
 import { getExecutePayload } from "../hub/execute.js";
 import { getNextPayload } from "../hub/next.js";
 import { listProjectEntries, loadProjectEntry, readWorkspaceHelp } from "../hub/project-loader.js";
+import { readHistory } from "../hub/snapshots.js";
 import { getVerifyPayload } from "../hub/verify.js";
 import { getWhyPayload } from "../hub/why.js";
 
@@ -109,6 +110,35 @@ function summarizeProject(entry) {
   };
 }
 
+function projectStatusPayload(workspace, entry) {
+  if (!entry.ok) {
+    return {
+      workspace,
+      slug: entry.slug,
+      ok: false,
+      path: entry.path,
+      error: entry.message
+    };
+  }
+
+  return {
+    workspace,
+    project: {
+      slug: entry.slug,
+      name: entry.data?.meta?.name || null,
+      path: entry.path,
+      rev: entry.rev,
+      total: entry.derived?.total ?? 0,
+      pct: entry.derived?.pct ?? 0,
+      counts: entry.derived?.counts || {},
+      blocked: entry.derived?.blocked || {},
+      perSwimlane: entry.derived?.perSwimlane || {},
+      scratchpad: entry.data?.meta?.scratchpad || "",
+      updatedAt: entry.data?.meta?.updatedAt || null
+    }
+  };
+}
+
 function encodeMessage(message) {
   const json = Buffer.from(JSON.stringify(message), "utf8");
   const header = Buffer.from(`Content-Length: ${json.length}\r\n\r\n`, "utf8");
@@ -169,6 +199,36 @@ function createTools(workspace, portFlag) {
           projectCount: projects.length,
           projects
         });
+      }
+    },
+    {
+      name: "tracker_projects_status",
+      description: "Return overall status for all projects in the configured workspace.",
+      inputSchema: { type: "object", properties: {} },
+      handler: async () => {
+        const projects = listProjectEntries(workspace).map(summarizeProject);
+        return makeJsonResult({
+          workspace,
+          projectCount: projects.length,
+          projects
+        });
+      }
+    },
+    {
+      name: "tracker_project_status",
+      description: "Return status for one project: totals, progress, blocked map, swimlane breakdown, and scratchpad.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" }
+        },
+        required: ["slug"]
+      },
+      handler: async (args = {}) => {
+        const slug = nonEmptyString(args.slug);
+        const loaded = loadReadableEntry(workspace, slug);
+        if (!loaded.ok) return loaded.result;
+        return makeJsonResult(projectStatusPayload(workspace, loaded.entry));
       }
     },
     {
@@ -302,6 +362,46 @@ function createTools(workspace, portFlag) {
         })
     },
     {
+      name: "tracker_history",
+      description: "Return recent project history entries from the append-only revision log.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" },
+          fromRev: { type: "integer", minimum: 0 },
+          limit: { type: "integer", minimum: 1, maximum: 200 }
+        },
+        required: ["slug"]
+      },
+      handler: async (args = {}) => {
+        const slug = nonEmptyString(args.slug);
+        const loaded = loadReadableEntry(workspace, slug);
+        if (!loaded.ok) return loaded.result;
+
+        const fromRev = clampInt(args.fromRev, {
+          fallback: 0,
+          min: 0,
+          max: Number.MAX_SAFE_INTEGER
+        });
+        const limit = clampInt(args.limit, { fallback: 50, min: 1, max: 200 });
+        const all = readHistory(workspace, slug).filter((event) => event.rev > fromRev);
+        const events = all.slice(-limit);
+
+        return makeJsonResult({
+          project: slug,
+          currentRev: loaded.entry.rev,
+          fromRev,
+          events,
+          truncation: {
+            applied: events.length < all.length,
+            returned: events.length,
+            totalAvailable: all.length,
+            maxCount: limit
+          }
+        });
+      }
+    },
+    {
       name: "tracker_pick",
       description: "Atomically claim a task through the running hub. Requires the hub to be reachable.",
       inputSchema: {
@@ -333,6 +433,62 @@ function createTools(workspace, portFlag) {
         if (response.status >= 400) {
           return makeTextResult(
             `tracker_pick failed (${response.status}): ${response.body.error || response.body.raw}`,
+            { isError: true }
+          );
+        }
+        return makeJsonResult(response.body);
+      }
+    },
+    {
+      name: "tracker_undo",
+      description: "Undo the most recent effective project change through the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" }
+        },
+        required: ["slug"]
+      },
+      handler: async (args = {}) => {
+        const slug = nonEmptyString(args.slug);
+        const response = await httpRequest(workspace, portFlag, "POST", `/api/projects/${slug}/undo`);
+        if (response.status === 0) {
+          return makeTextResult(
+            `Hub not reachable at ${response.url}. Start the hub or daemon before calling tracker_undo.`,
+            { isError: true }
+          );
+        }
+        if (response.status >= 400) {
+          return makeTextResult(
+            `tracker_undo failed (${response.status}): ${response.body.error || response.body.raw}`,
+            { isError: true }
+          );
+        }
+        return makeJsonResult(response.body);
+      }
+    },
+    {
+      name: "tracker_redo",
+      description: "Redo the last undone project change through the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" }
+        },
+        required: ["slug"]
+      },
+      handler: async (args = {}) => {
+        const slug = nonEmptyString(args.slug);
+        const response = await httpRequest(workspace, portFlag, "POST", `/api/projects/${slug}/redo`);
+        if (response.status === 0) {
+          return makeTextResult(
+            `Hub not reachable at ${response.url}. Start the hub or daemon before calling tracker_redo.`,
+            { isError: true }
+          );
+        }
+        if (response.status >= 400) {
+          return makeTextResult(
+            `tracker_redo failed (${response.status}): ${response.body.error || response.body.raw}`,
             { isError: true }
           );
         }
