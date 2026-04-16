@@ -42,6 +42,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **Hub owns structure. You own content.**
 - **Hub enforces** — task array order, task existence (no accidental deletion), human UI state (`meta.swimlanes[i].collapsed`), version stamps (`updatedAt`, `rev`).
 - **You write freely** — `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
+- **Patch-mode new tasks must start open** — when you append a brand-new task through Mode A or Mode B, use `not_started` or `in_progress`, not `complete` or `deferred`.
 - **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
 - **When the human asks a feature-shaped or fuzzy question**, prefer `GET /api/projects/<slug>/search?q=...` for semantic search or `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic lexical matching before rereading the full tracker.
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
@@ -97,7 +98,7 @@ If any is "no" or "unsure," ask the human before proceeding.
 - `context.*` — `tags`, `files_touched`, `notes`, anything diagnostic (shallow-merged per key)
 - `placement.priorityId` and `placement.swimlaneId` — you *can* change these; last-write-wins against human drags
 - `meta.scratchpad` — status banner to the human (rendered above the matrix)
-- **New tasks** — include them in your patch; hub appends to the end of `tasks[]`
+- **New tasks** — include them in your patch; hub appends to the end of `tasks[]`, but brand-new patch tasks must start as `not_started` or `in_progress`
 
 **What the hub enforces (you can't break these even if you try):**
 
@@ -152,8 +153,8 @@ Tasks are ordered by array index. Hub owns the order.
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓    | Both values must exist in `meta`.                     |
 | `dependencies`   | array of task IDs                              |          | Drives block state (§6).                              |
 | `assignee`       | string \| null                                 |          | Your model ID when claiming.                          |
-| `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. |
-| `references`     | array of strings \| null                       |          | Preferred additive source list. Use the same `path:line` or `path:line-line` format. |
+| `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. Bare URLs are invalid. |
+| `references`     | array of strings \| null                       |          | Preferred additive source list. Use the same `path:line` or `path:line-line` format. Bare URLs are invalid. |
 | `effort`         | `xs`\|`s`\|`m`\|`l`\|`xl`\|null                |          | Optional sizing hint for ranking and planning.        |
 | `related`        | array of task IDs \| null                      |          | Optional soft links to adjacent tasks.                |
 | `comment`        | string \| null                                 |          | One short note that helps explain why the task matters. |
@@ -174,6 +175,7 @@ Reference path rules:
 - For trackers stored inside the shared workspace, relative reference paths resolve from the shared workspace root.
 - For linked repo-local trackers such as `<repo>/.llm-tracker/trackers/<slug>.json` or `<repo>/.phalanx/<slug>.json`, relative reference paths resolve from the repo root, not from the hidden tracker directory and not from the shared workspace root.
 - Prefer portable repo-relative references for repo files. Do **not** rewrite them into machine-specific absolute paths just to make snippets appear.
+- Bare URLs are invalid in `reference` and `references[]`. Use a real file location with `:line` or `:line-line`.
 - If a valid repo-relative reference is not producing a snippet, treat that as a reload/resolver issue to verify and report; do not "fix" it by baking local absolute paths into the tracker.
 
 ### 4.3a Migrating older trackers
@@ -253,6 +255,8 @@ For bounded active tasks, do not stop at retrieval-only fields if the execution 
 - `approval_required_for`
 
 If a patch only adds `references[]`, `effort`, `related`, and `comment`, treat it as **retrieval-only enrichment**. Do not describe it as a complete migration batch for that task.
+
+Do not append a brand-new standalone docs/workflow row through patch mode just to mark it `complete` or `deferred` immediately after. If the idea is already folded into an owning row, update that owning row instead of creating churn.
 
 For active tasks, evaluate the whole author-owned field set and leave fields blank only when the repo/docs/tracker evidence truly does not support them.
 
@@ -378,27 +382,36 @@ Helpful MCP resources:
 
 Register the MCP server in your client config instead of launching it manually in a spare shell. `llm-tracker mcp` is a stdio server, so the client should spawn and keep it alive.
 
-Installed package example:
+Assume the package is installed and register the installed binary in your MCP config:
 
-```json
-{
-  "command": "npx",
-  "args": ["llm-tracker", "mcp", "--path", "/Users/you/.llm-tracker"]
-}
+```toml
+[mcp_servers.llm-tracker]
+command = "llm-tracker"
+args = ["mcp", "--path", "/Users/you/.llm-tracker"]
+startup_timeout_sec = 60
+```
+
+If the client does not resolve installed binaries cleanly, use `npx`:
+
+```toml
+[mcp_servers.llm-tracker]
+command = "npx"
+args = ["llm-tracker", "mcp", "--path", "/Users/you/.llm-tracker"]
+startup_timeout_sec = 60
 ```
 
 Local checkout example:
 
-```json
-{
-  "command": "node",
-  "args": [
-    "/Users/you/path/to/llm-project-tracker/bin/llm-tracker.js",
-    "mcp",
-    "--path",
-    "/Users/you/.llm-tracker"
-  ]
-}
+```toml
+[mcp_servers.llm-tracker]
+command = "node"
+args = [
+  "/Users/you/path/to/llm-project-tracker/bin/llm-tracker.js",
+  "mcp",
+  "--path",
+  "/Users/you/.llm-tracker",
+]
+startup_timeout_sec = 60
 ```
 
 Helpful MCP prompts:
@@ -656,7 +669,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 - `tasks` patch keyed by id → each listed task is field-merged with existing (shallow merge on `context` and `placement`; other fields replaced).
 - `tasks` patch as an array → same, but tasks missing from the array are **preserved, not deleted**, with a warning in `notes`.
-- New task IDs → **appended to the end of `tasks[]`**. You can't insert or reorder.
+- New task IDs → **appended to the end of `tasks[]`**. You can't insert or reorder, and brand-new patch tasks must start as `not_started` or `in_progress`.
 - `meta.swimlanes[i].collapsed` → always dropped. Hub keeps whatever's on disk.
 - `updatedAt`, `rev` → always dropped. Hub-owned.
 
@@ -794,6 +807,9 @@ Error shape:
 
 ```json
 {
+  "error": "/tasks/0/references/0: reference must use path:line or path:line-line; bare URLs are invalid",
+  "type": "schema",
+  "hint": "Use repo-relative file references in `path:line` or `path:line-line` form. Bare URLs are invalid in `reference` and `references[]`.",
   "timestamp": "2026-04-13T12:34:56.000Z",
   "kind": "schema",
   "message": "/tasks/0/placement/priorityId: \"p9\" not declared in meta.priorities",
@@ -801,7 +817,7 @@ Error shape:
 }
 ```
 
-`kind` is `parse` (malformed JSON) or `schema` (valid JSON, fails §4 or §4.5). Prior valid state remains live.
+`type` / `kind` is `parse` (malformed JSON) or `schema` (valid JSON, fails §4 or §4.5). `message` is kept for compatibility; prefer `error` + `hint` in new consumers. Prior valid state remains live.
 
 ---
 
@@ -818,6 +834,7 @@ Error shape:
 | `llm-tracker daemon status [--path <dir>]`                | Show background-hub pid / port / log path.                                    |     no       |
 | `llm-tracker daemon logs [--path <dir>] [--lines N]`      | Print recent background-hub logs.                                             |     no       |
 | `llm-tracker mcp [--path <dir>] [--port N]`               | Start the stdio MCP server exposing `tracker_*` tools.                        |     no       |
+| `llm-tracker shortcuts [--alias NAME]`                    | Print shell shortcuts for zero-token `lt next`, `lt brief`, etc.              |     no       |
 | `GET /help`                                               | Fetch the current workspace agent contract over HTTP.                         |     no       |
 | `llm-tracker status`                                      | Dashboard of all projects.                                                    |     no       |
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |
@@ -874,6 +891,16 @@ When the human asks you to "wire up the status command" or "add a skill for proj
 
 Minimum content: one sentence saying *"For project status, run `npx llm-tracker status`."* Don't overwrite existing files — merge or append.
 
+### Zero-token terminal shortcuts
+
+If the human wants direct terminal commands in Codex or Claude without asking the model first, use:
+
+```bash
+eval "$(npx llm-tracker shortcuts)"
+```
+
+That installs a small `lt` shell function in the current shell, so the human can run `lt next <slug>`, `lt brief <slug> <taskId>`, `lt why ...`, `lt execute ...`, and `lt verify ...` directly with zero model tokens. To keep it permanently, append the printed snippet to `~/.zshrc` or `~/.bashrc`. Use `--alias <name>` if the human wants a different shell function name.
+
 ---
 
 ## 14. Hard rules (do not violate)
@@ -891,6 +918,9 @@ Minimum content: one sentence saying *"For project status, run `npx llm-tracker 
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.
 - Never invent a `priorityId` or `swimlaneId` not declared in `meta`.
+- Never append a brand-new patch task as already `complete` or `deferred`; patch-mode task creation is for open work.
+- Never add a standalone docs-only/workflow task and then immediately retire it if the work already belongs under an existing owning row.
+- Never put bare URLs in `reference` or `references[]`; use `path:line` or `path:line-line`.
 - Never set `updatedAt` or `rev` — hub ignores and overwrites.
 - Never rewrite this README.
 - Never touch `settings.json`, `.runtime/`, `.snapshots/`, `.history/`, `<slug>.errors.json`.

@@ -195,6 +195,38 @@ test("applyPatch: 404 when project doesn't exist", async () => {
   }
 });
 
+test("applyPatch: rejects brand-new patch tasks that start complete or deferred", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      tasks: {
+        t4: {
+          title: "Historical packaging row",
+          status: "complete",
+          placement: { swimlaneId: "ops", priorityId: "p1" }
+        }
+      }
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.equal(res.type, "schema");
+    assert.match(res.message, /new tasks added through patch mode/);
+    assert.match(res.hint, /not_started/);
+    assert.match(res.hint, /in_progress/);
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.tasks.some((task) => task.id === "t4"), false);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("pickTask auto-selects the top ready task and updates status atomically", async () => {
   const ws = setupWorkspace();
   try {

@@ -9,6 +9,7 @@ import { cmdChanged } from "./commands/changed.js";
 import { cmdDecisions } from "./commands/decisions.js";
 import { cmdExecute } from "./commands/execute.js";
 import { cmdFuzzy } from "./commands/fuzzy.js";
+import { startMcpServer } from "./mcp-server.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
 import { cmdReload } from "./commands/reload.js";
@@ -496,6 +497,37 @@ async function cmdDaemon(args) {
   process.exit(1);
 }
 
+function renderShellShortcuts(aliasName = "lt") {
+  return `# Add to ~/.zshrc or ~/.bashrc, or eval directly:
+#   eval "$(npx llm-tracker shortcuts)"
+#
+# Then run zero-token tracker commands such as:
+#   ${aliasName} next <slug>
+#   ${aliasName} brief <slug> <taskId>
+#   ${aliasName} verify <slug> <taskId>
+__llm_tracker_cli() {
+  if command -v llm-tracker >/dev/null 2>&1; then
+    llm-tracker "$@"
+  else
+    npx llm-tracker "$@"
+  fi
+}
+${aliasName}() {
+  __llm_tracker_cli "$@"
+}
+`;
+}
+
+function cmdShortcuts(args) {
+  const aliasName = String(args.flags.alias || "lt");
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(aliasName)) {
+    console.error("Usage: llm-tracker shortcuts [--alias <shell-function-name>]");
+    console.error(`Invalid alias "${aliasName}". Use letters, numbers, and underscores only.`);
+    process.exit(1);
+  }
+  console.log(renderShellShortcuts(aliasName));
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cmd = args._[0];
@@ -519,6 +551,8 @@ async function main() {
   if (cmd === "rollback") return cmdRollback(args);
   if (cmd === "since") return cmdSince(args);
   if (cmd === "link") return cmdLink(args);
+  if (cmd === "shortcuts") return cmdShortcuts(args);
+  if (cmd === "mcp") return startMcpServer({ workspace: args.flags.path, portFlag: args.flags.port });
   if (cmd === "daemon") return cmdDaemon(args);
   if (cmd === "help" || args.flags.help) {
     console.log(`llm-tracker — file-system-as-database project tracker
@@ -532,6 +566,7 @@ Usage:
   llm-tracker daemon restart [--path <dir>] [--port N] Restart the background daemon
   llm-tracker daemon status [--path <dir>]             Show daemon status
   llm-tracker daemon logs [--path <dir>] [--lines N]   Print recent daemon logs
+  llm-tracker mcp [--path <dir>] [--port N]            Start the stdio MCP server
   llm-tracker status [<slug>] [--json]                 Print project status to stdout
   llm-tracker reload [<slug>] [--json]                 Reload one or all trackers from disk (requires hub)
   llm-tracker brief <slug> <taskId> [--json]           Print a task brief pack (requires hub)
@@ -548,6 +583,7 @@ Usage:
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)
   llm-tracker link <slug> <abs-path>                   Symlink an external tracker file into the workspace (requires hub)
+  llm-tracker shortcuts [--alias NAME]                 Print shell shortcuts for zero-token lt next / lt brief usage
   llm-tracker help                                     Show this help
 
 Env:

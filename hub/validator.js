@@ -131,6 +131,9 @@ function formatAjvError(err) {
     return `${path}: missing required field "${err.params.missingProperty}"`;
   }
   if (err.keyword === "pattern") {
+    if (path.includes("/reference") || path.includes("/references/")) {
+      return `${path}: reference must use path:line or path:line-line; bare URLs are invalid`;
+    }
     return `${path}: does not match pattern ${err.params.pattern}`;
   }
   return `${path}: ${err.message}`;

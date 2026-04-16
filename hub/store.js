@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { isAbsolute } from "node:path";
 import { basename, join } from "node:path";
+import { buildTrackerErrorBody, inferTrackerErrorHint } from "./error-payload.js";
 import { validateProject } from "./validator.js";
 import { deriveProject } from "./progress.js";
 import { mergeProject, stableEq } from "./merge.js";
@@ -43,12 +44,11 @@ export function errorPath(workspace, slug) {
 
 export function writeErrorFile(workspace, slug, err) {
   const file = errorPath(workspace, slug);
-  const body = {
-    timestamp: new Date().toISOString(),
-    kind: err.kind,
+  const body = buildTrackerErrorBody({
     message: err.message,
+    kind: err.kind,
     path: trackerPath(workspace, slug)
-  };
+  });
   try {
     writeFileSync(file, JSON.stringify(body, null, 2));
   } catch {}
@@ -85,6 +85,39 @@ function normalizeForCompare(obj) {
     delete copy.meta.updatedAt;
   }
   return copy;
+}
+
+function collectPatchTaskArray(patch) {
+  if (!patch || typeof patch !== "object" || !patch.tasks) return [];
+  if (Array.isArray(patch.tasks)) return patch.tasks.filter((task) => task && typeof task === "object");
+  return Object.entries(patch.tasks).map(([id, task]) => ({ id, ...(task || {}) }));
+}
+
+function validatePatchGuardrails(existing, patch) {
+  if (!existing || !patch || typeof patch !== "object") return { ok: true };
+  const existingIds = new Set((existing.tasks || []).map((task) => task.id));
+  const forbiddenStatuses = new Set(["complete", "deferred"]);
+  const violations = [];
+
+  for (const task of collectPatchTaskArray(patch)) {
+    if (!task?.id || existingIds.has(task.id)) continue;
+    if (!forbiddenStatuses.has(task.status)) continue;
+    violations.push(`${task.id} (${task.status})`);
+  }
+
+  if (violations.length === 0) return { ok: true };
+
+  const message =
+    `new tasks added through patch mode must start as not_started or in_progress; ` +
+    `rejecting ${violations.join(", ")}`;
+
+  return {
+    ok: false,
+    status: 400,
+    type: "schema",
+    message,
+    hint: inferTrackerErrorHint(message)
+  };
 }
 
 export class Store {
@@ -477,6 +510,9 @@ export class Store {
         return { ok: false, status: 500, message: `tracker file not parseable: ${e.message}` };
       }
 
+      const guard = validatePatchGuardrails(existing, patch);
+      if (!guard.ok) return guard;
+
       const normalizationNotes = { warnings: [] };
       patch = normalizeProjectStatuses(patch, normalizationNotes).data;
       const { merged, notes } = mergeProject(existing, patch);
@@ -484,7 +520,17 @@ export class Store {
         notes.warnings.push(...normalizationNotes.warnings);
       }
       const { ok, errors } = validateProject(merged);
-      if (!ok) return { ok: false, status: 400, message: errors.join("; "), notes };
+      if (!ok) {
+        const message = errors.join("; ");
+        return {
+          ok: false,
+          status: 400,
+          type: "schema",
+          message,
+          hint: inferTrackerErrorHint(message),
+          notes
+        };
+      }
 
       atomicWriteJson(file, merged);
       return { ok: true, notes };

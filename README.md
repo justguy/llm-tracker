@@ -22,8 +22,6 @@ When an agent is ready to act or validate work, it can now call `npx llm-tracker
 
 When an agent needs the current contract for a running hub, it should call `GET /help` first instead of guessing write modes or endpoints.
 
-If your coding client supports MCP, `npx llm-tracker mcp --path ~/.llm-tracker` exposes deterministic `tracker_*` tools plus preloadable resources and prompts so agents can stop shelling out to `curl` and stop reopening the README by hand. MCP read tools and resources work directly from workspace files; MCP write tools still require the hub or daemon to be running.
-
 The UI now exposes the same deterministic loop for humans: header actions for `[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, and `[DECISIONS]`, hover task actions for `[READ]`, `[WHY]`, `[EXEC]`, and `[VERIFY]`, project-shortlist `[PICK]` actions that jump straight into execution context, a live `/help` contract panel, an exact board filter plus deterministic `[FUZZY]` highlight mode, plus real `[UNDO]`, `[REDO]`, and revision history.
 
 ## Why use llm-tracker?
@@ -95,16 +93,16 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 - It serves the workspace `README.md`
 - For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
 - Agents should read `/help` before using write paths or task-intelligence endpoints
-- If MCP is configured, agents should prefer `tracker_help` first, then `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`
 - Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, `decisions` to recall prior decisions, and `execute` / `verify` to close the work loop before broad file reads
 - If you change agent-facing behavior, update the workspace template so `/help` stays accurate
-- If you change agent-facing behavior, update the MCP tool layer so the `tracker_*` tools stay aligned with HTTP and CLI behavior
 
 ---
 
 ## Wire it into your LLM CLI
 
 Drop a one-line file into your coding CLI's rules/skills folder. That's the whole install. Next time you ask "what's the state of my projects?" the LLM runs `npx llm-tracker status` on its own.
+
+That path is still prompt-driven. It saves rereads, but it still spends model tokens.
 
 **Claude Code** — create `~/.claude/skills/llm-tracker-status/SKILL.md`:
 
@@ -136,9 +134,34 @@ If the hub is already running, add one more line: *"Before using the tracker, re
 
 ---
 
+## Zero-token terminal shortcut
+
+If you want direct tracker commands from a Codex or Claude terminal session without asking the model anything, print the shell wrapper once and load it into your shell:
+
+```bash
+eval "$(npx llm-tracker shortcuts)"
+```
+
+That creates a small `lt` shell function. Use it like:
+
+```bash
+lt next project-phalanx
+lt brief project-phalanx t-021
+lt why project-phalanx t-021
+lt execute project-phalanx t-021
+lt verify project-phalanx t-021
+```
+
+To keep it permanently, append the printed snippet to `~/.zshrc` or `~/.bashrc`. If you want a different function name, use `npx llm-tracker shortcuts --alias tracker`.
+
+---
+
 ## Shell commands
 
 ```bash
+# Zero-token shell wrapper for lt next / lt brief / lt verify
+npx llm-tracker shortcuts            # prints a bash/zsh function wrapper
+
 # Works with hub NOT running — reads files directly
 npx llm-tracker status              # dashboard of all projects
 npx llm-tracker status <slug>       # detail on one project
@@ -163,7 +186,6 @@ npx llm-tracker daemon status             # show pid / port / log path
 npx llm-tracker daemon stop               # stop the background hub
 npx llm-tracker daemon restart            # restart the same background hub
 npx llm-tracker daemon logs --lines 80    # print recent daemon logs
-npx llm-tracker mcp --path ~/.llm-tracker # start the stdio MCP server for agent clients
 
 # For LLMs talking to the running hub
 curl http://localhost:4400/help           # current workspace agent contract
@@ -171,67 +193,108 @@ curl http://localhost:4400/help           # current workspace agent contract
 
 Full flag reference: `npx llm-tracker help`.
 
-### MCP
+## HTTP API Quick Reference
 
-The MCP server is intentionally thin.
+The HTTP hub is the clean machine interface for agent clients.
 
-- Read tools (`tracker_help`, `tracker_projects`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`) load the same workspace files and deterministic payload builders used by the HTTP/CLI layer. They do **not** require the daemon.
-- Write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) call the running hub so locking, revisioning, and live reconciliation stay authoritative. They **do** require the hub or daemon to be reachable.
-- Resources provide preloadable read-only context:
-  - `tracker://help`
-  - `tracker://workspace/status`
-  - `tracker://workspace/runtime`
-  - `tracker://projects`
-  - `tracker://projects/<slug>/status`
-- Prompts provide thin workflow guidance without duplicating the business logic in the tools:
-  - `tracker_start_here`
-  - `tracker_pick_next`
-  - `tracker_search_project`
-  - `tracker_task_context`
-  - `tracker_execute_task`
-  - `tracker_verify_task`
-  - `tracker_patch_write`
+Start with:
 
-Use `tracker://help` when you want the full workspace contract in one read, and `tracker://workspace/runtime` when you need the daemon rule, patch directory, and runtime paths without scanning the whole README again.
+```bash
+curl http://localhost:4400/help
+```
 
-Recommended MCP tool flow:
+That returns the active workspace contract for the running hub. In daemon mode on
+another port, use the port recorded in `.runtime/daemon.json` or
+`npx llm-tracker daemon status`.
 
-- `tracker_help`
-- `tracker_projects_status`
-- `tracker_project_status`
-- `tracker_next`
-- `tracker_search` or `tracker_fuzzy_search`
-- `tracker_brief` or `tracker_why`
-- `tracker_execute`
-- `tracker_history`
-- `tracker_pick`
-- `tracker_undo` / `tracker_redo`
-- `tracker_verify`
+### Core read endpoints
 
-Example MCP command:
+```bash
+# Workspace / project overview
+curl http://localhost:4400/help
+curl http://localhost:4400/api/projects
+curl http://localhost:4400/api/projects/<slug>
+curl "http://localhost:4400/api/projects/<slug>/next?limit=5"
+curl "http://localhost:4400/api/projects/<slug>/since/<rev>"
+
+# Focused task context
+curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/brief
+curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/why
+curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/execute
+curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/verify
+
+# Project-level context
+curl "http://localhost:4400/api/projects/<slug>/decisions?limit=20"
+curl http://localhost:4400/api/projects/<slug>/blockers
+curl "http://localhost:4400/api/projects/<slug>/changed?fromRev=<rev>&limit=20"
+curl "http://localhost:4400/api/projects/<slug>/history?limit=50"
+
+# Search
+curl "http://localhost:4400/api/projects/<slug>/search?q=<query>"
+curl "http://localhost:4400/api/projects/<slug>/fuzzy-search?q=<query>"
+```
+
+Use `search` for feature-shaped questions and `fuzzy-search` when you want a
+deterministic lexical fallback.
+
+### Core write endpoints
+
+Use HTTP writes when you want to avoid touching the workspace filesystem.
+
+```bash
+# Atomic claim / pick
+curl -X POST http://localhost:4400/api/projects/<slug>/pick \
+  -H "Content-Type: application/json" \
+  -d '{"taskId":"<task-id>","assignee":"codex"}'
+
+# Fire-and-forget project patch
+curl -X POST http://localhost:4400/api/projects/<slug>/patch \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/<slug>-patch.json
+
+# Revision controls
+curl -X POST http://localhost:4400/api/projects/<slug>/undo
+curl -X POST http://localhost:4400/api/projects/<slug>/redo
+
+# Reload trackers from disk
+curl -X POST http://localhost:4400/api/projects/<slug>/reload
+```
+
+Patch payloads stay small. Typical shape:
 
 ```json
 {
-  "command": "npx",
-  "args": ["llm-tracker", "mcp", "--path", "/Users/you/.llm-tracker"]
+  "tasks": {
+    "t-001": {
+      "status": "complete",
+      "context": {
+        "notes": "shipped"
+      }
+    }
+  },
+  "meta": {
+    "scratchpad": "t-001 closed; t-002 is next"
+  }
 }
 ```
 
-Do not run that command manually in a spare shell and expect it to persist for agents. `llm-tracker mcp` is a stdio MCP server, so your MCP client should spawn and manage it.
+### Practical rule of thumb
 
-If you are using this repo from a local checkout instead of an installed package, register the local entrypoint directly:
+- Read `/help` first.
+- Use `next`, `brief`, `why`, `execute`, and `verify` instead of rereading the whole tracker.
+- Use `patch` for status/content updates.
+- Use `pick` when you want an atomic claim instead of hand-rolling status changes.
+- Keep writes small and frequent.
 
-```json
-{
-  "command": "node",
-  "args": [
-    "/Users/you/path/to/llm-project-tracker/bin/llm-tracker.js",
-    "mcp",
-    "--path",
-    "/Users/you/.llm-tracker"
-  ]
-}
-```
+### Agent Interfaces
+
+This project does not currently ship an MCP interface.
+
+Use the CLI commands and HTTP endpoints above:
+
+- read `GET /help` first for the active workspace contract
+- use `next`, `brief`, `why`, `decisions`, `execute`, `verify`, `search`, and `fuzzy-search` for focused reads
+- use `pick`, `patch`, `undo`, `redo`, and `reload` through the running hub for authoritative writes
 
 ## Background daemon
 
@@ -276,6 +339,11 @@ Do **not** fix this by creating a second accidental workspace in the repo. The c
 - **LLM writes** — statuses, assignees, dependencies, notes, tags, priorities, new tasks, scratchpad
 - **Hub enforces** — task array order, existence (no accidental deletion), human UI state (drag positions, swimlane collapse), version stamps
 
+Two patch-time guardrails now matter for agent reliability:
+
+- append brand-new patch tasks only as `not_started` or `in_progress`, not already `complete` or `deferred`
+- use `reference` / `references[]` only in `path:line` or `path:line-line` form; bare URLs are rejected with an explicit hint
+
 LLMs send small patches. The hub merges them under a per-project lock, bumps `meta.rev`, writes a full snapshot, and appends a `{rev, delta}` line to the history log. When the LLM needs to refresh, it calls `GET /api/projects/:slug/since/<last-rev>` and gets only what changed — **constant-size payload regardless of project size**.
 
 For task pickup, prefer the atomic claim flow over hand-built status patches:
@@ -316,6 +384,8 @@ Two write modes:
 
 - **Mode A — File patches** (bash-less): LLM drops a JSON patch in `patches/<slug>.<ts>.json`; hub picks it up and deletes it.
 - **Mode B — HTTP patches** (fastest): `POST /api/projects/:slug/patch`; one-time `curl` approval in your CLI, then no filesystem access.
+
+Patch failures now return `error`, `type`, and `hint` so agents do not have to reverse-engineer raw schema regex output. The same hint-bearing payload is also written to `.errors.json` files in file-patch mode.
 
 Full schema, merge semantics, field ownership, versioning, rollback, and the whole LLM-facing contract → **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 

@@ -6,6 +6,7 @@ import express from "express";
 import cors from "cors";
 import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
+import { buildTrackerErrorBody } from "./error-payload.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
 import { Store, slugFromFile } from "./store.js";
@@ -267,7 +268,12 @@ export async function startHub({ workspace, port, uiDir }) {
     const patch = req.body || {};
     const r = await store.applyPatch(req.params.slug, patch);
     if (!r.ok) {
-      return res.status(r.status || 400).json({ error: r.message, notes: r.notes || null });
+      return res.status(r.status || 400).json({
+        error: r.message,
+        type: r.type || null,
+        hint: r.hint || null,
+        notes: r.notes || null
+      });
     }
     const entry = store.get(req.params.slug);
     res.json({
@@ -423,7 +429,7 @@ export async function startHub({ workspace, port, uiDir }) {
         const errPath = patchPath.replace(/\.json$/, ".errors.json");
         writeFileSync(
           errPath,
-          JSON.stringify({ timestamp: new Date().toISOString(), kind: "parse", message: e.message, path: patchPath }, null, 2)
+          JSON.stringify(buildTrackerErrorBody({ message: e.message, kind: "parse", path: patchPath }), null, 2)
         );
       } catch {}
       return;
@@ -435,7 +441,13 @@ export async function startHub({ workspace, port, uiDir }) {
         writeFileSync(
           errPath,
           JSON.stringify(
-            { timestamp: new Date().toISOString(), kind: "schema", message: r.message, notes: r.notes || null, path: patchPath },
+            buildTrackerErrorBody({
+              message: r.message,
+              kind: "schema",
+              type: r.type || "schema",
+              path: patchPath,
+              notes: r.notes || null
+            }),
             null,
             2
           )

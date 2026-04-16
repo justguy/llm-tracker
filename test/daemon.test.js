@@ -266,4 +266,5 @@ test("help output documents daemon commands, reload, retrieval and execution pac
   assert.match(res.stdout, /decisions <slug>/);
   assert.match(res.stdout, /execute <slug> <taskId>/);
   assert.match(res.stdout, /verify <slug> <taskId>/);
+  assert.match(res.stdout, /shortcuts \[--alias NAME\]/);
 });

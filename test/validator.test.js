@@ -93,6 +93,8 @@ test("rejects malformed references[] entries", () => {
   const { ok, errors } = validateProject(p);
   assert.equal(ok, false);
   assert.ok(errors.some((e) => e.includes("references")));
+  assert.ok(errors.some((e) => e.includes("path:line")));
+  assert.ok(errors.some((e) => e.includes("bare URLs are invalid")));
 });
 
 test("rejects a task reference without a line number", () => {
@@ -101,6 +103,7 @@ test("rejects a task reference without a line number", () => {
   const { ok, errors } = validateProject(p);
   assert.equal(ok, false);
   assert.ok(errors.some((e) => e.includes("reference")));
+  assert.ok(errors.some((e) => e.includes("path:line")));
 });
 
 test("allows task reference to be null (clears the field)", () => {
