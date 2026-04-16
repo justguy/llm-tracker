@@ -23,7 +23,8 @@ import {
   maxRev,
   appendHistoryEntry,
   historySince,
-  readHistory
+  readHistory,
+  listRevs
 } from "./snapshots.js";
 import { buildPickedPayload, resolvePickSelection } from "./pick.js";
 
@@ -472,6 +473,63 @@ export class Store {
 
       atomicWriteJson(file, newState);
       return { ok: true, newRev };
+    });
+  }
+
+  async restoreProject(slug, { rev } = {}) {
+    return this.withLock(slug, async () => {
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+        return {
+          ok: false,
+          status: 400,
+          message: "slug must match ^[a-z0-9][a-z0-9-]*$"
+        };
+      }
+      const file = trackerPath(this.workspace, slug);
+      if (existsSync(file)) {
+        return {
+          ok: false,
+          status: 409,
+          message: `project already registered at ${file} — nothing to restore`
+        };
+      }
+
+      const revs = listRevs(this.workspace, slug);
+      if (revs.length === 0) {
+        return {
+          ok: false,
+          status: 404,
+          message: `no snapshots for slug "${slug}" — register with PUT /api/projects/${slug} instead`
+        };
+      }
+      const targetRev = Number.isInteger(rev) ? rev : revs[revs.length - 1];
+      if (!revs.includes(targetRev)) {
+        return {
+          ok: false,
+          status: 404,
+          message: `no snapshot at rev ${targetRev} for slug "${slug}" (available: ${revs.join(", ")})`
+        };
+      }
+
+      const snap = readSnapshot(this.workspace, slug, targetRev);
+      if (!snap) {
+        return { ok: false, status: 500, message: `snapshot at rev ${targetRev} is unreadable` };
+      }
+
+      const { ok, errors } = validateProject(snap);
+      if (!ok) {
+        return {
+          ok: false,
+          status: 500,
+          message: `snapshot failed validation: ${errors.join("; ")}`
+        };
+      }
+
+      // Write the snapshot as-is. chokidar's `add` event triggers ingest, which
+      // will either adopt the existing rev (cold-start resume path) or bump it
+      // if anything was changed between snapshot time and restore time.
+      atomicWriteJson(file, snap);
+      return { ok: true, slug, restoredFromRev: targetRev, file };
     });
   }
 

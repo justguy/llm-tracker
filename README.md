@@ -28,6 +28,8 @@ The UI now exposes the same deterministic loop for humans: header actions for `[
 
 🔒 **100 % Local & Secure** — the core hub doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine. Semantic `/search` uses a local embedding model and only reaches out once if the model is not already cached on disk.
 
+The hub binds to `127.0.0.1` by default, rejects cross-origin mutating requests, and supports an optional bearer token (`LLM_TRACKER_TOKEN`) that — when set — gates every write. See [Local security](#local-security) for the full threat model and override knobs.
+
 💸 **Massive Token Savings** — no full-file rewrites. LLMs send surgical JSON patches (often <100 bytes) and pull changes since their last rev, keeping context windows small and API costs low.
 
 ⚡ **Stupidly Simple** — no databases, no cloud accounts, and no behavior surprises. `npx llm-tracker init`, `npx llm-tracker`, open the browser. Foreground remains the default; an optional local background daemon is available if you do not want to dedicate a shell. Every project is one JSON file you can `cat`, diff, or commit.
@@ -72,6 +74,32 @@ Or install globally once:
 npm install -g llm-tracker
 llm-tracker init && llm-tracker
 ```
+
+### Day 0 project skeleton
+
+Every tracker is one JSON file with two top-level keys: `meta` and `tasks`. The minimal shape the hub accepts — copied from `workspace-template/templates/default.json` — is:
+
+```json
+{
+  "meta": {
+    "name": "New Project",
+    "slug": "new-project",
+    "swimlanes": [
+      { "id": "main", "label": "Main" }
+    ],
+    "priorities": [
+      { "id": "p0", "label": "P0 / Now" },
+      { "id": "p1", "label": "P1 / Next" },
+      { "id": "p2", "label": "P2 / Soon" },
+      { "id": "p3", "label": "P3 / Later" }
+    ],
+    "scratchpad": ""
+  },
+  "tasks": []
+}
+```
+
+Drop this at `<workspace>/trackers/<slug>.json` (with `meta.slug` matching the filename) and the hub renders it immediately. Field-by-field contract → [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Supported Topologies
 
@@ -474,6 +502,55 @@ The repo ships every change through **issues → feature branch → PR → autom
 Workflow files: [`.github/workflows/release-please.yml`](./.github/workflows/release-please.yml), [`.github/workflows/pr-title.yml`](./.github/workflows/pr-title.yml), [`release-please-config.json`](./release-please-config.json).
 
 ---
+
+## Local security
+
+The hub is a local service. It ships three layers that matter if another process (or a browser tab on the same machine) tries to talk to it:
+
+- **Loopback binding** — by default the listener binds to `127.0.0.1`, so other hosts on the LAN cannot reach it. Override with `LLM_TRACKER_HOST=0.0.0.0` if you consciously want LAN access.
+- **Cross-origin guard** — every mutating request (`POST` / `PUT` / `PATCH` / `DELETE`) must either have no `Origin` header (trusted CLI / `curl` / MCP context) or carry a loopback origin (`http://localhost:<port>` or `http://127.0.0.1:<port>`). Anything else returns `403`. Browser CSRF is therefore blocked without you doing anything.
+- **Optional bearer token** — set `LLM_TRACKER_TOKEN=<secret>` before starting the hub and every mutating request must include `Authorization: Bearer <secret>` (or `X-LLM-Tracker-Token: <secret>`). The CLI picks the token up from the same env var automatically. The UI reads it from a same-origin injection in `index.html`, so the browser UI keeps working after you enable it.
+
+Body-size hardening:
+
+- Default JSON body limit is **1 MB** (override with `LLM_TRACKER_BODY_LIMIT`, e.g. `LLM_TRACKER_BODY_LIMIT=4mb`).
+- Route-level guards reject oversized `meta.scratchpad` (> 5000 chars) and `task.comment` (> 500 chars) before merge/validation runs, so hallucinated jumbo patches cost the hub almost nothing.
+
+## Deleted-project restore
+
+`DELETE /api/projects/<slug>` (or the UI `[DELETE]` button) removes the registered tracker file but preserves `.snapshots/<slug>/` and `.history/<slug>.jsonl` for audit. To bring a deleted project back:
+
+```bash
+# restore latest snapshot
+llm-tracker restore <slug>
+
+# restore a specific rev
+llm-tracker restore <slug> --rev 7
+```
+
+Or over HTTP:
+
+```bash
+curl -X POST http://localhost:4400/api/projects/<slug>/restore \
+  -H "Content-Type: application/json" -d '{"rev": 7}'
+```
+
+`restore` vs `undo` vs `rollback`:
+
+- `restore` — bring back a project that was fully deleted (`DELETE /api/projects/<slug>`). Refuses if the project is still registered.
+- `undo` — reverse the last accepted revision on a **currently registered** project.
+- `rollback` — set a registered project back to any prior rev as a new, auditable rev.
+
+## Windows support
+
+The hub runs on Windows, but a few paths need extra care:
+
+- **Symlinking repo-local trackers (`llm-tracker link`, Option C)** — `symlinkSync` requires either Developer Mode (Settings → Privacy & security → For developers) or running the shell as Administrator. If you hit `EPERM` / `EACCES`, fall back to `PUT /api/projects/<slug>` (Option B) instead — it has no filesystem-privilege requirements.
+- **File watchers** — chokidar polling is enabled by default for linked targets, so symlinked files outside the workspace still get change events. Native filesystem events are not relied on for this path.
+- **Line endings** — tracker JSON is written with `\n` on all platforms. Leave core.autocrlf to your preference in the repo itself; the hub never rewrites linked files for EOL.
+- **Paths** — Windows absolute paths (`C:\Users\...`) work everywhere an absolute path is expected.
+
+CI currently targets Linux and macOS. Windows-specific behavior is documented but not yet gated by CI — expect the Linux/macOS matrix to be the canonical coverage until a Windows runner lands.
 
 ## License
 

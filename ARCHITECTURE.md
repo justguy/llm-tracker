@@ -71,7 +71,7 @@ workspace-template/      Copied on `init` into the workspace folder. README.md i
 
 ## Schema
 
-Every tracker JSON has two top-level keys: `meta` and `tasks`.
+Every tracker JSON has two top-level keys: `meta` and `tasks`. The minimal "Day 0" shape the hub accepts is the skeleton in [`workspace-template/templates/default.json`](./workspace-template/templates/default.json) (also inlined in the [README](./README.md)) — everything below is additive context the LLM fills in as work progresses.
 
 ### meta
 

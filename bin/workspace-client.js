@@ -41,10 +41,14 @@ export function resolvePort(workspace, flagPort) {
 export async function httpRequest(workspace, portFlag, method, path, body) {
   const port = resolvePort(workspace, portFlag);
   const url = `http://localhost:${port}${path}`;
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  const token = process.env.LLM_TRACKER_TOKEN;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   try {
     const res = await fetch(url, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       body: body ? JSON.stringify(body) : undefined
     });
     const text = await res.text();

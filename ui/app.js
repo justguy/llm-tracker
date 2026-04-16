@@ -5,6 +5,29 @@ import { buildCardMetaFacts } from "./lib/intelligence.js";
 import { HistoryModal } from "./modals/history.js";
 import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
 
+// When the hub is started with LLM_TRACKER_TOKEN, the bearer token is injected
+// into index.html via window.__LLM_TRACKER_TOKEN. Wrap fetch once so mutating
+// same-origin calls carry the Authorization header automatically.
+(function attachAuthFetch() {
+  if (typeof window === "undefined") return;
+  const token = window.__LLM_TRACKER_TOKEN;
+  if (!token) return;
+  const origFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const method = ((init && init.method) || "GET").toUpperCase();
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+      return origFetch(input, init);
+    }
+    const nextInit = { ...(init || {}) };
+    const headers = new Headers(nextInit.headers || {});
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    nextInit.headers = headers;
+    return origFetch(input, nextInit);
+  };
+})();
+
 const STATUS_ORDER = ["complete", "in_progress", "not_started", "deferred"];
 
 // ─────── Settings (localStorage) ───────

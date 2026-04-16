@@ -184,6 +184,43 @@ async function cmdLink(args) {
   }
 }
 
+async function cmdRestore(args) {
+  const workspace = resolveWorkspace(args.flags.path);
+  const slug = args._[1];
+  if (!slug) {
+    console.error("Usage: llm-tracker restore <slug> [--rev <rev>]");
+    process.exit(1);
+  }
+  const body = {};
+  if (args.flags.rev !== undefined) {
+    const r = parseInt(args.flags.rev, 10);
+    if (isNaN(r) || r < 1) {
+      console.error("--rev must be a positive integer");
+      process.exit(1);
+    }
+    body.rev = r;
+  }
+  const { status, body: resp } = await httpRequest(
+    workspace,
+    args.flags.port,
+    "POST",
+    `/api/projects/${slug}/restore`,
+    body
+  );
+  if (status === 0) {
+    console.error("Hub not reachable. Start it with 'llm-tracker'.");
+    process.exit(1);
+  }
+  if (status >= 400) {
+    console.error(`Restore failed (${status}): ${resp.error || resp.raw}`);
+    process.exit(1);
+  }
+  console.log(
+    `Restored ${slug} from snapshot rev ${resp.restoredFromRev}. Current rev: ${resp.rev}.`
+  );
+  console.log(`  file: ${resp.file}`);
+}
+
 async function cmdRollback(args) {
   const workspace = resolveWorkspace(args.flags.path);
   const slug = args._[1];
@@ -549,6 +586,7 @@ async function main() {
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
   if (cmd === "next") return cmdNext(args, { resolveWorkspace, httpRequest });
   if (cmd === "rollback") return cmdRollback(args);
+  if (cmd === "restore") return cmdRestore(args);
   if (cmd === "since") return cmdSince(args);
   if (cmd === "link") return cmdLink(args);
   if (cmd === "shortcuts") return cmdShortcuts(args);
@@ -582,6 +620,7 @@ Usage:
   llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)
+  llm-tracker restore <slug> [--rev <rev>]             Restore a deleted project from its snapshot (requires hub)
   llm-tracker link <slug> <abs-path>                   Symlink an external tracker file into the workspace (requires hub)
   llm-tracker shortcuts [--alias NAME]                 Print shell shortcuts for zero-token lt next / lt brief usage
   llm-tracker help                                     Show this help

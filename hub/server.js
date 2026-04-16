@@ -3,13 +3,81 @@ import { readFileSync, existsSync, writeFileSync, renameSync, readdirSync } from
 import { join, extname, dirname } from "node:path";
 import { createRequire } from "node:module";
 import express from "express";
-import cors from "cors";
 import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
 import { buildTrackerErrorBody } from "./error-payload.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
 import { Store, slugFromFile } from "./store.js";
+
+const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+const MAX_SCRATCHPAD_LEN = 5000;
+const MAX_COMMENT_LEN = 500;
+const MAX_BLOCKER_REASON_LEN = 2000;
+
+function isLocalOrigin(origin) {
+  if (!origin) return false;
+  return LOCAL_ORIGIN_RE.test(origin);
+}
+
+function patchTaskEntries(patch) {
+  if (!patch || typeof patch !== "object" || !patch.tasks) return [];
+  if (Array.isArray(patch.tasks)) {
+    return patch.tasks
+      .filter((t) => t && typeof t === "object")
+      .map((t) => [t.id || "<unknown>", t]);
+  }
+  return Object.entries(patch.tasks).filter(([, t]) => t && typeof t === "object");
+}
+
+// Route-level rejection for oversized mutable fields. Runs before merge/schema
+// validation so hallucinated payloads are dropped cheaply.
+function checkPatchSize(body) {
+  if (!body || typeof body !== "object") return null;
+  const scratchpad = body?.meta?.scratchpad;
+  if (typeof scratchpad === "string" && scratchpad.length > MAX_SCRATCHPAD_LEN) {
+    return {
+      field: "meta.scratchpad",
+      max: MAX_SCRATCHPAD_LEN,
+      actual: scratchpad.length
+    };
+  }
+  for (const [id, task] of patchTaskEntries(body)) {
+    if (typeof task.comment === "string" && task.comment.length > MAX_COMMENT_LEN) {
+      return {
+        field: `tasks[${id}].comment`,
+        max: MAX_COMMENT_LEN,
+        actual: task.comment.length
+      };
+    }
+    if (
+      typeof task.blocker_reason === "string" &&
+      task.blocker_reason.length > MAX_BLOCKER_REASON_LEN
+    ) {
+      return {
+        field: `tasks[${id}].blocker_reason`,
+        max: MAX_BLOCKER_REASON_LEN,
+        actual: task.blocker_reason.length
+      };
+    }
+  }
+  return null;
+}
+
+function rejectOversizedMutableFields(req, res, next) {
+  const violation = checkPatchSize(req.body);
+  if (!violation) return next();
+  return res.status(413).json({
+    error: `${violation.field} is ${violation.actual} chars; limit is ${violation.max}`,
+    type: "field.too.large",
+    field: violation.field,
+    max: violation.max,
+    actual: violation.actual,
+    hint: "Trim the field before resubmitting. Limits exist to keep tracker files human-reviewable."
+  });
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -41,11 +109,73 @@ function snapshot(store) {
   return projects;
 }
 
-export async function startHub({ workspace, port, uiDir }) {
+export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   const store = new Store(workspace);
   const app = express();
-  app.use(cors());
-  app.use(express.json({ limit: "16mb" }));
+
+  const bindHost = host || process.env.LLM_TRACKER_HOST || "127.0.0.1";
+  const bearerToken =
+    typeof token === "string" && token.length > 0
+      ? token
+      : process.env.LLM_TRACKER_TOKEN || "";
+
+  // CSRF / cross-origin guard. The hub binds to loopback by default, but a
+  // malicious web page in a local browser can still fire cross-origin POSTs
+  // at localhost. Reject any mutating request whose Origin/Referer is not
+  // loopback. Browser fetch always attaches Origin on cross-origin POST, so
+  // this is a strict check. CLI/MCP/curl requests usually have no Origin at
+  // all and are treated as trusted.
+  app.use((req, res, next) => {
+    if (SAFE_METHODS.has(req.method)) return next();
+    const origin = req.headers.origin;
+    if (origin) {
+      if (!isLocalOrigin(origin)) {
+        return res.status(403).json({
+          error: "cross-origin request blocked",
+          hint: "Mutating requests must come from localhost or 127.0.0.1."
+        });
+      }
+      return next();
+    }
+    const referer = req.headers.referer;
+    if (referer) {
+      try {
+        const u = new URL(referer);
+        if (!isLocalOrigin(u.origin)) {
+          return res.status(403).json({
+            error: "cross-origin request blocked",
+            hint: "Mutating requests must come from localhost or 127.0.0.1."
+          });
+        }
+      } catch {}
+    }
+    next();
+  });
+
+  // Optional bearer-token guard. When LLM_TRACKER_TOKEN is set, every mutating
+  // request must carry a matching Authorization: Bearer <token> header (or
+  // X-LLM-Tracker-Token). The UI, when same-origin, reads the token from the
+  // injected window global and adds it automatically (see index.html handler).
+  if (bearerToken) {
+    app.use((req, res, next) => {
+      if (SAFE_METHODS.has(req.method)) return next();
+      const auth = req.headers.authorization || "";
+      const m = /^Bearer\s+(.+)$/i.exec(auth);
+      const x = req.headers["x-llm-tracker-token"];
+      if ((m && m[1] === bearerToken) || x === bearerToken) return next();
+      return res.status(401).json({
+        error: "missing or invalid bearer token",
+        hint:
+          "Set Authorization: Bearer $LLM_TRACKER_TOKEN (or X-LLM-Tracker-Token header) on mutating requests."
+      });
+    });
+  }
+
+  // Default JSON body limit. Real patches are tiny (< 10 KB is typical);
+  // 1 MB is already generous for full project files. Can be overridden via
+  // LLM_TRACKER_BODY_LIMIT for the rare case of a very large full-project PUT.
+  const bodyLimit = process.env.LLM_TRACKER_BODY_LIMIT || "1mb";
+  app.use(express.json({ limit: bodyLimit }));
   const readmePath = join(workspace, "README.md");
 
   const sendWorkspaceHelp = (res) => {
@@ -129,7 +259,7 @@ export async function startHub({ workspace, port, uiDir }) {
   });
   registerIntelligenceRoutes(app, { workspace, store });
 
-  app.put("/api/projects/:slug", async (req, res) => {
+  app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {
     const r = await store.createOrReplace(req.params.slug, req.body || {});
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
     res.json({ ok: true, slug: req.params.slug });
@@ -139,6 +269,26 @@ export async function startHub({ workspace, port, uiDir }) {
     const r = await store.deleteProject(req.params.slug);
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
     res.json({ ok: true, slug: req.params.slug });
+  });
+
+  app.post("/api/projects/:slug/restore", async (req, res) => {
+    const { rev } = req.body || {};
+    const parsedRev = rev === undefined ? undefined : parseInt(rev, 10);
+    if (rev !== undefined && (!Number.isInteger(parsedRev) || parsedRev < 1)) {
+      return res.status(400).json({ error: "body.rev must be a positive integer (or omit to restore latest)" });
+    }
+    const result = await store.restoreProject(req.params.slug, { rev: parsedRev });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    const loaded = reloadProject(req.params.slug);
+    const rehydratedRev = store.get(req.params.slug)?.rev ?? null;
+    res.json({
+      ok: true,
+      slug: req.params.slug,
+      restoredFromRev: result.restoredFromRev,
+      rev: rehydratedRev,
+      file: result.file,
+      loaded: !!loaded?.ok
+    });
   });
 
   app.post("/api/projects/:slug/symlink", async (req, res) => {
@@ -264,7 +414,7 @@ export async function startHub({ workspace, port, uiDir }) {
     res.json({ ok: true, from: result.from, to: result.to, newRev: result.newRev, action: "redo" });
   });
 
-  app.post("/api/projects/:slug/patch", async (req, res) => {
+  app.post("/api/projects/:slug/patch", rejectOversizedMutableFields, async (req, res) => {
     const patch = req.body || {};
     const r = await store.applyPatch(req.params.slug, patch);
     if (!r.ok) {
@@ -346,6 +496,15 @@ export async function startHub({ workspace, port, uiDir }) {
     if (!existsSync(file) || !file.startsWith(uiDir)) return next();
     const type = MIME[extname(file)] || "application/octet-stream";
     res.setHeader("Content-Type", type);
+    // When a bearer token is active, inject it into the UI shell so
+    // same-origin browser fetches can authenticate. Cross-origin JS cannot
+    // read the HTML body under default SOP, so this does not leak the token.
+    if (bearerToken && file.endsWith("index.html")) {
+      let html = readFileSync(file, "utf-8");
+      const snippet = `<script>window.__LLM_TRACKER_TOKEN=${JSON.stringify(bearerToken)};</script>`;
+      html = html.replace(/<head>/i, (match) => `${match}\n${snippet}`);
+      return res.send(html);
+    }
     res.send(readFileSync(file));
   });
 
@@ -362,7 +521,7 @@ export async function startHub({ workspace, port, uiDir }) {
       type: err.type || null,
       hint:
         err.type === "entity.too.large"
-          ? "Request body exceeds 16 MB. Split the patch into smaller chunks, or open a GitHub issue if your project is legitimately this large."
+          ? `Request body exceeds ${bodyLimit}. Split the patch into smaller chunks, or set LLM_TRACKER_BODY_LIMIT if your project is legitimately this large.`
           : err.type === "entity.parse.failed"
           ? "Body is not valid JSON. Check quoting / escaping / trailing commas."
           : undefined
@@ -622,9 +781,13 @@ export async function startHub({ workspace, port, uiDir }) {
       console.log("─────────────────────────────────────────────────────────");
       console.log(` LLM Project Tracker — hub running`);
       console.log(`   UI:         ${url}`);
+      console.log(`   Bind host:  ${bindHost}`);
       console.log(`   Workspace:  ${workspace}`);
       console.log(`   Help:       ${url}/help`);
       console.log(`   README:     ${readmePath}`);
+      if (bearerToken) {
+        console.log(`   Auth:       bearer token required for mutating requests`);
+      }
       console.log("─────────────────────────────────────────────────────────");
       console.log(" Paste into your LLM to register a project:");
       console.log("");
@@ -636,7 +799,7 @@ export async function startHub({ workspace, port, uiDir }) {
 
     httpServer.once("error", onError);
     httpServer.once("listening", onListening);
-    httpServer.listen(port);
+    httpServer.listen(port, bindHost);
   });
 
   return { httpServer, wss, store, watcher };
