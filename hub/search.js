@@ -8,6 +8,7 @@ const MAX_LIMIT = 50;
 const MIN_SEMANTIC_SCORE = 0.18;
 const MIN_FUZZY_SCORE = 0.22;
 const EMBEDDING_MODEL = process.env.LLM_TRACKER_EMBEDDING_MODEL || "Xenova/all-MiniLM-L6-v2";
+const LOCAL_HASH_VECTOR_SIZE = 384;
 const ORT_SYMBOL = Symbol.for("onnxruntime");
 const SEARCH_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TRANSFORMERS_WEB_MODULE = resolve(
@@ -125,6 +126,59 @@ function cosineSimilarity(vecA, vecB) {
 
   if (normA === 0 || normB === 0) return 0;
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function stableHash32(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function addHashedFeature(vector, feature, weight) {
+  const hash = stableHash32(feature);
+  const index = hash % LOCAL_HASH_VECTOR_SIZE;
+  const sign = hash & 1 ? 1 : -1;
+  vector[index] += sign * weight;
+}
+
+function normalizeVector(vector) {
+  let magnitude = 0;
+  for (const value of vector) magnitude += value * value;
+  if (magnitude === 0) return vector;
+
+  const scale = 1 / Math.sqrt(magnitude);
+  for (let index = 0; index < vector.length; index += 1) {
+    vector[index] *= scale;
+  }
+  return vector;
+}
+
+function localHashVector(text) {
+  const normalized = normalizeText(text).replace(/\s+/g, " ");
+  const vector = new Float32Array(LOCAL_HASH_VECTOR_SIZE);
+  if (!normalized) return vector;
+
+  const tokens = tokenize(normalized);
+  for (const token of tokens) {
+    addHashedFeature(vector, `tok:${token}`, 1.8);
+  }
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    addHashedFeature(vector, `bi:${tokens[index]}_${tokens[index + 1]}`, 1.1);
+  }
+  for (const trigram of trigramSet(normalized)) {
+    addHashedFeature(vector, `tri:${trigram}`, 0.2);
+  }
+
+  return normalizeVector(vector);
+}
+
+function createLocalHashExtractor() {
+  return async (input) => ({
+    data: localHashVector(String(input || ""))
+  });
 }
 
 function taskExcerpt(task) {
@@ -308,6 +362,19 @@ async function initializeExtractor(factoryLoader) {
   return extractor;
 }
 
+function localHashRuntimeWarning() {
+  return "semantic search is using the bundled local hash runtime because model runtimes are unavailable in this environment";
+}
+
+async function fallbackToLocalHashRuntime() {
+  return {
+    extractor: createLocalHashExtractor(),
+    warning: localHashRuntimeWarning(),
+    mode: "hash",
+    backend: "semantic_hash_fallback"
+  };
+}
+
 async function getExtractorRuntime() {
   semanticActivated = true;
   if (!extractorPromise) {
@@ -316,14 +383,18 @@ async function getExtractorRuntime() {
         return {
           extractor: await initializeExtractor(loadNativeExtractorFactory),
           warning: null,
-          mode: "native"
+          mode: "native",
+          backend: "semantic"
         };
       } catch (error) {
-        if (!isOnnxNativeBindingFailure(error)) {
-          throw error;
+        if (isOnnxNativeBindingFailure(error)) {
+          return fallbackToWasmRuntime(error);
+        }
+        if (shouldHideSemanticRuntimeDetail(error)) {
+          return fallbackToLocalHashRuntime(error);
         }
 
-        return fallbackToWasmRuntime(error);
+        throw error;
       }
     })();
   }
@@ -335,9 +406,13 @@ async function fallbackToWasmRuntime(nativeFailure) {
     return {
       extractor: await initializeExtractor(loadWasmExtractorFactory),
       warning: `semantic search is using the local wasm runtime because the native backend failed: ${nativeFailure.message}`,
-      mode: "wasm"
+      mode: "wasm",
+      backend: "semantic"
     };
   } catch (wasmError) {
+    if (shouldHideSemanticRuntimeDetail(wasmError)) {
+      return fallbackToLocalHashRuntime(wasmError, nativeFailure);
+    }
     wasmError.cause = wasmError.cause || nativeFailure;
     throw wasmError;
   }
@@ -351,17 +426,49 @@ async function embedText(text, runtime) {
       runtime
     };
   } catch (error) {
-    if (runtime.mode !== "native" || !isOnnxNativeBindingFailure(error)) {
-      throw error;
+    if (runtime.mode === "native") {
+      if (isOnnxNativeBindingFailure(error)) {
+        const wasmRuntime = await fallbackToWasmRuntime(error);
+        extractorPromise = Promise.resolve(wasmRuntime);
+        try {
+          const output = await wasmRuntime.extractor(text, { pooling: "mean", normalize: true });
+          return {
+            vector: Array.from(output?.data || []),
+            runtime: wasmRuntime
+          };
+        } catch (wasmError) {
+          if (shouldHideSemanticRuntimeDetail(wasmError)) {
+            const hashRuntime = await fallbackToLocalHashRuntime(wasmError);
+            extractorPromise = Promise.resolve(hashRuntime);
+            const output = await hashRuntime.extractor(text, { pooling: "mean", normalize: true });
+            return {
+              vector: Array.from(output?.data || []),
+              runtime: hashRuntime
+            };
+          }
+          throw wasmError;
+        }
+      }
+      if (shouldHideSemanticRuntimeDetail(error)) {
+        const hashRuntime = await fallbackToLocalHashRuntime(error);
+        extractorPromise = Promise.resolve(hashRuntime);
+        const output = await hashRuntime.extractor(text, { pooling: "mean", normalize: true });
+        return {
+          vector: Array.from(output?.data || []),
+          runtime: hashRuntime
+        };
+      }
     }
-
-    const wasmRuntime = await fallbackToWasmRuntime(error);
-    extractorPromise = Promise.resolve(wasmRuntime);
-    const output = await wasmRuntime.extractor(text, { pooling: "mean", normalize: true });
-    return {
-      vector: Array.from(output?.data || []),
-      runtime: wasmRuntime
-    };
+    if (runtime.mode === "wasm" && shouldHideSemanticRuntimeDetail(error)) {
+      const hashRuntime = await fallbackToLocalHashRuntime(error);
+      extractorPromise = Promise.resolve(hashRuntime);
+      const output = await hashRuntime.extractor(text, { pooling: "mean", normalize: true });
+      return {
+        vector: Array.from(output?.data || []),
+        runtime: hashRuntime
+      };
+    }
+    throw error;
   }
 }
 
@@ -563,7 +670,7 @@ export async function getSearchPayload({
       mode: "semantic",
       query: state.raw,
       model: EMBEDDING_MODEL,
-      backend: "semantic",
+      backend: embeddedQuery.runtime.backend || "semantic",
       ...(embeddedQuery.runtime.warning ? { warning: embeddedQuery.runtime.warning } : {}),
       matches,
       truncation: {

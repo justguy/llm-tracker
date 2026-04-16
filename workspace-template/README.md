@@ -483,8 +483,8 @@ llm-tracker fuzzy-search <slug> <query>
 If MCP is configured, the matching tools are `tracker_search` and `tracker_fuzzy_search`.
 
 - `search` is semantic local-model search backed by `@huggingface/transformers` and `Xenova/all-MiniLM-L6-v2`
-- it tries the native Node runtime first, then a local WASM runtime, and only then degrades to deterministic fuzzy matching
-- if semantic has to fall back, `search` returns a warning; if both semantic runtimes are unavailable it returns fuzzy results with `backend: "fuzzy_fallback"` instead of failing the whole call
+- it tries the native Node runtime first, then a local WASM runtime, then a bundled offline hash runtime, and only then degrades to deterministic fuzzy matching
+- if semantic has to fall back, `search` returns a warning; if model runtimes are unavailable it can still return semantic results with `backend: "semantic_hash_fallback"`, and only unexpected failures degrade to `backend: "fuzzy_fallback"`
 - `fuzzy-search` is deterministic lexical fallback
 - use the returned task ids to pivot into `brief` or `why`
 

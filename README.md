@@ -392,8 +392,8 @@ Legacy compatibility: if an older patch or tracker file still uses `status: "par
 - The default embedding model is [`Xenova/all-MiniLM-L6-v2`](https://huggingface.co/Xenova/all-MiniLM-L6-v2).
 - Both are Apache-2.0 licensed.
 - The first semantic query may download the model into the local Hugging Face cache; after that, query embedding and cosine ranking stay local.
-- Semantic `/search` now tries the native Node runtime first, then a local WASM runtime bundled from `onnxruntime-web`, and only then degrades to deterministic fuzzy matching.
-- If semantic has to fall back, the payload returns a warning. If both semantic runtimes are unavailable, `/search` returns fuzzy results with `backend: "fuzzy_fallback"` instead of failing the whole call.
+- Semantic `/search` now tries the native Node runtime first, then a local WASM runtime bundled from `onnxruntime-web`, then a bundled offline hash runtime, and only then degrades to deterministic fuzzy matching.
+- If semantic has to fall back, the payload returns a warning. If model runtimes are unavailable, `/search` can still return semantic results with `backend: "semantic_hash_fallback"`; only unexpected runtime failures degrade to `backend: "fuzzy_fallback"`.
 - `/fuzzy-search` remains the deterministic lexical fallback when you want approximate string matching without loading embeddings.
 
 Two write modes:

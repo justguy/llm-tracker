@@ -28,7 +28,8 @@ For this repo specifically:
 - when adding tasks through patch mode, only append genuinely open work; brand-new patch tasks must start as `not_started` or `in_progress`, not `complete` or `deferred`
 - if an idea is already folded into an existing owning row, update that row instead of appending a standalone docs/workflow task and retiring it immediately
 - treat bare URLs in `reference` / `references[]` as invalid; use repo-relative `path:line` or `path:line-line`
-- if `/search` returns a warning, treat that as a degraded local semantic runtime, not as a tracker-data failure; the hub now tries native semantic, then local WASM semantic, then fuzzy fallback
+- if `/search` returns a warning, treat that as a degraded local semantic runtime, not as a tracker-data failure; the hub now tries native semantic, then local WASM semantic, then a bundled offline hash semantic runtime, and only then fuzzy fallback
+- if `/search` returns `backend: "semantic_hash_fallback"`, continue with the returned matches; that means the local model runtime is unavailable but the bundled offline semantic fallback is still working
 - if `/search` returns `backend: "fuzzy_fallback"`, continue with the returned matches or call `fuzzy-search` explicitly instead of blaming tracker data
 - if a slug exists on disk but 404s from the hub, retry once first because the hub auto-reloads missing slugs on demand, then prefer `reload` before asking for a daemon restart
 - for metadata backfills on existing projects, prefer bounded active tasks before broad roadmap rows, verify with `next` / `brief` / `execute` / `verify` / `search`, and stop before commit or PR refresh unless the human explicitly asked for that step
