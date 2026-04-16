@@ -224,6 +224,19 @@ For migration/backfill batches, prefer this order:
 4. broad roadmap/container rows only when they improve ranking or blocker explanations
 5. remaining open but inactive tasks only if they still matter to search or active work
 
+For bounded active tasks, do not stop at retrieval-only fields if the execution contract can be grounded. A strong first batch should usually include:
+
+- `references[]`
+- `effort`
+- `comment`
+- `definition_of_done`
+- `constraints`
+- `expected_changes`
+- `allowed_paths`
+- `approval_required_for`
+
+If a patch only adds `references[]`, `effort`, `related`, and `comment`, treat it as **retrieval-only enrichment**. Do not describe it as a complete migration batch for that task.
+
 After each batch, verify with `next`, `brief`, `execute`, `verify`, `search`, and `fuzzy-search`, then stop and report. Do **not** commit or refresh a PR unless the human explicitly asked you to.
 
 ### 4.4 Canonical example

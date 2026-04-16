@@ -144,6 +144,12 @@ This improves:
 - `search`
 - `fuzzy-search`
 
+Important:
+
+- a patch that adds only `references[]`, `effort`, `related`, and `comment` is a **retrieval-only** patch
+- do **not** call that a complete migration batch for active work
+- for bounded active tasks, the first serious migration batch should usually include both retrieval fields and execution-contract fields when they can be grounded
+
 ### Pass 2: execution quality
 
 Backfill:
@@ -182,6 +188,19 @@ Start with the highest-value executable tasks:
 - then blocked tasks missing context
 
 Do not start with broad roadmap rows or umbrella program sections unless they are the only available representation of the work.
+
+For each bounded active task in this batch, prefer to fill:
+
+- `references[]`
+- `effort`
+- `comment`
+- `definition_of_done`
+- `constraints`
+- `expected_changes`
+- `allowed_paths`
+- `approval_required_for`
+
+If you only fill retrieval fields, treat the batch as **retrieval-only enrichment**, not as a complete migration pass for that task.
 
 ### Step 3: backfill broad program rows only where they help
 
@@ -262,6 +281,8 @@ Rules:
 - Keep each patch small: 3-10 tasks max.
 - If the project is linked from a branch worktree, verify the shared workspace link and reload the slug before writing.
 - Backfill bounded active tasks before broad roadmap/container rows.
+- If a patch only adds `references[]`, `effort`, `related`, or `comment`, describe it as retrieval-only enrichment, not as a complete migration batch.
+- For bounded active tasks, include `definition_of_done`, `constraints`, `expected_changes`, `allowed_paths`, and `approval_required_for` whenever they can be grounded from actual evidence.
 - Verify with next/brief/execute/verify/search after each batch.
 - Stop after verification unless the human explicitly asked you to commit or refresh a PR.
 

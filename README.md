@@ -321,6 +321,8 @@ Migrating an older `0.1.x` workspace or tracker set to the `0.2.0` contract, inc
 
 That migration guide also covers existing shared-workspace projects linked from repo worktrees: relink the slug to the intended branch file, `reload` it, backfill bounded active tasks first, verify with `execute` / `verify` / `search`, and stop before any commit unless the human asked for one.
 
+It now also calls out an easy failure mode: a patch that adds only `references[]`, `effort`, `related`, and `comment` is retrieval-only enrichment, not a complete migration batch for active tasks.
+
 ---
 
 ## How it looks under the hood
