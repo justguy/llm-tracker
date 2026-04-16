@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { getPrompt, listPrompts, listResources, readResource } from "./mcp-context.js";
 import { httpRequest, resolveWorkspace } from "./workspace-client.js";
@@ -9,7 +9,6 @@ import { getChangedPayload } from "../hub/changed.js";
 import { getDecisionsPayload } from "../hub/decisions.js";
 import { getExecutePayload } from "../hub/execute.js";
 import { getNextPayload } from "../hub/next.js";
-import { getFuzzyPayload, getSearchPayload } from "../hub/search.js";
 import { listProjectEntries, loadProjectEntry, readWorkspaceHelp } from "../hub/project-loader.js";
 import { readHistory } from "../hub/snapshots.js";
 import { getVerifyPayload } from "../hub/verify.js";
@@ -18,12 +17,16 @@ import { getWhyPayload } from "../hub/why.js";
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
 
+let searchModulePromise = null;
+const MCP_DEBUG_LOG = process.env.LLM_TRACKER_MCP_DEBUG_LOG || "/tmp/llm-tracker-mcp-debug.log";
+
 const SUPPORTED_PROTOCOL_VERSIONS = [
   "2025-11-25",
   "2025-06-18",
   "2025-03-26",
   "2024-11-05"
 ];
+const DEFAULT_PROTOCOL_VERSION = "2025-03-26";
 
 function clampInt(value, { fallback, min, max }) {
   const parsed = parseInt(value, 10);
@@ -141,10 +144,60 @@ function projectStatusPayload(workspace, entry) {
   };
 }
 
-function encodeMessage(message) {
+function encodeMessage(message, lineEnding = "\r\n") {
   const json = Buffer.from(JSON.stringify(message), "utf8");
-  const header = Buffer.from(`Content-Length: ${json.length}\r\n\r\n`, "utf8");
+  const header = Buffer.from(`Content-Length: ${json.length}${lineEnding}${lineEnding}`, "utf8");
   return Buffer.concat([header, json]);
+}
+
+function findHeaderBoundary(buffer) {
+  const crlfBoundary = buffer.indexOf("\r\n\r\n");
+  if (crlfBoundary !== -1) {
+    return { index: crlfBoundary, separatorLength: 4, lineEnding: "\r\n" };
+  }
+
+  const lfBoundary = buffer.indexOf("\n\n");
+  if (lfBoundary !== -1) {
+    return { index: lfBoundary, separatorLength: 2, lineEnding: "\n" };
+  }
+
+  return null;
+}
+
+function debugLog(line) {
+  if (!MCP_DEBUG_LOG) return;
+  try {
+    appendFileSync(MCP_DEBUG_LOG, `[${new Date().toISOString()}] ${line}\n`);
+  } catch {
+    // Debug logging must never interfere with MCP stdio behavior.
+  }
+}
+
+async function loadSearchModule() {
+  if (!searchModulePromise) {
+    searchModulePromise = import("../hub/search.js");
+  }
+  return searchModulePromise;
+}
+
+async function getSearchToolPayload(...args) {
+  const module = await loadSearchModule();
+  return module.getSearchPayload(...args);
+}
+
+async function getFuzzySearchToolPayload(...args) {
+  const module = await loadSearchModule();
+  return module.getFuzzyPayload(...args);
+}
+
+function negotiateProtocolVersion(requested) {
+  if (requested === "2024-11-05") {
+    return requested;
+  }
+  if (SUPPORTED_PROTOCOL_VERSIONS.includes(requested)) {
+    return DEFAULT_PROTOCOL_VERSION;
+  }
+  return DEFAULT_PROTOCOL_VERSION;
 }
 
 function parseMessages(buffer) {
@@ -152,21 +205,24 @@ function parseMessages(buffer) {
   let rest = buffer;
 
   while (true) {
-    const headerEnd = rest.indexOf("\r\n\r\n");
-    if (headerEnd === -1) break;
+    const boundary = findHeaderBoundary(rest);
+    if (!boundary) break;
 
-    const header = rest.subarray(0, headerEnd).toString("utf8");
+    const header = rest.subarray(0, boundary.index).toString("utf8");
     const match = header.match(/Content-Length:\s*(\d+)/i);
     if (!match) {
       throw new Error("missing Content-Length header");
     }
 
     const length = parseInt(match[1], 10);
-    const messageStart = headerEnd + 4;
+    const messageStart = boundary.index + boundary.separatorLength;
     if (rest.length - messageStart < length) break;
 
     const body = rest.subarray(messageStart, messageStart + length).toString("utf8");
-    messages.push(JSON.parse(body));
+    messages.push({
+      lineEnding: boundary.lineEnding,
+      message: JSON.parse(body)
+    });
     rest = rest.subarray(messageStart + length);
   }
 
@@ -265,7 +321,7 @@ function createTools(workspace, portFlag) {
         required: ["slug", "query"]
       },
       handler: async (args = {}) =>
-        readToolPayload(getSearchPayload, workspace, nonEmptyString(args.slug), {
+        readToolPayload(getSearchToolPayload, workspace, nonEmptyString(args.slug), {
           query: nonEmptyString(args.query),
           limit: clampInt(args.limit, { fallback: 10, min: 1, max: 50 })
         })
@@ -283,7 +339,7 @@ function createTools(workspace, portFlag) {
         required: ["slug", "query"]
       },
       handler: async (args = {}) =>
-        readToolPayload(getFuzzyPayload, workspace, nonEmptyString(args.slug), {
+        readToolPayload(getFuzzySearchToolPayload, workspace, nonEmptyString(args.slug), {
           query: nonEmptyString(args.query),
           limit: clampInt(args.limit, { fallback: 10, min: 1, max: 50 })
         })
@@ -574,16 +630,19 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
   if (!existsSync(join(workspace, "README.md"))) {
     throw new Error(`Workspace at ${workspace} is missing README.md.`);
   }
+  debugLog(`server start pid=${process.pid} cwd=${process.cwd()} workspace=${workspace}`);
 
   const tools = createTools(workspace, portFlag);
   let initialized = false;
   let buffer = Buffer.alloc(0);
+  let responseLineEnding = "\r\n";
 
   const send = (message) => {
-    process.stdout.write(encodeMessage(message));
+    process.stdout.write(encodeMessage(message, responseLineEnding));
   };
 
   const sendResult = (id, result) => {
+    debugLog(`send result id=${id} keys=${Object.keys(result || {}).join(",")}`);
     send({
       jsonrpc: "2.0",
       id,
@@ -592,6 +651,7 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
   };
 
   const sendError = (id, code, message, data = undefined) => {
+    debugLog(`send error id=${id} code=${code} message=${message}`);
     send({
       jsonrpc: "2.0",
       id,
@@ -604,32 +664,22 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
   };
 
   const onRequest = async (message) => {
+    debugLog(`request method=${message.method} id=${message.id ?? "notification"}`);
     if (message.method === "initialize") {
       const requested = nonEmptyString(message.params?.protocolVersion);
-      const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
-        ? requested
-        : SUPPORTED_PROTOCOL_VERSIONS[0];
+      const protocolVersion = negotiateProtocolVersion(requested);
 
       sendResult(message.id, {
         protocolVersion,
         capabilities: {
-          prompts: {
-            listChanged: false
-          },
-          resources: {
-            listChanged: false,
-            subscribe: false
-          },
-          tools: {
-            listChanged: false
-          }
+          prompts: {},
+          resources: {},
+          tools: {}
         },
         serverInfo: {
           name: pkg.name,
           version: pkg.version
-        },
-        instructions:
-          `Call tracker_help or read tracker://help first for the current workspace contract. MCP read tools and resources operate directly on workspace files; MCP write tools like tracker_pick and tracker_reload require the hub to be reachable. File-mode patches live under ${join(workspace, "patches")}.`
+        }
       });
       return;
     }
@@ -653,6 +703,13 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
     if (message.method === "resources/list") {
       sendResult(message.id, {
         resources: listResources(workspace)
+      });
+      return;
+    }
+
+    if (message.method === "resources/templates/list") {
+      sendResult(message.id, {
+        resourceTemplates: []
       });
       return;
     }
@@ -725,26 +782,46 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
     sendError(message.id, -32601, `Method not found: ${message.method}`);
   };
 
+  process.on("beforeExit", (code) => {
+    debugLog(`beforeExit code=${code}`);
+  });
+  process.on("exit", (code) => {
+    debugLog(`exit code=${code}`);
+  });
+  process.stdin.on("close", () => {
+    debugLog("stdin close");
+  });
+  process.stdin.on("end", () => {
+    debugLog("stdin end");
+    process.exit(0);
+  });
+
   process.stdin.on("data", async (chunk) => {
+    debugLog(`stdin data bytes=${chunk.length}`);
     buffer = Buffer.concat([buffer, chunk]);
     let parsed;
 
     try {
       parsed = parseMessages(buffer);
     } catch (error) {
+      debugLog(`parse error: ${error.message}`);
       process.stderr.write(`[llm-tracker mcp] failed to parse request: ${error.message}\n`);
-      buffer = "";
+      buffer = Buffer.alloc(0);
       return;
     }
 
     buffer = parsed.rest;
-    for (const message of parsed.messages) {
+    for (const packet of parsed.messages) {
+      responseLineEnding = packet.lineEnding || responseLineEnding;
+      const message = packet.message;
       if (!message || typeof message !== "object") continue;
 
       if (!("id" in message)) {
         if (message.method === "notifications/initialized") {
+          debugLog("notification initialized");
           initialized = true;
         } else if (message.method === "notifications/cancelled") {
+          debugLog("notification cancelled");
           continue;
         }
         continue;
@@ -753,6 +830,4 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
       await onRequest(message);
     }
   });
-
-  process.stdin.on("end", () => process.exit(0));
 }

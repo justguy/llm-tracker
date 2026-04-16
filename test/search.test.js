@@ -5,7 +5,8 @@ import {
   buildFuzzySearchPayload,
   buildSearchPayload,
   setSemanticExtractorFactoryForTests,
-  setSemanticRuntimeFactoriesForTests
+  setSemanticRuntimeFactoriesForTests,
+  setSemanticWasmModuleLoadersForTests
 } from "../hub/search.js";
 
 function makeKeywordEmbedderFactory(keywords) {
@@ -22,6 +23,7 @@ function makeKeywordEmbedderFactory(keywords) {
 afterEach(() => {
   setSemanticExtractorFactoryForTests(null);
   setSemanticRuntimeFactoriesForTests();
+  setSemanticWasmModuleLoadersForTests();
 });
 
 test("buildSearchPayload returns semantic matches from the local embedder", async () => {
@@ -132,7 +134,7 @@ test("buildSearchPayload falls back to fuzzy matches when semantic runtime is un
 
   assert.equal(payload.mode, "semantic");
   assert.equal(payload.backend, "fuzzy_fallback");
-  assert.match(payload.warning, /semantic search unavailable/i);
+  assert.equal(payload.warning, "semantic search unavailable in this environment; using fuzzy fallback");
   assert.equal(payload.matches[0].id, "t-017");
 });
 
@@ -178,4 +180,65 @@ test("buildSearchPayload falls back from native backend to local wasm semantic r
   assert.equal(payload.backend, "semantic");
   assert.match(payload.warning, /local wasm runtime/i);
   assert.equal(payload.matches[0].id, "t-017");
+});
+
+test("buildSearchPayload does not force an unsupported wasm device in the local fallback path", async () => {
+  const fakeEnv = { backends: { onnx: { wasm: {} } } };
+  const pipelineCalls = [];
+  setSemanticRuntimeFactoriesForTests({
+    nativeFactory: async () => async () => {
+      throw new Error("onnxruntime-node native binding missing");
+    }
+  });
+  setSemanticWasmModuleLoadersForTests({
+    onnxWebLoader: async () => ({ default: { fake: true } }),
+    transformersWebLoader: async () => ({
+      env: fakeEnv,
+      pipeline: async (...args) => {
+        pipelineCalls.push(args);
+        return makeKeywordEmbedderFactory(["parallel", "route", "flow", "investor"])();
+      }
+    })
+  });
+
+  const project = validProject({
+    tasks: [
+      {
+        id: "t-017",
+        title: "Parallel execution branch/variant route-flow proof",
+        goal: "Prove the branch and route flow.",
+        status: "in_progress",
+        placement: { swimlaneId: "exec", priorityId: "p0" },
+        dependencies: []
+      },
+      {
+        id: "t-018",
+        title: "Investor demo cost surface",
+        goal: "Show cost savings honestly.",
+        status: "not_started",
+        placement: { swimlaneId: "ops", priorityId: "p1" },
+        dependencies: []
+      }
+    ]
+  });
+  project.meta.rev = 24;
+
+  const payload = await buildSearchPayload({
+    slug: "test-project",
+    data: project,
+    query: "parallel route flow",
+    limit: 5,
+    workspace: "/tmp/search-test"
+  });
+
+  assert.equal(payload.mode, "semantic");
+  assert.equal(payload.backend, "semantic");
+  assert.match(payload.warning, /local wasm runtime/i);
+  assert.equal(payload.matches[0].id, "t-017");
+  assert.equal(fakeEnv.allowLocalModels, false);
+  assert.deepEqual(pipelineCalls, [[
+    "feature-extraction",
+    "Xenova/all-MiniLM-L6-v2",
+    { device: "auto" }
+  ]]);
 });

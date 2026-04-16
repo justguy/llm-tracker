@@ -49,9 +49,9 @@ function findFreePort() {
   });
 }
 
-function encodeMessage(message) {
+function encodeMessage(message, { lineEnding = "\r\n" } = {}) {
   const json = Buffer.from(JSON.stringify(message), "utf8");
-  const header = Buffer.from(`Content-Length: ${json.length}\r\n\r\n`, "utf8");
+  const header = Buffer.from(`Content-Length: ${json.length}${lineEnding}${lineEnding}`, "utf8");
   return Buffer.concat([header, json]);
 }
 
@@ -60,15 +60,26 @@ function parseMessages(buffer) {
   let rest = buffer;
 
   while (true) {
-    const headerEnd = rest.indexOf("\r\n\r\n");
-    if (headerEnd === -1) break;
+    const crlfBoundary = rest.indexOf("\r\n\r\n");
+    const lfBoundary = rest.indexOf("\n\n");
+    let headerEnd = -1;
+    let separatorLength = 0;
+    if (crlfBoundary !== -1) {
+      headerEnd = crlfBoundary;
+      separatorLength = 4;
+    } else if (lfBoundary !== -1) {
+      headerEnd = lfBoundary;
+      separatorLength = 2;
+    } else {
+      break;
+    }
 
     const header = rest.subarray(0, headerEnd).toString("utf8");
     const match = header.match(/Content-Length:\s*(\d+)/i);
     if (!match) throw new Error("missing Content-Length header");
 
     const length = parseInt(match[1], 10);
-    const messageStart = headerEnd + 4;
+    const messageStart = headerEnd + separatorLength;
     if (rest.length - messageStart < length) break;
 
     const body = rest.subarray(messageStart, messageStart + length).toString("utf8");
@@ -165,6 +176,57 @@ function startMcp(workspace, extraArgs = [], options = {}) {
   return new McpClient(child);
 }
 
+test("llm-tracker mcp accepts LF-delimited headers during initialize", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-lf-");
+  const tracker = validProject();
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(tracker, null, 2));
+
+  const child = spawn(process.execPath, [BIN, "mcp", "--path", workspace], {
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  child.stderr.resume();
+
+  const pending = new Promise((resolve, reject) => {
+    let buffer = Buffer.alloc(0);
+    const timeout = setTimeout(() => reject(new Error("timed out waiting for initialize response")), 5000);
+    timeout.unref?.();
+
+    child.stdout.on("data", (chunk) => {
+      const parsed = parseMessages(Buffer.concat([buffer, chunk]));
+      buffer = parsed.rest;
+      if (parsed.messages.length === 0) return;
+      clearTimeout(timeout);
+      resolve(parsed.messages[0]);
+    });
+    child.on("exit", (code, signal) => {
+      clearTimeout(timeout);
+      reject(new Error(`MCP server exited: ${code ?? "null"} ${signal || ""}`.trim()));
+    });
+  });
+
+  try {
+    child.stdin.write(encodeMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "lf-client", version: "1.0.0" }
+      }
+    }, { lineEnding: "\n" }));
+
+    const init = await pending;
+    assert.equal(init.result.protocolVersion, "2025-03-26");
+    assert.equal(init.result.serverInfo.name, "llm-tracker");
+  } finally {
+    child.stdin.end();
+    child.kill();
+    await new Promise((resolve) => child.once("exit", resolve));
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("llm-tracker mcp initializes and lists tracker tools", async () => {
   const workspace = setupWorkspace();
   const tracker = validProject();
@@ -174,11 +236,9 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
   try {
     const init = await client.initialize();
     assert.equal(init.result.protocolVersion, "2024-11-05");
-    assert.equal(init.result.capabilities.tools.listChanged, false);
-    assert.equal(init.result.capabilities.resources.listChanged, false);
-    assert.equal(init.result.capabilities.resources.subscribe, false);
-    assert.equal(init.result.capabilities.prompts.listChanged, false);
-    assert.match(init.result.instructions, /tracker:\/\/help/);
+    assert.deepEqual(init.result.capabilities.tools, {});
+    assert.deepEqual(init.result.capabilities.resources, {});
+    assert.deepEqual(init.result.capabilities.prompts, {});
 
     const tools = await client.request("tools/list");
     const names = tools.result.tools.map((tool) => tool.name).sort();

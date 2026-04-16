@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { cmdBlockers } from "./commands/blockers.js";
 import { cmdBrief } from "./commands/brief.js";
 import { cmdChanged } from "./commands/changed.js";
@@ -17,8 +17,6 @@ import { cmdSearch } from "./commands/search.js";
 import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
 import { DEFAULT_PORT, httpRequest, resolvePort, resolveWorkspace } from "./workspace-client.js";
-import { startHub } from "../hub/server.js";
-import { loadProjects, renderDashboard, renderProject, renderJson } from "../hub/status.js";
 import {
   daemonLogPath,
   ensureRuntimeDir,
@@ -255,12 +253,13 @@ async function cmdSince(args) {
   }
 }
 
-function cmdStatus(args) {
+async function cmdStatus(args) {
   const workspace = resolveWorkspace(args.flags.path);
   if (!existsSync(workspace)) {
     console.error(`No workspace at ${workspace}. Run 'llm-tracker init' first.`);
     process.exit(1);
   }
+  const { loadProjects, renderDashboard, renderProject, renderJson } = await import("../hub/status.js");
   const projects = loadProjects(workspace);
   if (!projects) {
     console.error(`No trackers folder at ${workspace}.`);
@@ -292,6 +291,7 @@ async function cmdRun(args, { daemonized = false } = {}) {
   const port = resolvePort(workspace, args.flags.port);
 
   ensureWorkspaceReady(workspace);
+  const { startHub } = await import("../hub/server.js");
   await startHub({ workspace, port, uiDir: join(PKG_ROOT, "ui") });
 
   if (daemonized) {

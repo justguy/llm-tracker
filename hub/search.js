@@ -25,6 +25,8 @@ const WASM_BINARY_FILE = "ort-wasm-simd-threaded.asyncify.wasm";
 let extractorFactoryOverride = null;
 let nativeExtractorFactoryOverride = null;
 let wasmExtractorFactoryOverride = null;
+let onnxWebModuleLoaderOverride = null;
+let transformersWebModuleLoaderOverride = null;
 let extractorPromise = null;
 let semanticActivated = false;
 
@@ -224,6 +226,9 @@ function createLocalAwareFetch(baseFetch = globalThis.fetch?.bind(globalThis)) {
 function configureTransformersWasmEnv(env) {
   if (!env?.backends?.onnx?.wasm) return;
   env.fetch = createLocalAwareFetch(env.fetch || globalThis.fetch?.bind(globalThis));
+  // The web build defaults to probing /models in Node, which is not a real
+  // local model store for llm-tracker and produces parse errors.
+  env.allowLocalModels = false;
   env.backends.onnx.wasm.wasmPaths = {
     mjs: pathToFileURL(resolve(ONNXRUNTIME_WEB_DIST, WASM_FACTORY_FILE)).href,
     wasm: pathToFileURL(resolve(ONNXRUNTIME_WEB_DIST, WASM_BINARY_FILE)).href
@@ -274,13 +279,21 @@ async function loadWasmExtractorFactory() {
   if (extractorFactoryOverride) return extractorFactoryOverride;
   if (wasmExtractorFactoryOverride) return wasmExtractorFactoryOverride;
 
-  const onnxWebModule = await import("onnxruntime-web/webgpu");
+  const onnxWebModule = onnxWebModuleLoaderOverride
+    ? await onnxWebModuleLoaderOverride()
+    : await import("onnxruntime-web/webgpu");
   globalThis[ORT_SYMBOL] = onnxWebModule.default || onnxWebModule;
 
-  const module = await import(pathToFileURL(TRANSFORMERS_WEB_MODULE).href);
+  const module = transformersWebModuleLoaderOverride
+    ? await transformersWebModuleLoaderOverride()
+    : await import(pathToFileURL(TRANSFORMERS_WEB_MODULE).href);
   configureTransformersWasmEnv(module.env);
   const { pipeline } = module;
-  return async ({ modelId }) => pipeline("feature-extraction", modelId, { device: "wasm" });
+  // Avoid the Node default device ("cpu") because transformers.web does not
+  // populate a supported-device list when onnxruntime-web is injected via the
+  // global symbol. "auto" still allows the runtime to pick an execution
+  // provider without tripping the unsupported-device guard first.
+  return async ({ modelId }) => pipeline("feature-extraction", modelId, { device: "auto" });
 }
 
 async function initializeExtractor(factoryLoader) {
@@ -456,6 +469,23 @@ export function clearSearchCachesForSlug(workspace, slug) {
   semanticIndexCache.delete(cacheKey(workspace, slug));
 }
 
+function shouldHideSemanticRuntimeDetail(error) {
+  const message = fullErrorMessage(error);
+  return (
+    isOnnxNativeBindingFailure(error) ||
+    /unsupported device:/i.test(message) ||
+    /failed to parse url from \/models\//i.test(message) ||
+    /fetch failed/i.test(message)
+  );
+}
+
+function semanticUnavailableWarning(error) {
+  if (shouldHideSemanticRuntimeDetail(error)) {
+    return "semantic search unavailable in this environment; using fuzzy fallback";
+  }
+  return `semantic search unavailable: ${error.message}`;
+}
+
 export function setSemanticExtractorFactoryForTests(factory) {
   extractorFactoryOverride = factory;
   nativeExtractorFactoryOverride = null;
@@ -469,6 +499,20 @@ export function setSemanticRuntimeFactoriesForTests({ nativeFactory = null, wasm
   extractorFactoryOverride = null;
   nativeExtractorFactoryOverride = nativeFactory;
   wasmExtractorFactoryOverride = wasmFactory;
+  extractorPromise = null;
+  semanticActivated = false;
+  semanticIndexCache.clear();
+}
+
+export function setSemanticWasmModuleLoadersForTests({
+  onnxWebLoader = null,
+  transformersWebLoader = null
+} = {}) {
+  onnxWebModuleLoaderOverride = onnxWebLoader;
+  transformersWebModuleLoaderOverride = transformersWebLoader;
+  if (!onnxWebLoader) {
+    delete globalThis[ORT_SYMBOL];
+  }
   extractorPromise = null;
   semanticActivated = false;
   semanticIndexCache.clear();
@@ -542,7 +586,7 @@ export async function getSearchPayload({
       mode: "semantic",
       model: EMBEDDING_MODEL,
       backend: "fuzzy_fallback",
-      warning: `semantic search unavailable: ${error.message}`
+      warning: semanticUnavailableWarning(error)
     };
   }
 }
