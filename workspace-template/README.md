@@ -169,6 +169,13 @@ Tasks are ordered by array index. Hub owns the order.
 
 Prefer `references[]` for new data. Legacy `reference` remains valid for backward compatibility and is normalized alongside `references[]` when the hub builds ranked `next` responses.
 
+Reference path rules:
+
+- For trackers stored inside the shared workspace, relative reference paths resolve from the shared workspace root.
+- For linked repo-local trackers such as `<repo>/.llm-tracker/trackers/<slug>.json` or `<repo>/.phalanx/<slug>.json`, relative reference paths resolve from the repo root, not from the hidden tracker directory and not from the shared workspace root.
+- Prefer portable repo-relative references for repo files. Do **not** rewrite them into machine-specific absolute paths just to make snippets appear.
+- If a valid repo-relative reference is not producing a snippet, treat that as a reload/resolver issue to verify and report; do not "fix" it by baking local absolute paths into the tracker.
+
 ### 4.3a Migrating older trackers
 
 If this workspace or tracker file started on `v0.1.1` or any pre-`0.2.0` setup:
@@ -180,10 +187,15 @@ If this workspace or tracker file started on `v0.1.1` or any pre-`0.2.0` setup:
 
 When backfilling older tasks, write only author-owned metadata:
 
+- `goal`
 - `references[]`
 - `effort`
 - `related`
 - `comment`
+- `context.tags`
+- `context.notes`
+- `context.files_touched`
+- `blocker_reason`
 - `definition_of_done`
 - `constraints`
 - `expected_changes`
@@ -226,9 +238,14 @@ For migration/backfill batches, prefer this order:
 
 For bounded active tasks, do not stop at retrieval-only fields if the execution contract can be grounded. A strong first batch should usually include:
 
+- `goal` when weak or stale
 - `references[]`
 - `effort`
 - `comment`
+- `context.tags`
+- `context.notes`
+- `context.files_touched`
+- `blocker_reason` when the task is currently blocked
 - `definition_of_done`
 - `constraints`
 - `expected_changes`
@@ -236,6 +253,10 @@ For bounded active tasks, do not stop at retrieval-only fields if the execution 
 - `approval_required_for`
 
 If a patch only adds `references[]`, `effort`, `related`, and `comment`, treat it as **retrieval-only enrichment**. Do not describe it as a complete migration batch for that task.
+
+For active tasks, evaluate the whole author-owned field set and leave fields blank only when the repo/docs/tracker evidence truly does not support them.
+
+The suggested field order in the migration guide is a sequence, not permission to ignore `goal`, `context.*`, or `blocker_reason` when there is real evidence for them.
 
 After each batch, verify with `next`, `brief`, `execute`, `verify`, `search`, and `fuzzy-search`, then stop and report. Do **not** commit or refresh a PR unless the human explicitly asked you to.
 

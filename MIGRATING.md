@@ -101,19 +101,46 @@ Backfill metadata only where it creates real value:
 
 Do **not** start with old completed tasks unless they are still referenced.
 
-## Which Fields To Backfill
+## Which Fields To Evaluate
 
-### Author-owned fields: safe for LLM migration patches
+For active-task migration work, evaluate the **full 0.2.0 author-owned field set** and fill whatever the repo/docs/tracker evidence actually supports. Do not silently stop after the first few convenient fields.
 
+### Author-owned field families to evaluate for active tasks
+
+#### Retrieval and explanation
+
+- `goal`
 - `references[]`
-- `effort`
 - `related`
 - `comment`
+- `context.tags`
+- `context.notes`
+- `context.files_touched`
+
+#### Planning and execution
+
+- `effort`
 - `definition_of_done`
 - `constraints`
 - `expected_changes`
 - `allowed_paths`
 - `approval_required_for`
+
+#### Current blocker clarification
+
+- `blocker_reason`
+
+#### State correction when evidence says the tracker is stale
+
+- `dependencies`
+- `status`
+- `assignee`
+
+Do **not** churn operational fields as part of a metadata pass unless the current project state is actually wrong. For most migration batches, this means:
+
+- enrich retrieval/execution fields aggressively
+- update `blocker_reason` when a task is currently blocked and the reason is known
+- only touch `dependencies`, `status`, or `assignee` if you are correcting stale tracker reality rather than enriching metadata
 
 ### Derived fields: do not write these in migration patches
 
@@ -193,11 +220,16 @@ Start with the highest-value executable tasks:
 
 Do not start with broad roadmap rows or umbrella program sections unless they are the only available representation of the work.
 
-For each bounded active task in this batch, prefer to fill:
+For each bounded active task in this batch, inspect every author-owned field family above. In practice, that usually means filling:
 
 - `references[]`
 - `effort`
+- `goal` when weak or stale
 - `comment`
+- `context.tags`
+- `context.notes`
+- `context.files_touched`
+- `blocker_reason` when currently blocked
 - `definition_of_done`
 - `constraints`
 - `expected_changes`
@@ -278,8 +310,12 @@ Do not write these derived or hub-owned fields:
 - rev
 
 Rules:
+- Evaluate the full author-owned field set for active tasks. Do not stop after references/comment unless the remaining fields truly lack grounding.
+- The suggested order below is a sequence, not a complete field checklist. Also evaluate `goal`, `context.*`, and `blocker_reason` whenever evidence exists.
 - Prefer references[] over legacy reference for new additions.
 - Preserve existing reference if present; do not delete it just to modernize.
+- For linked repo-local trackers such as `<repo>/.llm-tracker/trackers/<slug>.json` or `<repo>/.phalanx/<slug>.json`, keep repo references portable and relative to the repo root. Do not rewrite them into machine-specific absolute paths just to make snippets appear.
+- If repo-relative references are not producing snippets, verify the shared workspace link and `reload` the slug. Treat persistent misses as a resolver/runtime problem to report, not as a cue to rewrite paths.
 - If uncertain, leave the field empty rather than inventing content.
 - Use real file paths and real approval categories only when supported by the code/docs/history.
 - Keep each patch small: 3-10 tasks max.
@@ -287,6 +323,7 @@ Rules:
 - Backfill bounded active tasks before broad roadmap/container rows.
 - If a patch only adds `references[]`, `effort`, `related`, or `comment`, describe it as retrieval-only enrichment, not as a complete migration batch.
 - For bounded active tasks, include `definition_of_done`, `constraints`, `expected_changes`, `allowed_paths`, and `approval_required_for` whenever they can be grounded from actual evidence.
+- Also consider `goal`, `context.tags`, `context.notes`, `context.files_touched`, and `blocker_reason` whenever those are materially incomplete and evidence exists.
 - Verify with next/brief/execute/verify/search after each batch.
 - Stop after verification unless the human explicitly asked you to commit or refresh a PR.
 

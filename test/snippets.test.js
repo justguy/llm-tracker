@@ -64,6 +64,40 @@ test("loadReferenceSnippets resolves repo-linked trackers and refreshes cache wh
   }
 });
 
+test("loadReferenceSnippets resolves repo-relative references for linked hidden tracker directories", () => {
+  const workspace = setupWorkspace("llm-tracker-snippets-hidden-ws-");
+  const repoRoot = mkdtempSync(join(tmpdir(), "llm-tracker-snippets-hidden-repo-"));
+
+  try {
+    mkdirSync(join(repoRoot, "docs"), { recursive: true });
+    mkdirSync(join(repoRoot, ".phalanx"), { recursive: true });
+
+    const trackerPath = join(repoRoot, ".phalanx", "project-phalanx.json");
+    const docsPath = join(repoRoot, "docs", "PHALANX_ROADMAP.md");
+
+    writeFileSync(trackerPath, "{}\n");
+    writeFileSync(docsPath, "alpha\nbeta\ngamma\n");
+
+    assert.equal(inferProjectRoot(workspace, trackerPath), realpathSync(repoRoot));
+
+    const result = loadReferenceSnippets({
+      workspace,
+      slug: "project-phalanx",
+      trackerPath,
+      references: ["docs/PHALANX_ROADMAP.md:2-3"],
+      indexedAtRev: 11
+    });
+
+    assert.equal(result.snippets.length, 1);
+    assert.equal(result.projectRoot, realpathSync(repoRoot));
+    assert.equal(result.snippets[0].text, "beta\ngamma");
+    assert.equal(result.snippets[0].indexedAtRev, 11);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadReferenceSnippets returns graceful errors for stale references", () => {
   const workspace = setupWorkspace("llm-tracker-snippets-stale-ws-");
   const repoRoot = mkdtempSync(join(tmpdir(), "llm-tracker-snippets-stale-repo-"));

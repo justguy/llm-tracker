@@ -48,6 +48,10 @@ function isWithinPath(parent, child) {
   return target === base || target.startsWith(`${base}${sep}`);
 }
 
+function isHiddenDirectoryName(name) {
+  return Boolean(name) && name.startsWith(".") && name !== "." && name !== "..";
+}
+
 function ensureSnippetCacheDir(workspace) {
   const dir = join(runtimeDir(workspace), "snippets");
   mkdirSync(dir, { recursive: true });
@@ -193,9 +197,13 @@ export function inferProjectRoot(workspace, trackerPath) {
   }
 
   const trackerDir = dirname(resolvedTracker);
-  const dotTrackerDir = dirname(trackerDir);
-  if (basename(trackerDir) === "trackers" && basename(dotTrackerDir) === ".llm-tracker") {
-    return dirname(dotTrackerDir);
+  if (isHiddenDirectoryName(basename(trackerDir))) {
+    return dirname(trackerDir);
+  }
+
+  const parentDir = dirname(trackerDir);
+  if (isHiddenDirectoryName(basename(parentDir))) {
+    return dirname(parentDir);
   }
 
   return dirname(resolvedTracker);

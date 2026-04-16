@@ -325,6 +325,10 @@ If a linked slug is already registered, the safe relink flow is: remove the curr
 
 It now also calls out an easy failure mode: a patch that adds only `references[]`, `effort`, `related`, and `comment` is retrieval-only enrichment, not a complete migration batch for active tasks.
 
+The migration guidance now also tells agents to evaluate the full author-owned field set for active tasks, including `goal`, `context.*`, and `blocker_reason`, rather than treating only the retrieval and execution-contract subsets as the whole job.
+
+It also now makes the reference rule explicit: for linked repo-local trackers, keep repo file references portable and repo-relative. If a valid repo-relative reference is not producing snippets, `reload` and treat it as a resolver/runtime problem to report, not as a cue to rewrite the tracker with machine-specific absolute paths.
+
 ---
 
 ## How it looks under the hood
