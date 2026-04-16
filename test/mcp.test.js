@@ -172,6 +172,11 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
   try {
     const init = await client.initialize();
     assert.equal(init.result.protocolVersion, "2024-11-05");
+    assert.equal(init.result.capabilities.tools.listChanged, false);
+    assert.equal(init.result.capabilities.resources.listChanged, false);
+    assert.equal(init.result.capabilities.resources.subscribe, false);
+    assert.equal(init.result.capabilities.prompts.listChanged, false);
+    assert.match(init.result.instructions, /tracker:\/\/help/);
 
     const tools = await client.request("tools/list");
     const names = tools.result.tools.map((tool) => tool.name).sort();
@@ -188,6 +193,81 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
     const help = await client.request("tools/call", { name: "tracker_help", arguments: {} });
     assert.equal(help.result.isError, false);
     assert.match(help.result.content[0].text, /Use tracker_help first/);
+  } finally {
+    await client.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("MCP resources expose workspace help, runtime, and project status", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-resources-");
+  const tracker = validProject();
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(tracker, null, 2));
+
+  const client = startMcp(workspace);
+  try {
+    await client.initialize();
+
+    const listed = await client.request("resources/list");
+    const uris = listed.result.resources.map((resource) => resource.uri).sort();
+    assert.ok(uris.includes("tracker://help"));
+    assert.ok(uris.includes("tracker://workspace/status"));
+    assert.ok(uris.includes("tracker://workspace/runtime"));
+    assert.ok(uris.includes("tracker://projects"));
+    assert.ok(uris.includes("tracker://projects/test-project/status"));
+
+    const help = await client.request("resources/read", { uri: "tracker://help" });
+    assert.match(help.result.contents[0].text, /Use tracker_help first/);
+
+    const runtime = await client.request("resources/read", { uri: "tracker://workspace/runtime" });
+    const runtimePayload = JSON.parse(runtime.result.contents[0].text);
+    assert.equal(runtimePayload.daemonRule.readToolsRequireDaemon, false);
+    assert.equal(runtimePayload.daemonRule.writeToolsRequireDaemon, true);
+    assert.match(runtimePayload.patchWorkflow.patchDirectory, /patches$/);
+
+    const project = await client.request("resources/read", { uri: "tracker://projects/test-project/status" });
+    const projectPayload = JSON.parse(project.result.contents[0].text);
+    assert.equal(projectPayload.project.slug, "test-project");
+    assert.equal(projectPayload.project.counts.not_started, 1);
+  } finally {
+    await client.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("MCP prompts expose tracker workflows and operational guidance", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-prompts-");
+  const tracker = validProject();
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(tracker, null, 2));
+
+  const client = startMcp(workspace);
+  try {
+    await client.initialize();
+
+    const listed = await client.request("prompts/list");
+    const names = listed.result.prompts.map((prompt) => prompt.name).sort();
+    assert.ok(names.includes("tracker_start_here"));
+    assert.ok(names.includes("tracker_pick_next"));
+    assert.ok(names.includes("tracker_task_context"));
+    assert.ok(names.includes("tracker_execute_task"));
+    assert.ok(names.includes("tracker_verify_task"));
+    assert.ok(names.includes("tracker_patch_write"));
+
+    const startHere = await client.request("prompts/get", { name: "tracker_start_here", arguments: {} });
+    const startText = startHere.result.messages[0].content.text;
+    assert.match(startText, /tracker:\/\/help/);
+    assert.match(startText, /patches/);
+    assert.match(startText, /tracker_pick/);
+
+    const execute = await client.request("prompts/get", {
+      name: "tracker_execute_task",
+      arguments: { slug: "test-project", taskId: "t1" }
+    });
+    const executeText = execute.result.messages[0].content.text;
+    assert.match(executeText, /tracker_execute/);
+    assert.match(executeText, /tracker_verify/);
+    assert.match(executeText, /test-project/);
+    assert.match(executeText, /t1/);
   } finally {
     await client.close();
     rmSync(workspace, { recursive: true, force: true });

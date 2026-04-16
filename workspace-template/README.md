@@ -50,6 +50,9 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
 - **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
+- MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
+- If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
+- If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
 - **On failure**, read `<slug>.errors.json` (file mode) or the JSON response body (HTTP mode). Both are structured `{error, type, hint}` with a precise path pointer.
@@ -267,6 +270,28 @@ The shortlist is deterministic and capped at 5 tasks:
 Use this instead of scanning the whole tracker just to choose work.
 
 If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
+
+Daemon rule:
+
+- MCP reads do **not** require a running daemon.
+- MCP writes (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
+
+Helpful MCP resources:
+
+- `tracker://help` for the full workspace contract
+- `tracker://workspace/status` for workspace + project summaries
+- `tracker://workspace/runtime` for daemon state, runtime paths, and patch workflow
+- `tracker://projects` for all project summaries
+- `tracker://projects/<slug>/status` for one project summary
+
+Helpful MCP prompts:
+
+- `tracker_start_here`
+- `tracker_pick_next`
+- `tracker_task_context`
+- `tracker_execute_task`
+- `tracker_verify_task`
+- `tracker_patch_write`
 
 Related deterministic reads:
 

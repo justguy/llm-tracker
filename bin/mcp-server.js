@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { getPrompt, listPrompts, listResources, readResource } from "./mcp-context.js";
 import { httpRequest, resolveWorkspace } from "./workspace-client.js";
 import { getBlockersPayload } from "../hub/blockers.js";
 import { getBriefPayload } from "../hub/briefs.js";
@@ -575,6 +576,13 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
       sendResult(message.id, {
         protocolVersion,
         capabilities: {
+          prompts: {
+            listChanged: false
+          },
+          resources: {
+            listChanged: false,
+            subscribe: false
+          },
           tools: {
             listChanged: false
           }
@@ -584,7 +592,7 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
           version: pkg.version
         },
         instructions:
-          "Call tracker_help first for the current workspace contract. Read tools operate directly on the workspace files; write tools like tracker_pick and tracker_reload require the hub to be reachable."
+          `Call tracker_help or read tracker://help first for the current workspace contract. MCP read tools and resources operate directly on workspace files; MCP write tools like tracker_pick and tracker_reload require the hub to be reachable. File-mode patches live under ${join(workspace, "patches")}.`
       });
       return;
     }
@@ -602,6 +610,50 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
           inputSchema
         }))
       });
+      return;
+    }
+
+    if (message.method === "resources/list") {
+      sendResult(message.id, {
+        resources: listResources(workspace)
+      });
+      return;
+    }
+
+    if (message.method === "resources/read") {
+      const uri = nonEmptyString(message.params?.uri);
+      if (!uri) {
+        sendError(message.id, -32602, "resources/read requires a resource uri");
+        return;
+      }
+
+      try {
+        sendResult(message.id, readResource(workspace, uri));
+      } catch (error) {
+        sendError(message.id, -32602, error.message);
+      }
+      return;
+    }
+
+    if (message.method === "prompts/list") {
+      sendResult(message.id, {
+        prompts: listPrompts()
+      });
+      return;
+    }
+
+    if (message.method === "prompts/get") {
+      const name = nonEmptyString(message.params?.name);
+      if (!name) {
+        sendError(message.id, -32602, "prompts/get requires a prompt name");
+        return;
+      }
+
+      try {
+        sendResult(message.id, getPrompt(workspace, name, message.params?.arguments || {}));
+      } catch (error) {
+        sendError(message.id, -32602, error.message);
+      }
       return;
     }
 

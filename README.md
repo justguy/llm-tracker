@@ -20,7 +20,7 @@ When an agent is ready to act or validate work, it can now call `npx llm-tracker
 
 When an agent needs the current contract for a running hub, it should call `GET /help` first instead of guessing write modes or endpoints.
 
-If your coding client supports MCP, `npx llm-tracker mcp --path ~/.llm-tracker` exposes the same deterministic surfaces as `tracker_*` tools so agents can stop shelling out to `curl`.
+If your coding client supports MCP, `npx llm-tracker mcp --path ~/.llm-tracker` exposes deterministic `tracker_*` tools plus preloadable resources and prompts so agents can stop shelling out to `curl` and stop reopening the README by hand. MCP read tools and resources work directly from workspace files; MCP write tools still require the hub or daemon to be running.
 
 ## Why use llm-tracker?
 
@@ -167,7 +167,25 @@ Full flag reference: `npx llm-tracker help`.
 
 ### MCP
 
-The MCP server is intentionally thin. Read tools load the same workspace files and deterministic payload builders used by the HTTP/CLI layer; write tools like `tracker_pick` and `tracker_reload` call the running hub so locking and live reconciliation stay authoritative.
+The MCP server is intentionally thin.
+
+- Read tools (`tracker_help`, `tracker_projects`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`) load the same workspace files and deterministic payload builders used by the HTTP/CLI layer. They do **not** require the daemon.
+- Write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) call the running hub so locking, revisioning, and live reconciliation stay authoritative. They **do** require the hub or daemon to be reachable.
+- Resources provide preloadable read-only context:
+  - `tracker://help`
+  - `tracker://workspace/status`
+  - `tracker://workspace/runtime`
+  - `tracker://projects`
+  - `tracker://projects/<slug>/status`
+- Prompts provide thin workflow guidance without duplicating the business logic in the tools:
+  - `tracker_start_here`
+  - `tracker_pick_next`
+  - `tracker_task_context`
+  - `tracker_execute_task`
+  - `tracker_verify_task`
+  - `tracker_patch_write`
+
+Use `tracker://help` when you want the full workspace contract in one read, and `tracker://workspace/runtime` when you need the daemon rule, patch directory, and runtime paths without scanning the whole README again.
 
 Recommended MCP tool flow:
 

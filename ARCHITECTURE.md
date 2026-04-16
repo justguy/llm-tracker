@@ -183,7 +183,7 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 
 ## MCP layer
 
-`llm-tracker mcp --path <workspace>` exposes the same deterministic surfaces as stdio MCP tools:
+`llm-tracker mcp --path <workspace>` exposes the same deterministic surfaces as stdio MCP tools, plus read-only resources and thin workflow prompts:
 
 - `tracker_help`
 - `tracker_projects`
@@ -203,9 +203,28 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 - `tracker_redo`
 - `tracker_reload`
 
+Resources:
+
+- `tracker://help`
+- `tracker://workspace/status`
+- `tracker://workspace/runtime`
+- `tracker://projects`
+- `tracker://projects/<slug>/status`
+
+Prompts:
+
+- `tracker_start_here`
+- `tracker_pick_next`
+- `tracker_task_context`
+- `tracker_execute_task`
+- `tracker_verify_task`
+- `tracker_patch_write`
+
 Design rule:
 
 - read tools load the workspace files directly and call the same deterministic payload builders as HTTP/CLI
+- resources are preloadable read-only views over the same workspace-file state, including daemon and patch metadata
+- prompts are workflow hints only; they must point back to the deterministic tools/resources instead of re-implementing ranking or execution logic
 - write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
 - `/help`, CLI, and MCP must stay in sync when agent-facing behavior changes
 
