@@ -319,6 +319,8 @@ Full schema, merge semantics, field ownership, versioning, rollback, and the who
 
 Migrating an older `0.1.x` workspace or tracker set to the `0.2.0` contract, including agent backfill guidance for the new fields → **[MIGRATING.md](./MIGRATING.md)**.
 
+That migration guide also covers existing shared-workspace projects linked from repo worktrees: relink the slug to the intended branch file, `reload` it, backfill bounded active tasks first, verify with `execute` / `verify` / `search`, and stop before any commit unless the human asked for one.
+
 ---
 
 ## How it looks under the hood

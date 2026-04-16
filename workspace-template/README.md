@@ -208,6 +208,24 @@ Backfill active tasks first:
 
 Skip low-value bulk rewrites of old completed tasks unless humans still ask about them.
 
+When the project is linked from a repo worktree and the human wants branch-safe writes:
+
+1. relink the shared workspace slug to the intended branch/worktree tracker file
+2. run `reload <slug>`
+3. verify a read call before writing patches
+
+Do not assume the shared daemon is writing to the branch file unless the link was updated first.
+
+For migration/backfill batches, prefer this order:
+
+1. bounded `in_progress` tasks
+2. bounded `p0` / `p1` tasks
+3. blocked tasks missing context
+4. broad roadmap/container rows only when they improve ranking or blocker explanations
+5. remaining open but inactive tasks only if they still matter to search or active work
+
+After each batch, verify with `next`, `brief`, `execute`, `verify`, `search`, and `fuzzy-search`, then stop and report. Do **not** commit or refresh a PR unless the human explicitly asked you to.
+
 ### 4.4 Canonical example
 
 ```json
