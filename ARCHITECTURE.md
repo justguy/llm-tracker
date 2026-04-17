@@ -8,7 +8,14 @@ Deep-dive on the internals. For the marketing hook and installation, see [README
 
 ```
 bin/llm-tracker.js       CLI entrypoint: init | run | daemon | mcp | status | blockers | changed | search | fuzzy | pick | next | since | rollback | restore | link
-bin/mcp-server.js        Stdio MCP server exposing the deterministic tracker surfaces as `tracker_*` tools
+bin/mcp-server.js        Stdio MCP server wiring for the deterministic `tracker_*` MCP surface
+bin/mcp-tools.js         MCP tool registry composer
+bin/mcp-read-tools.js    Workspace-file-backed deterministic MCP read tools
+bin/mcp-write-tools.js   Hub-backed MCP write tools (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`)
+bin/mcp-utils.js         Shared MCP result formatting, workspace loads, and hub-mutation helpers
+bin/mcp-resources.js     MCP resource registry and readers
+bin/mcp-prompts.js       Thin MCP workflow prompts that point back to deterministic tools
+bin/mcp-context-data.js  Shared MCP prompt/resource metadata and tool-name lists
 bin/workspace-client.js  Shared workspace/port resolution + local hub HTTP client
 bin/commands/shared.js   Shared CLI helpers for hub-backed command modules
 bin/commands/blockers.js `llm-tracker blockers` formatter + HTTP client wrapper
@@ -151,6 +158,8 @@ Backward compatibility: legacy patch files or tracker files that still use `stat
 
 **Progress %** = `round((count(complete) + 0.5 * count(in_progress)) / (total - count(deferred)) * 100)`.
 
+`outcome` is orthogonal to `status`: `partial_slice_landed` marks that a bounded slice shipped while the task remains open. Progress still keys only off the four status values above.
+
 ---
 
 ## Block state (derived)
@@ -207,6 +216,7 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 - `tracker_blockers`
 - `tracker_changed`
 - `tracker_history`
+- `tracker_patch`
 - `tracker_pick`
 - `tracker_undo`
 - `tracker_redo`
@@ -235,7 +245,7 @@ Design rule:
 - read tools load the workspace files directly and call the same deterministic payload builders as HTTP/CLI
 - resources are preloadable read-only views over the same workspace-file state, including daemon and patch metadata
 - prompts are workflow hints only; they must point back to the deterministic tools/resources instead of re-implementing ranking or execution logic
-- write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
+- write tools (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
 - `/help`, CLI, and MCP must stay in sync when agent-facing behavior changes
 
 ### Companion surfaces
@@ -477,7 +487,7 @@ Two deployment topologies are supported:
 
 In the recommended topology, repo-local tracker files are usually linked in via Option C. The shared daemon remains the source of truth for HTTP, `patches/`, `.runtime/`, and the central UI, while the linked repo-local file is watched for direct edits.
 
-That linked-file churn is sync, not relocation: hub writes go through the workspace registration and update the linked repo-local JSON in place. Today the tracker file still mixes durable task spec with day-to-day coordination churn, so linked repo-local trackers will show status / assignee / scratchpad / rev noise in Git.
+Linked-tracker writes are still sync, not relocation: durable tracker edits go through the workspace registration and update the linked repo-local JSON in place. High-churn runtime fields now live in `<shared-workspace>/.runtime/overlays/<slug>.json` for linked trackers, so `status` / `assignee` / `blocker_reason` / `meta.scratchpad` / `updatedAt` / `rev` changes no longer need to dirty the repo-visible tracker file.
 
 Daemon mode is explicit:
 

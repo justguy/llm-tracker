@@ -4,6 +4,7 @@ import { html } from "htm/preact";
 import { buildCardMetaFacts } from "./lib/intelligence.js";
 import { HistoryModal } from "./modals/history.js";
 import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
+import { humanizeTaskOutcome } from "./task-outcomes.js";
 
 const STATUS_ORDER = ["complete", "in_progress", "not_started", "deferred"];
 
@@ -329,6 +330,7 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
   const cardFacts = buildCardMetaFacts(task, blockedBy || []);
+  const outcome = humanizeTaskOutcome(task.outcome);
   const approvals = Array.isArray(task.approval_required_for)
     ? task.approval_required_for.filter((value) => typeof value === "string" && value.trim())
     : [];
@@ -426,6 +428,9 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
       />
       <div class="card-footer">
         <${Badge} kind=${`status-${task.status}`}>${task.status.replace("_", " ")}</${Badge}>
+        ${outcome
+          ? html`<${Badge} kind="outcome" title=${`Outcome marker: ${outcome}`}>outcome · ${outcome}</${Badge}>`
+          : null}
         ${task.effort ? html`<${Badge} kind="tag" title=${`Estimated effort ${task.effort}`}>effort · ${task.effort}</${Badge}>` : null}
         ${blockedBy && blockedBy.length > 0
           ? html`<${Badge} kind="blocked" title=${`Blocked by ${blockedBy.join(", ")}`}>blocked · ${blockedBy.length}</${Badge}>`

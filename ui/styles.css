@@ -1986,6 +1986,7 @@ body {
 .badge.status-in_progress { color: var(--status-in-progress); background: var(--amber-soft); border-color: var(--status-in-progress); }
 .badge.status-not_started { color: var(--status-not-started); background: var(--status-not-started-soft); border-color: var(--status-not-started); }
 .badge.status-deferred    { color: var(--status-deferred);    background: transparent; border-color: var(--status-deferred); }
+.badge.outcome            { color: var(--cyan); background: var(--cyan-soft); border-color: var(--cyan); }
 
 .badge.tag {
   color: var(--white-dim);

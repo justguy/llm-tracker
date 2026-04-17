@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { deriveProject } from "./progress.js";
+import { loadProjectWithRuntimeOverlay } from "./runtime-overlay.js";
 import { normalizeProjectStatuses } from "./status-vocabulary.js";
 import { validateProject } from "./validator.js";
 
@@ -20,7 +21,7 @@ export function trackerFilePath(workspace, slug) {
   return join(workspace, "trackers", `${slug}.json`);
 }
 
-function loadProjectFile(path, slug) {
+function loadProjectFile(workspace, path, slug) {
   if (!existsSync(path)) {
     return { ok: false, status: 404, message: "project not found", slug, path };
   }
@@ -30,7 +31,13 @@ function loadProjectFile(path, slug) {
     const parsed = JSON.parse(raw);
     const notes = { warnings: [] };
     const normalized = normalizeProjectStatuses(parsed, notes).data;
-    const validation = validateProject(normalized);
+    const loaded = loadProjectWithRuntimeOverlay({
+      workspace,
+      slug,
+      trackerPath: path,
+      baseProject: normalized
+    });
+    const validation = validateProject(loaded.data);
     if (!validation.ok) {
       return {
         ok: false,
@@ -45,9 +52,10 @@ function loadProjectFile(path, slug) {
       ok: true,
       slug,
       path,
-      data: normalized,
-      derived: deriveProject(normalized),
-      rev: normalized?.meta?.rev ?? null,
+      data: loaded.data,
+      base: loaded.base,
+      derived: deriveProject(loaded.data),
+      rev: loaded.data?.meta?.rev ?? null,
       notes
     };
   } catch (error) {
@@ -62,7 +70,7 @@ function loadProjectFile(path, slug) {
 }
 
 export function loadProjectEntry(workspace, slug) {
-  return loadProjectFile(trackerFilePath(workspace, slug), slug);
+  return loadProjectFile(workspace, trackerFilePath(workspace, slug), slug);
 }
 
 export function listProjectEntries(workspace) {
@@ -74,6 +82,6 @@ export function listProjectEntries(workspace) {
     .sort()
     .map((name) => {
       const slug = name.slice(0, -5);
-      return loadProjectFile(join(dir, name), slug);
+      return loadProjectFile(workspace, join(dir, name), slug);
     });
 }

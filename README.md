@@ -144,10 +144,10 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - the shared daemon automatically watches the linked tracker file for direct edits
 - the shared daemon automatically watches the shared workspace `patches/` directory
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
-- hub writes still land on the linked repo-local tracker file itself, so status / assignee / scratchpad / rev churn will dirty that repo-visible JSON today
-- that is sync, not relocation: the hub writes through the workspace registration to the linked repo-local file in place
-- today the tracker JSON still mixes durable task spec and day-to-day coordination churn in one file, so linked repo-local trackers will show that churn in Git
-- `GET /api/projects/<slug>` includes `file`, the effective tracker JSON path the hub will write
+- durable tracker writes still land on the linked repo-local tracker file itself; that is sync, not relocation
+- linked trackers now split high-churn runtime state into the shared workspace overlay at `.runtime/overlays/<slug>.json`
+- for linked trackers, runtime churn such as task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer needs to dirty the repo-visible JSON
+- durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
 
 ## Agent Help
 
@@ -364,7 +364,7 @@ Use the workspace contract first, then the narrowest interface that fits:
 
 - read `GET /help` or `tracker_help` first for the active workspace contract
 - use `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_search`, and `tracker_fuzzy_search` for focused reads
-- use `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
+- use `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
 
 Register the server in your client config instead of launching it manually:
 
@@ -455,6 +455,8 @@ For feature-oriented or fuzzy questions, prefer:
 - `npx llm-tracker fuzzy-search <slug> <query>`
 
 Legacy compatibility: if an older patch or tracker file still uses `status: "partial"`, the hub normalizes it to `in_progress` on ingest and writes back the canonical value.
+
+`outcome` is separate from `status`: use `partial_slice_landed` when a bounded slice shipped but the task remains open. Progress % still keys only off the four status values above.
 
 ### Semantic search stack
 

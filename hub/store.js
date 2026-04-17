@@ -18,6 +18,11 @@ import { mergeProject, stableEq } from "./merge.js";
 import { computeDelta, hasChanges, summarize } from "./versioning.js";
 import { normalizeProjectStatuses } from "./status-vocabulary.js";
 import {
+  clearRuntimeOverlay,
+  loadProjectWithRuntimeOverlay,
+  persistProjectWithRuntimeOverlay
+} from "./runtime-overlay.js";
+import {
   writeSnapshot,
   readSnapshot,
   maxRev,
@@ -129,11 +134,50 @@ function latestRecordedRev(workspace, slug) {
   return Math.max(snapRev, historyRev);
 }
 
+function defaultNotes() {
+  return { ignored: [], warnings: [], appended: [], updated: [] };
+}
+
 export class Store {
   constructor(workspace) {
     this.workspace = workspace;
     this.projects = new Map();
     this.locks = new Map();
+  }
+
+  _entry(slug, filePath, data, base, rev, notes = defaultNotes()) {
+    return {
+      data,
+      base,
+      derived: deriveProject(data),
+      path: filePath,
+      rev,
+      error: null,
+      notes
+    };
+  }
+
+  _persistProject(slug, filePath, baseProject, effectiveProject, overlayEnabled) {
+    return persistProjectWithRuntimeOverlay({
+      workspace: this.workspace,
+      slug,
+      trackerPath: filePath,
+      baseProject,
+      effectiveProject,
+      overlayEnabled
+    });
+  }
+
+  _loadProjectState(slug, filePath, rawContents = null, notes = null) {
+    const raw = typeof rawContents === "string" ? rawContents : readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const normalized = normalizeProjectStatuses(parsed, notes).data;
+    return loadProjectWithRuntimeOverlay({
+      workspace: this.workspace,
+      slug,
+      trackerPath: filePath,
+      baseProject: normalized
+    });
   }
 
   _restoreRevisionUnlocked(slug, current, toRev, historyMeta = {}) {
@@ -162,16 +206,18 @@ export class Store {
     }
 
     const delta = computeDelta(current.data, newState);
-    const derived = deriveProject(newState);
+    const persisted = this._persistProject(
+      slug,
+      current.path,
+      current.base || current.data,
+      newState,
+      current.overlayEnabled === true
+    );
 
-    this.projects.set(slug, {
-      data: newState,
-      derived,
-      path: current.path,
-      rev: newRev,
-      error: null,
-      notes: { ignored: [], warnings: [], appended: [], updated: [] }
-    });
+    this.projects.set(
+      slug,
+      this._entry(slug, current.path, newState, persisted.base, newRev, defaultNotes())
+    );
 
     writeSnapshot(this.workspace, slug, newRev, newState);
     appendHistoryEntry(this.workspace, slug, {
@@ -183,8 +229,6 @@ export class Store {
       rolledBackTo: toRev,
       ...historyMeta
     });
-
-    atomicWriteJson(current.path, newState);
 
     return { ok: true, from: baseRev, to: toRev, newRev };
   }
@@ -220,111 +264,120 @@ export class Store {
     const slug = slugFromFile(filePath);
     if (!slug) return { ok: false, reason: "not-a-tracker" };
 
-    let incoming;
+    let loadedIncoming;
     try {
-      incoming = JSON.parse(rawContents);
+      const normalizationNotes = { warnings: [] };
+      loadedIncoming = this._loadProjectState(slug, filePath, rawContents, normalizationNotes);
+      let incoming = normalizeProjectStatuses(loadedIncoming.data, normalizationNotes).data;
+      const incomingBase = loadedIncoming.base;
+      const overlayEnabled = loadedIncoming.overlayEnabled;
+      
+      let prev = this.projects.get(slug);
+
+      // Cold-start resume: if we don't have in-memory state but incoming matches
+      // a known snapshot at incoming.meta.rev, adopt without bumping.
+      if (!prev || !prev.data) {
+        const incomingRev = incoming?.meta?.rev ?? 0;
+        if (incomingRev > 0) {
+          const snap = readSnapshot(this.workspace, slug, incomingRev);
+          if (snap) {
+            if (stableEq(normalizeForCompare(snap), normalizeForCompare(incoming))) {
+              const { ok: vOk, errors: vErr } = validateProject(incoming);
+              if (!vOk) {
+                return this._recordError(slug, filePath, { kind: "schema", message: vErr.join("; ") });
+              }
+              const entry = this._entry(
+                slug,
+                filePath,
+                incoming,
+                incomingBase,
+                incomingRev,
+                {
+                  ignored: [],
+                  warnings: [...normalizationNotes.warnings],
+                  appended: [],
+                  updated: []
+                }
+              );
+              entry.overlayEnabled = overlayEnabled;
+              this.projects.set(slug, entry);
+              clearErrorFile(this.workspace, slug);
+              return { ok: true, slug, event: "UPDATE", project: entry, resumed: true };
+            }
+            // Snapshot differs from incoming — treat snapshot as the prev baseline.
+            prev = {
+              data: snap,
+              base: incomingBase,
+              path: filePath,
+              rev: incomingRev,
+              overlayEnabled
+            };
+          }
+        }
+      }
+
+      const prevData = prev?.data || null;
+      const { merged, notes } = mergeProject(prevData, incoming);
+      if (normalizationNotes.warnings.length > 0) {
+        notes.warnings.push(...normalizationNotes.warnings);
+      }
+
+      const { ok, errors } = validateProject(merged);
+      if (!ok) {
+        return this._recordError(slug, filePath, { kind: "schema", message: errors.join("; ") });
+      }
+
+      const delta = computeDelta(prevData, merged);
+      if (!hasChanges(delta) && prev?.data) {
+        // In-memory state is unchanged. If the file on disk differs from what we
+        // want (e.g., LLM tried to reorder or flip collapsed), correct it without
+        // bumping rev.
+        if (!stableEq(normalizeForCompare(merged), normalizeForCompare(incoming))) {
+          merged.meta.rev = prev.rev;
+          merged.meta.updatedAt = prev.data.meta.updatedAt;
+          try {
+            this._persistProject(
+              slug,
+              filePath,
+              incomingBase,
+              merged,
+              overlayEnabled
+            );
+          } catch {}
+        }
+        return { ok: true, slug, event: "UPDATE", project: prev, noop: true };
+      }
+
+      const baseRev = prev?.rev ?? incoming?.meta?.rev ?? 0;
+      const newRev = baseRev + 1;
+
+      merged.meta.rev = newRev;
+      merged.meta.updatedAt = new Date().toISOString();
+      const persisted = this._persistProject(
+        slug,
+        filePath,
+        incomingBase,
+        merged,
+        overlayEnabled
+      );
+
+      writeSnapshot(this.workspace, slug, newRev, merged);
+      appendHistoryEntry(this.workspace, slug, {
+        rev: newRev,
+        ts: merged.meta.updatedAt,
+        delta,
+        summary: summarize(delta)
+      });
+
+      const entry = this._entry(slug, filePath, merged, persisted.base, newRev, notes);
+      entry.overlayEnabled = persisted.overlayEnabled;
+      this.projects.set(slug, entry);
+      clearErrorFile(this.workspace, slug);
+
+      return { ok: true, slug, event: "UPDATE", project: entry, delta, notes };
     } catch (e) {
       return this._recordError(slug, filePath, { kind: "parse", message: e.message });
     }
-
-    const normalizationNotes = { warnings: [] };
-    incoming = normalizeProjectStatuses(incoming, normalizationNotes).data;
-
-    let prev = this.projects.get(slug);
-
-    // Cold-start resume: if we don't have in-memory state but incoming matches
-    // a known snapshot at incoming.meta.rev, adopt without bumping.
-    if (!prev || !prev.data) {
-      const incomingRev = incoming?.meta?.rev ?? 0;
-      if (incomingRev > 0) {
-        const snap = readSnapshot(this.workspace, slug, incomingRev);
-        if (snap) {
-          if (stableEq(normalizeForCompare(snap), normalizeForCompare(incoming))) {
-            const { ok: vOk, errors: vErr } = validateProject(incoming);
-            if (!vOk) {
-              return this._recordError(slug, filePath, { kind: "schema", message: vErr.join("; ") });
-            }
-            const derived = deriveProject(incoming);
-            const entry = {
-              data: incoming,
-              derived,
-              path: filePath,
-              rev: incomingRev,
-              error: null,
-              notes: {
-                ignored: [],
-                warnings: [...normalizationNotes.warnings],
-                appended: [],
-                updated: []
-              }
-            };
-            this.projects.set(slug, entry);
-            clearErrorFile(this.workspace, slug);
-            return { ok: true, slug, event: "UPDATE", project: entry, resumed: true };
-          }
-          // Snapshot differs from incoming — treat snapshot as the prev baseline.
-          prev = { data: snap, rev: incomingRev };
-        }
-      }
-    }
-
-    const prevData = prev?.data || null;
-    const { merged, notes } = mergeProject(prevData, incoming);
-    if (normalizationNotes.warnings.length > 0) {
-      notes.warnings.push(...normalizationNotes.warnings);
-    }
-
-    const { ok, errors } = validateProject(merged);
-    if (!ok) {
-      return this._recordError(slug, filePath, { kind: "schema", message: errors.join("; ") });
-    }
-
-    const delta = computeDelta(prevData, merged);
-    if (!hasChanges(delta) && prev?.data) {
-      // In-memory state is unchanged. If the file on disk differs from what we
-      // want (e.g., LLM tried to reorder or flip collapsed), correct it without
-      // bumping rev.
-      if (!stableEq(normalizeForCompare(merged), normalizeForCompare(incoming))) {
-        merged.meta.rev = prev.rev;
-        merged.meta.updatedAt = prev.data.meta.updatedAt;
-        try {
-          atomicWriteJson(filePath, merged);
-        } catch {}
-      }
-      return { ok: true, slug, event: "UPDATE", project: prev, noop: true };
-    }
-
-    const baseRev = prev?.rev ?? incoming?.meta?.rev ?? 0;
-    const newRev = baseRev + 1;
-
-    merged.meta.rev = newRev;
-    merged.meta.updatedAt = new Date().toISOString();
-
-    try {
-      atomicWriteJson(filePath, merged);
-    } catch {}
-
-    writeSnapshot(this.workspace, slug, newRev, merged);
-    appendHistoryEntry(this.workspace, slug, {
-      rev: newRev,
-      ts: merged.meta.updatedAt,
-      delta,
-      summary: summarize(delta)
-    });
-
-    const derived = deriveProject(merged);
-    const entry = {
-      data: merged,
-      derived,
-      path: filePath,
-      rev: newRev,
-      error: null,
-      notes
-    };
-    this.projects.set(slug, entry);
-    clearErrorFile(this.workspace, slug);
-
-    return { ok: true, slug, event: "UPDATE", project: entry, delta, notes };
   }
 
   _recordError(slug, filePath, err) {
@@ -360,6 +413,7 @@ export class Store {
       const { ok, errors } = validateProject(data);
       if (!ok) return { ok: false, status: 400, message: errors.join("; ") };
       const file = trackerPath(this.workspace, slug);
+      clearRuntimeOverlay(this.workspace, slug);
       atomicWriteJson(file, data);
       // chokidar fires → ingest stamps rev, writes snapshot, broadcasts.
       return { ok: true };
@@ -475,16 +529,16 @@ export class Store {
       if (!ok) return { ok: false, status: 400, message: errors.join("; ") };
 
       const delta = computeDelta(current.data, newState);
-      const derived = deriveProject(newState);
-
-      this.projects.set(slug, {
-        data: newState,
-        derived,
-        path: file,
-        rev: newRev,
-        error: null,
-        notes: { ignored: [], warnings: [], appended: [], updated: [] }
-      });
+      const persisted = this._persistProject(
+        slug,
+        file,
+        current.base || current.data,
+        newState,
+        current.overlayEnabled === true
+      );
+      const entry = this._entry(slug, file, newState, persisted.base, newRev, defaultNotes());
+      entry.overlayEnabled = persisted.overlayEnabled;
+      this.projects.set(slug, entry);
 
       writeSnapshot(this.workspace, slug, newRev, newState);
       appendHistoryEntry(this.workspace, slug, {
@@ -494,7 +548,6 @@ export class Store {
         summary: summarize(delta)
       });
 
-      atomicWriteJson(file, newState);
       return { ok: true, newRev };
     });
   }
@@ -553,18 +606,12 @@ export class Store {
       newState.meta.rev = newRev;
       newState.meta.updatedAt = new Date().toISOString();
 
-      const derived = deriveProject(newState);
-      const entry = {
-        data: newState,
-        derived,
-        path: file,
-        rev: newRev,
-        error: null,
-        notes: { ignored: [], warnings: [], appended: [], updated: [] }
-      };
+      const entry = this._entry(slug, file, newState, newState, newRev, defaultNotes());
+      entry.overlayEnabled = false;
       this.projects.set(slug, entry);
 
       try {
+        clearRuntimeOverlay(this.workspace, slug);
         atomicWriteJson(file, newState);
       } catch (e) {
         this.projects.delete(slug);
@@ -594,15 +641,18 @@ export class Store {
       const current = this.projects.get(slug);
       const priorEntry = current ? {
         data: current.data ? JSON.parse(JSON.stringify(current.data)) : null,
+        base: current.base ? JSON.parse(JSON.stringify(current.base)) : null,
         derived: current.derived,
         path: current.path,
         rev: current.rev,
         error: current.error,
-        notes: current.notes
+        notes: current.notes,
+        overlayEnabled: current.overlayEnabled === true
       } : null;
       try {
         if (current) this.projects.delete(slug);
         unlinkSync(file);
+        clearRuntimeOverlay(this.workspace, slug);
       } catch (e) {
         if (current && priorEntry) this.projects.set(slug, priorEntry);
         return { ok: false, status: 500, message: `delete failed: ${e.message}` };
@@ -636,9 +686,16 @@ export class Store {
       }
       const current = this.projects.get(slug);
       let existing = current?.data || null;
+      let existingBase = current?.base || null;
+      let overlayEnabled = current?.overlayEnabled === true;
       let currentRev = current?.rev ?? null;
       try {
-        if (!existing) existing = JSON.parse(readFileSync(file, "utf-8"));
+        if (!existing || !existingBase) {
+          const loaded = this._loadProjectState(slug, file);
+          existing = loaded.data;
+          existingBase = loaded.base;
+          overlayEnabled = loaded.overlayEnabled;
+        }
       } catch (e) {
         return { ok: false, status: 500, message: `tracker file not parseable: ${e.message}` };
       }
@@ -674,14 +731,9 @@ export class Store {
       const delta = computeDelta(existing, merged);
       if (!hasChanges(delta)) {
         if (!current || !current.data) {
-          this.projects.set(slug, {
-            data: existing,
-            derived: deriveProject(existing),
-            path: file,
-            rev: currentRev,
-            error: null,
-            notes: { ignored: [], warnings: [], appended: [], updated: [] }
-          });
+          const entry = this._entry(slug, file, existing, existingBase, currentRev, defaultNotes());
+          entry.overlayEnabled = overlayEnabled;
+          this.projects.set(slug, entry);
           clearErrorFile(this.workspace, slug);
         }
         return { ok: true, notes, noop: true, rev: currentRev };
@@ -690,16 +742,10 @@ export class Store {
       const newRev = currentRev + 1;
       merged.meta.rev = newRev;
       merged.meta.updatedAt = new Date().toISOString();
-
-      const derived = deriveProject(merged);
-      this.projects.set(slug, {
-        data: merged,
-        derived,
-        path: file,
-        rev: newRev,
-        error: null,
-        notes
-      });
+      const persisted = this._persistProject(slug, file, existingBase, merged, overlayEnabled);
+      const entry = this._entry(slug, file, merged, persisted.base, newRev, notes);
+      entry.overlayEnabled = persisted.overlayEnabled;
+      this.projects.set(slug, entry);
 
       writeSnapshot(this.workspace, slug, newRev, merged);
       appendHistoryEntry(this.workspace, slug, {
@@ -709,7 +755,6 @@ export class Store {
         summary: summarize(delta)
       });
 
-      atomicWriteJson(file, merged);
       clearErrorFile(this.workspace, slug);
       return { ok: true, notes, rev: newRev, noop: false };
     });
@@ -777,15 +822,16 @@ export class Store {
       newState.meta.rev = newRev;
       newState.meta.updatedAt = new Date().toISOString();
 
-      const derived = deriveProject(newState);
-      this.projects.set(slug, {
-        data: newState,
-        derived,
-        path: file,
-        rev: newRev,
-        error: null,
-        notes: { ignored: [], warnings: [], appended: [], updated: [] }
-      });
+      const persisted = this._persistProject(
+        slug,
+        file,
+        current.base || current.data,
+        newState,
+        current.overlayEnabled === true
+      );
+      const entry = this._entry(slug, file, newState, persisted.base, newRev, defaultNotes());
+      entry.overlayEnabled = persisted.overlayEnabled;
+      this.projects.set(slug, entry);
 
       writeSnapshot(this.workspace, slug, newRev, newState);
       appendHistoryEntry(this.workspace, slug, {
@@ -794,8 +840,6 @@ export class Store {
         delta,
         summary: summarize(delta)
       });
-
-      atomicWriteJson(file, newState);
 
       return {
         ok: true,
@@ -918,6 +962,7 @@ export class Store {
     if (!slug) return null;
     if (!this.projects.has(slug)) return null;
     this.projects.delete(slug);
+    clearRuntimeOverlay(this.workspace, slug);
     return { slug, event: "REMOVE" };
   }
 
@@ -1030,16 +1075,16 @@ export class Store {
       if (!ok) return { ok: false, status: 400, message: errors.join("; ") };
 
       const delta = computeDelta(current.data, newState);
-      const derived = deriveProject(newState);
-
-      this.projects.set(slug, {
-        data: newState,
-        derived,
-        path: file,
-        rev: newRev,
-        error: null,
-        notes: { ignored: [], warnings: [], appended: [], updated: [] }
-      });
+      const persisted = this._persistProject(
+        slug,
+        file,
+        current.base || current.data,
+        newState,
+        current.overlayEnabled === true
+      );
+      const entry = this._entry(slug, file, newState, persisted.base, newRev, defaultNotes());
+      entry.overlayEnabled = persisted.overlayEnabled;
+      this.projects.set(slug, entry);
 
       writeSnapshot(this.workspace, slug, newRev, newState);
       appendHistoryEntry(this.workspace, slug, {
@@ -1049,7 +1094,6 @@ export class Store {
         summary: summarize(delta)
       });
 
-      atomicWriteJson(file, newState);
       return { ok: true, newRev };
     });
   }
@@ -1091,16 +1135,16 @@ export class Store {
       if (!ok) return { ok: false, status: 400, message: errors.join("; ") };
 
       const delta = computeDelta(current.data, newState);
-      const derived = deriveProject(newState);
-
-      this.projects.set(slug, {
-        data: newState,
-        derived,
-        path: file,
-        rev: newRev,
-        error: null,
-        notes: { ignored: [], warnings: [], appended: [], updated: [] }
-      });
+      const persisted = this._persistProject(
+        slug,
+        file,
+        current.base || current.data,
+        newState,
+        current.overlayEnabled === true
+      );
+      const entry = this._entry(slug, file, newState, persisted.base, newRev, defaultNotes());
+      entry.overlayEnabled = persisted.overlayEnabled;
+      this.projects.set(slug, entry);
 
       writeSnapshot(this.workspace, slug, newRev, newState);
       appendHistoryEntry(this.workspace, slug, {
@@ -1110,7 +1154,6 @@ export class Store {
         summary: summarize(delta)
       });
 
-      atomicWriteJson(file, newState);
       return { ok: true, newRev };
     });
   }

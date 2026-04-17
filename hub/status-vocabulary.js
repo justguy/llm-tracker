@@ -1,4 +1,5 @@
 export const STATUS_VALUES = ["not_started", "in_progress", "complete", "deferred"];
+export { TASK_OUTCOME_VALUES } from "../ui/task-outcomes.js";
 
 export const LEGACY_STATUS_ALIASES = {
   partial: "in_progress"

@@ -1,7 +1,7 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { EFFORT_VALUES, REFERENCE_PATTERN_SOURCE } from "./references.js";
-import { STATUS_VALUES } from "./status-vocabulary.js";
+import { STATUS_VALUES, TASK_OUTCOME_VALUES } from "./status-vocabulary.js";
 
 const schema = {
   type: "object",
@@ -61,6 +61,9 @@ const schema = {
           title: { type: "string", minLength: 1 },
           goal: { type: "string" },
           status: { enum: STATUS_VALUES },
+          outcome: {
+            enum: [...TASK_OUTCOME_VALUES, null]
+          },
           placement: {
             type: "object",
             required: ["swimlaneId", "priorityId"],

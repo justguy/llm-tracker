@@ -87,6 +87,22 @@ test("accepts additive references[] alongside legacy reference", () => {
   assert.equal(ok, true, errors.join("; "));
 });
 
+test("accepts the partial_slice_landed outcome marker", () => {
+  const p = validProject();
+  p.tasks[0].outcome = "partial_slice_landed";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("rejects unsupported outcome values", () => {
+  const p = validProject();
+  p.tasks[0].outcome = "half_done";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("outcome")));
+  assert.ok(errors.some((e) => e.includes("must be one of")));
+});
+
 test("rejects malformed references[] entries", () => {
   const p = validProject();
   p.tasks[0].references = ["hub/server.js"];

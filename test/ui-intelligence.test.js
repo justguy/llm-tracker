@@ -7,6 +7,7 @@ import {
   historyActionText,
   isIntelModeLoading
 } from "../ui/lib/intelligence.js";
+import { humanizeTaskOutcome, TASK_OUTCOME_VALUES } from "../ui/task-outcomes.js";
 
 test("defaultChangedFromRev clamps at zero", () => {
   assert.equal(defaultChangedFromRev(null), 0);
@@ -63,6 +64,12 @@ test("buildCardMetaFacts surfaces blocked deps, approvals, and task rev", () => 
   assert.equal(facts[0].value, "t-004");
   assert.equal(facts[1].value, "2 gates");
   assert.equal(facts[2].value, "r17");
+});
+
+test("task outcome helpers expose the canonical marker label", () => {
+  assert.ok(TASK_OUTCOME_VALUES.includes("partial_slice_landed"));
+  assert.equal(humanizeTaskOutcome("partial_slice_landed"), "partial slice landed");
+  assert.equal(humanizeTaskOutcome(null), "");
 });
 
 test("isIntelModeLoading derives loading per mode from cache and errors", () => {

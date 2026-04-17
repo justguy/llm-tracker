@@ -179,6 +179,7 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_help",
       "tracker_history",
       "tracker_next",
+      "tracker_patch",
       "tracker_pick",
       "tracker_project_status",
       "tracker_projects",
@@ -243,6 +244,7 @@ test("MCP resources expose workspace help, runtime, and project status", async (
     const runtimePayload = JSON.parse(runtime.result.contents[0].text);
     assert.equal(runtimePayload.daemonRule.readToolsRequireDaemon, false);
     assert.equal(runtimePayload.daemonRule.writeToolsRequireDaemon, true);
+    assert.ok(runtimePayload.daemonRule.writeTools.includes("tracker_patch"));
     assert.match(runtimePayload.patchWorkflow.patchDirectory, /patches$/);
 
     const project = await client.request("resources/read", { uri: "tracker://projects/test-project/status" });
@@ -277,6 +279,7 @@ test("MCP prompts expose tracker workflows and operational guidance", async () =
     const startText = startHere.result.messages[0].content.text;
     assert.match(startText, /tracker:\/\/help/);
     assert.match(startText, /patches/);
+    assert.match(startText, /tracker_patch/);
     assert.match(startText, /tracker_pick/);
 
     const execute = await client.request("prompts/get", {
@@ -430,6 +433,53 @@ test("tracker_pick goes through the running hub from MCP", async () => {
       assert.equal(payload.pickedTaskId, "t1");
       assert.equal(payload.task.assignee, "codex-mcp");
       assert.equal(payload.task.status, "in_progress");
+    } finally {
+      await client.close();
+    }
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_patch goes through the running hub from MCP", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-patch-");
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
+  const port = await findFreePort();
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const client = startMcp(workspace);
+    try {
+      await client.initialize();
+
+      const patched = await client.request("tools/call", {
+        name: "tracker_patch",
+        arguments: {
+          slug: "test-project",
+          patch: {
+            meta: {
+              scratchpad: "patched via mcp"
+            }
+          }
+        }
+      });
+
+      assert.notEqual(patched.result.isError, true);
+      const payload = JSON.parse(patched.result.content[0].text);
+      assert.equal(payload.ok, true);
+      assert.equal(payload.noop, false);
+      assert.match(payload.file, /trackers\/test-project\.json$/);
+      assert.equal(typeof payload.rev, "number");
+
+      const project = await client.request("tools/call", {
+        name: "tracker_project_status",
+        arguments: { slug: "test-project" }
+      });
+      const projectPayload = JSON.parse(project.result.content[0].text);
+      assert.equal(projectPayload.project.scratchpad, "patched via mcp");
     } finally {
       await client.close();
     }

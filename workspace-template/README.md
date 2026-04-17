@@ -49,9 +49,9 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - `patches/` means `<shared-workspace>/patches/`, not `<repo>/.llm-tracker/patches/`
 - `.runtime/` means the shared workspace runtime metadata
 - HTTP calls should still target the shared daemon
-- hub writes still update the linked repo-local tracker file in place, so status / assignee / scratchpad / rev churn will dirty that repo-visible JSON today
-- that is sync, not relocation: the hub writes through the workspace registration to the linked repo-local file in place
-- today the tracker JSON still mixes durable task spec and day-to-day coordination churn in one file, so linked repo-local trackers will show that churn in Git
+- durable tracker writes still update the linked repo-local tracker file in place; that is sync, not relocation
+- linked trackers store runtime churn in `<shared-workspace>/.runtime/overlays/<slug>.json`
+- for linked trackers, task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer need to dirty the repo-visible JSON
 
 ---
 
@@ -70,8 +70,8 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
-- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
-- MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
+- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
+- MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
 - If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
 - If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
@@ -173,6 +173,7 @@ Tasks are ordered by array index. Hub owns the order.
 | `title`          | string                                         |    ✓    | Card headline.                                        |
 | `goal`           | string                                         |          | One or two sentences under the title.                 |
 | `status`         | enum (§5)                                      |    ✓    | `not_started` \| `in_progress` \| `complete` \| `deferred` |
+| `outcome`        | string \| null                                 |          | Optional first-class marker for a bounded slice that landed. Canonical value: `partial_slice_landed`. |
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓    | Both values must exist in `meta`.                     |
 | `dependencies`   | array of task IDs                              |          | Drives block state (§6).                              |
 | `assignee`       | string \| null                                 |          | Your model ID when claiming.                          |
@@ -343,6 +344,8 @@ Four values only:
 | `complete`    | Shipped / merged / done.                                                   |
 | `deferred`    | Intentionally parked. Use instead of deletion. Excluded from progress %.   |
 
+`outcome` is separate from `status`: use `partial_slice_landed` when a bounded slice landed but the task is still open. Progress % still keys off the four status values above.
+
 Backward compatibility: legacy patches or tracker files that still send `status: "partial"` are normalized to `in_progress` on ingest. Canonical tracker state always writes back the four values above.
 
 **Progress %** = `round((count(complete) + 0.5 * count(in_progress)) / (total - count(deferred)) * 100)`.
@@ -388,12 +391,12 @@ The shortlist is deterministic and capped at 5 tasks:
 
 Use this instead of scanning the whole tracker just to choose work.
 
-If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
+If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
 
 Daemon rule:
 
 - MCP reads do **not** require a running daemon.
-- MCP writes (`tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
+- MCP writes (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
 
 Helpful MCP resources:
 
