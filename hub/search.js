@@ -30,6 +30,13 @@ let onnxWebModuleLoaderOverride = null;
 let transformersWebModuleLoaderOverride = null;
 let extractorPromise = null;
 let semanticActivated = false;
+let firstRunHintPrinted = false;
+
+function printFirstRunHintOnce() {
+  if (firstRunHintPrinted) return;
+  firstRunHintPrinted = true;
+  console.error("[llm-tracker] preparing semantic search backend — first run downloads model weights, this may take a minute");
+}
 
 const semanticIndexCache = new Map();
 
@@ -378,6 +385,7 @@ async function fallbackToLocalHashRuntime() {
 async function getExtractorRuntime() {
   semanticActivated = true;
   if (!extractorPromise) {
+    printFirstRunHintOnce();
     extractorPromise = (async () => {
       try {
         return {

@@ -24,6 +24,37 @@ When an agent needs the current contract for a running hub, it should call `GET 
 
 The UI now exposes the same deterministic loop for humans: header actions for `[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, and `[DECISIONS]`, hover task actions for `[READ]`, `[WHY]`, `[EXEC]`, and `[VERIFY]`, project-shortlist `[PICK]` actions that jump straight into execution context, a live `/help` contract panel, an exact board filter plus deterministic `[FUZZY]` highlight mode, plus real `[UNDO]`, `[REDO]`, and revision history.
 
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+    Browser["Browser (Preact UI)"]
+    Agent["LLM agent"]
+    CLI["llm-tracker CLI<br/>(bin/llm-tracker.js)"]
+    MCP["MCP server<br/>(bin/mcp-server.js)"]
+    Files["tracker JSON files<br/>(trackers/&lt;slug&gt;.json)"]
+    Patches["patches/&lt;slug&gt;.*.json"]
+    Chokidar["chokidar watcher"]
+    Hub["Hub<br/>(Express + WS)<br/>hub/server.js"]
+    Store["Store + merge engine<br/>hub/store.js + hub/merge.js"]
+    Snapshots[".snapshots/ + .history/"]
+
+    Browser -->|"HTTP drag/drop, inline edits"| Hub
+    Agent -->|"HTTP PATCH / PUT"| Hub
+    CLI -->|"HTTP"| Hub
+    Agent -->|"stdio MCP tools"| MCP
+    MCP -->|"reads workspace files directly;<br/>writes go through hub HTTP"| Hub
+    Agent -->|"drop patch file"| Patches
+    Patches -->|"picked up by"| Chokidar
+    Chokidar -->|"ingest (locked)"| Store
+    Hub --> Store
+    Store -->|"atomic write"| Files
+    Store -->|"snapshot + history append"| Snapshots
+    Hub -->|"WebSocket broadcast"| Browser
+```
+
+All write paths converge on the Store under a per-slug lock; the hub is the sole arbiter of merge and revision stamping. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full contract.
+
 ## Why use llm-tracker?
 
 🔒 **100 % Local & Secure** — the core hub doesn't ping any LLM APIs; it watches your local filesystem, merges patches, and serves the UI. Your project state never leaves your machine. Semantic `/search` uses a local embedding model and only reaches out once if the model is not already cached on disk.
@@ -115,6 +146,11 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
 
 ## Agent Help
+
+> **For agents.** The authoritative contract LLMs should follow is
+> [`workspace-template/README.md`](workspace-template/README.md), which is
+> served live at `GET /help`. If you are an agent / LLM, read that file (or
+> call `/help`) rather than this one.
 
 Running hubs expose `GET /help` as the current agent contract for that workspace.
 

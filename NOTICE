@@ -1,0 +1,19 @@
+llm-tracker
+Copyright (c) 2026 justguy
+
+This product includes software developed by the following third parties:
+
+- @huggingface/transformers (Apache-2.0) — Copyright Hugging Face
+- @huggingface/jinja (Apache-2.0) — Copyright Hugging Face
+- @huggingface/tokenizers (Apache-2.0) — Copyright Hugging Face
+- @modelcontextprotocol/sdk (MIT) — Copyright Anthropic, PBC
+- ajv (MIT) — Copyright Evgeny Poberezkin
+- ajv-formats (MIT) — Copyright Evgeny Poberezkin
+- chokidar (MIT) — Copyright Paul Miller
+- express (MIT) — Copyright TJ Holowaychuk
+- htm (Apache-2.0) — Copyright 2018 Google Inc.
+- preact (MIT) — Copyright Jason Miller
+- ws (MIT) — Copyright Einar Otto Stangvik
+
+No dependency ships its own NOTICE file; none of the above requires
+verbatim NOTICE reproduction under Apache-2.0 §4(d).

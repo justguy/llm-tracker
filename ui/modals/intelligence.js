@@ -423,10 +423,10 @@ export function TaskIntelligenceModal({ slug, task, initialMode = "brief", onOpe
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal intel-modal" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal intel-modal" role="dialog" aria-modal="true" aria-label="Task intelligence" onClick=${(e) => e.stopPropagation()}>
         <div class="modal-header">
           <span class="brand">${TASK_INTEL_TABS.find((tab) => tab.id === mode)?.label || "[TASK]"} · ${slug}</span>
-          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+          <button class="icon-btn" aria-label="Close dialog" onClick=${onClose} title="Close (Esc)">×</button>
         </div>
         <div class="modal-body">
           <div class="intel-title-block">
@@ -607,10 +607,10 @@ export function ProjectIntelligenceModal({ slug, project, initialMode = "next", 
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal intel-modal project-intel-modal" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal intel-modal project-intel-modal" role="dialog" aria-modal="true" aria-label="Project intelligence" onClick=${(e) => e.stopPropagation()}>
         <div class="modal-header">
           <span class="brand">[PROJECT INTEL] · ${slug}</span>
-          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+          <button class="icon-btn" aria-label="Close dialog" onClick=${onClose} title="Close (Esc)">×</button>
         </div>
         <div class="modal-body">
           <div class="intel-title-block">

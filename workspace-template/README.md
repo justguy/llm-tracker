@@ -1,5 +1,10 @@
 # LLM Project Tracker — Agent Contract
 
+> **Canonical agent contract.** This file is served by `GET /help` and is the
+> authoritative specification for agents interacting with the hub. The
+> project-root `README.md` links into this document where it describes the
+> agent contract — do not duplicate or overwrite the contract there.
+
 You are being asked to read this because there is a **local project tracker** running on this machine. It's a Kanban board that reflects real project state to a human operator. Your job: keep the tracker in sync with what you're actually doing, using **small JSON patches** — not full-file rewrites.
 
 Writes are **frequent and tiny**. Reads are **rare and only at decision points**. The hub is authoritative for structure (task order, which tasks exist, human UI state). You are authoritative for content (status, assignee, dependencies, context, new tasks, priority changes).
@@ -848,6 +853,7 @@ Error shape:
 | `llm-tracker daemon logs [--path <dir>] [--lines N]`      | Print recent background-hub logs.                                             |     no       |
 | `llm-tracker mcp [--path <dir>] [--port N]`               | Start the stdio MCP server exposing `tracker_*` tools.                        |     no       |
 | `llm-tracker shortcuts [--alias NAME]`                    | Print shell shortcuts for zero-token `lt next`, `lt brief`, etc.              |     no       |
+| `GET /healthz`                                            | Lightweight health probe: `{ok, projects, uptimeSeconds}`.                    |     no       |
 | `GET /help`                                               | Fetch the current workspace agent contract over HTTP.                         |     no       |
 | `llm-tracker status`                                      | Dashboard of all projects.                                                    |     no       |
 | `llm-tracker status <slug>`                               | Detail view of one project.                                                   |     no       |

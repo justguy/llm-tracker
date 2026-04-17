@@ -420,6 +420,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug/reload`                        | POST   | Force one tracker file to be reloaded from disk.           |
 | `/api/reload`                                       | POST   | Force all tracker files to be reloaded from disk.          |
 | `/api/history/:slug`                                | GET    | Last 50 raw history lines.                                 |
+| `/healthz`                                          | GET    | Lightweight health probe: `{ok, projects, uptimeSeconds}`. |
 | `/README.md`                                        | GET    | Serve the workspace README.                                |
 | `/ws`                                               | WS     | WebSocket: SNAPSHOT on connect, UPDATE/ERROR/REMOVE on change. |
 

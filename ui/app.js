@@ -358,6 +358,7 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
     >
       <button
         class="card-delete"
+        aria-label=${`Delete task ${task.id}`}
         title=${`Delete task ${task.id}`}
         onMouseDown=${(e) => e.stopPropagation()}
         onClick=${(e) => {
@@ -618,6 +619,7 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
         <div class="lane-cell-head">
           <button
             class="lane-chevron"
+            aria-label="Collapse swimlane"
             onClick=${() => onToggleCollapse(lane.id, true)}
             title="Collapse swimlane"
           >${"\u25BC"}</button>
@@ -923,10 +925,10 @@ function HelpModal({ workspace, onClose }) {
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal help-modal" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal help-modal" role="dialog" aria-modal="true" aria-label="Help" onClick=${(e) => e.stopPropagation()}>
         <div class="modal-header">
           <span class="brand">[HELP] · LLM PROJECT TRACKER</span>
-          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+          <button class="icon-btn" aria-label="Close dialog" onClick=${onClose} title="Close (Esc)">×</button>
         </div>
 
         <div class="modal-body">
@@ -1084,10 +1086,10 @@ function SettingsModal({ onClose, theme, onToggleTheme, drawerPinned, onToggleDr
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal settings-modal" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings" onClick=${(e) => e.stopPropagation()}>
         <div class="modal-header">
           <span class="brand">[SETTINGS]</span>
-          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+          <button class="icon-btn" aria-label="Close dialog" onClick=${onClose} title="Close (Esc)">×</button>
         </div>
 
         <div class="modal-body">
@@ -1179,7 +1181,7 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
               onClick=${onTogglePin}
               title=${pinned ? "Unpin" : "Pin drawer (persists)"}
             >${pinned ? "[PINNED]" : "[PIN]"}</button>
-            <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+            <button class="icon-btn" aria-label="Close drawer" onClick=${onClose} title="Close (Esc)">×</button>
           </div>
         </div>
         <div class="drawer-body">
@@ -1214,6 +1216,7 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
                         : null}
                       <button
                         class="drawer-project-delete"
+                        aria-label=${`Delete project ${s}`}
                         title=${`Delete ${s}`}
                         onClick=${(e) => {
                           e.stopPropagation();
@@ -1384,11 +1387,11 @@ function Header({
             title="Delete this project"
           >[DELETE]</button>
           <button class="icon-btn" onClick=${onOpenDrawer} title="Project overview">[OVERVIEW]</button>
-          <button class="icon-btn" onClick=${onToggleTheme} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
+          <button class="icon-btn" aria-label=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} onClick=${onToggleTheme} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
             ${theme === "dark" ? "[☼]" : "[☾]"}
           </button>
           <button class="icon-btn" onClick=${onOpenSettings} title="Settings">[SETTINGS]</button>
-          <button class="icon-btn" onClick=${onOpenHelp} title="Help">[?]</button>
+          <button class="icon-btn" aria-label="Help" onClick=${onOpenHelp} title="Help">[?]</button>
         </div>
         <div class="search-controls">
           <input
@@ -1874,11 +1877,11 @@ function App() {
           </div>
           <div class="header-right">
             <div class="header-actions">
-              <button class="icon-btn" onClick=${onToggleTheme}>
+              <button class="icon-btn" aria-label=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} onClick=${onToggleTheme}>
                 ${theme === "dark" ? "[☼]" : "[☾]"}
               </button>
               <button class="icon-btn" onClick=${() => setSettingsOpen(true)}>[SETTINGS]</button>
-              <button class="icon-btn" onClick=${() => setHelpOpen(true)}>[?]</button>
+              <button class="icon-btn" aria-label="Help" onClick=${() => setHelpOpen(true)}>[?]</button>
             </div>
           </div>
         </div>

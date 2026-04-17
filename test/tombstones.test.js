@@ -1,20 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { mergeProject } from "../hub/merge.js";
 import { Store, trackerPath } from "../hub/store.js";
 import { validateProject } from "../hub/validator.js";
-import { validProject } from "./fixtures.js";
-
-function setupWorkspace() {
-  const ws = mkdtempSync(join(tmpdir(), "llm-tracker-tomb-"));
-  for (const sub of ["trackers", ".snapshots", ".history"]) {
-    mkdirSync(join(ws, sub), { recursive: true });
-  }
-  return ws;
-}
+import { makeWorkspace, validProject } from "./fixtures.js";
 
 test("validator accepts meta.deleted_tasks as string[]", () => {
   const p = validProject();
@@ -24,7 +15,7 @@ test("validator accepts meta.deleted_tasks as string[]", () => {
 });
 
 test("deleteTask tombstones the id in meta.deleted_tasks", async () => {
-  const ws = setupWorkspace();
+  const ws = makeWorkspace("llm-tracker-tomb-");
   try {
     const store = new Store(ws);
     const p = validProject();
@@ -72,7 +63,7 @@ test("merge drops incoming meta.deleted_tasks so LLMs can't clear tombstones", (
 });
 
 test("applyPatch cannot resurrect a tombstoned task via new-id patch", async () => {
-  const ws = setupWorkspace();
+  const ws = makeWorkspace("llm-tracker-tomb-");
   try {
     const store = new Store(ws);
     const p = validProject();
@@ -107,7 +98,7 @@ test("applyPatch cannot resurrect a tombstoned task via new-id patch", async () 
 });
 
 test("rollback to a rev before deletion clears the tombstone (undo flow)", async () => {
-  const ws = setupWorkspace();
+  const ws = makeWorkspace("llm-tracker-tomb-");
   try {
     const store = new Store(ws);
     const p = validProject();

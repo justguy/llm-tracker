@@ -73,10 +73,10 @@ export function HistoryModal({ slug, onClose }) {
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal history-modal" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal history-modal" role="dialog" aria-modal="true" aria-label="History" onClick=${(e) => e.stopPropagation()}>
         <div class="modal-header">
           <span class="brand">[HISTORY] · ${slug}</span>
-          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+          <button class="icon-btn" aria-label="Close dialog" onClick=${onClose} title="Close (Esc)">×</button>
         </div>
         <div class="modal-body">
           ${error

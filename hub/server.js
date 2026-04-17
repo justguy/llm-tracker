@@ -182,6 +182,15 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     return true;
   };
 
+  // Periodic sweep to evict expired UI-session entries so the Map does not
+  // grow unbounded on a long-running hub. Each page load issues a new entry,
+  // so without this a multi-day hub accumulates O(page-loads) stale entries.
+  // The interval is unref()d so it does not keep the Node event loop alive
+  // when the hub shuts down cleanly (tests that spawn a daemon won't hang).
+  const UI_SESSION_SWEEP_INTERVAL_MS = Math.max(60_000, UI_SESSION_TTL_MS / 10);
+  const uiSessionSweepTimer = setInterval(pruneUiSessions, UI_SESSION_SWEEP_INTERVAL_MS);
+  uiSessionSweepTimer.unref();
+
   // CSRF / cross-origin guard. The hub binds to loopback by default, but a
   // malicious web page in a local browser can still fire cross-origin POSTs
   // at the hub. Reject any mutating request whose Origin/Referer is neither
@@ -248,6 +257,17 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     if (!existsSync(readmePath)) return res.status(404).send("No README");
     res.type("text/markdown").send(readFileSync(readmePath, "utf-8"));
   };
+
+  // Health-check endpoint — no auth required (bearer middleware only guards
+  // mutating methods; GET passes through unconditionally). Safe for Docker /
+  // Kubernetes readiness probes even when LLM_TRACKER_TOKEN is set.
+  app.get("/healthz", (_req, res) => {
+    res.json({
+      ok: true,
+      projects: store.list().length,
+      uptimeSeconds: Math.floor(process.uptime())
+    });
+  });
 
   app.get("/api/workspace", (_req, res) => {
     res.json({ workspace, readme: readmePath, help: "/help" });
@@ -563,6 +583,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       const f = VENDOR[request.path];
       if (existsSync(f)) {
         res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+        res.setHeader("X-Content-Type-Options", "nosniff");
         return res.send(readFileSync(f));
       }
     }
@@ -572,6 +593,14 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     if (!existsSync(file) || !file.startsWith(uiDir)) return next();
     const type = MIME[extname(file)] || "application/octet-stream";
     res.setHeader("Content-Type", type);
+    // All UI assets get nosniff; the HTML shell gets the full set of
+    // framing / referrer headers as well.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (file.endsWith("index.html")) {
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("Permissions-Policy", "interest-cohort=()");
+    }
     if (bearerToken && file.endsWith("index.html")) {
       const existing = parseCookies(request.headers.cookie)[UI_SESSION_COOKIE];
       const reuse = existing && uiSessions.get(existing) > Date.now();
@@ -886,6 +915,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+
+    clearInterval(uiSessionSweepTimer);
 
     try {
       await watcher.close();

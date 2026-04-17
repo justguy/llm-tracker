@@ -59,6 +59,9 @@
     "img",
     "README.md",
     "ARCHITECTURE.md",
-    "LICENSE"
+    "CHANGELOG.md",
+    "MIGRATING.md",
+    "LICENSE",
+    "NOTICE"
   ]
 }
