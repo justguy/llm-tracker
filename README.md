@@ -206,7 +206,7 @@ If you want direct tracker commands from a Codex or Claude terminal session with
 eval "$(npx llm-tracker shortcuts)"
 ```
 
-That creates a small `lt` shell function. Use it like:
+The default short alias for `llm-tracker` is `lt`. That command creates a small `lt` shell function. Use it like:
 
 ```bash
 lt next project-phalanx

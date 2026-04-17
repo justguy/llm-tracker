@@ -76,6 +76,18 @@ test("mergeProject preserves human-owned collapsed on swimlane", () => {
   assert.ok(notes.ignored.some((s) => s.includes("collapsed")));
 });
 
+test("mergeProject preserves existing swimlane order when incoming rewrites rows", () => {
+  const existing = validProject();
+  const incoming = JSON.parse(JSON.stringify(existing));
+  incoming.meta.swimlanes = [incoming.meta.swimlanes[1], incoming.meta.swimlanes[0]];
+
+  const { merged } = mergeProject(existing, incoming);
+  assert.deepEqual(
+    merged.meta.swimlanes.map((lane) => lane.id),
+    ["exec", "ops"]
+  );
+});
+
 test("mergeProject strips collapsed from LLM's new swimlanes (hub-owned)", () => {
   const existing = validProject();
   const incoming = JSON.parse(JSON.stringify(existing));

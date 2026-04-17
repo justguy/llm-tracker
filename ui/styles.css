@@ -1559,6 +1559,12 @@ body {
   gap: 6px;
 }
 
+.lane-order-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .lane-chevron {
   font-family: var(--font-mono);
   background: transparent;
@@ -1610,11 +1616,36 @@ body {
 .lane-collapsed > .lane-collapsed-pct { flex-shrink: 0; }
 
 .lane-collapsed-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--white);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.lane-label-text {
+  min-width: 0;
+}
+
+.lane-label .card-copy-btn,
+.lane-collapsed-label .card-copy-btn {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: text-top;
+  position: relative;
+  top: -1px;
+}
+
+.lane-cell:hover .card-copy-btn,
+.lane-cell:focus-within .card-copy-btn,
+.lane-collapsed:hover .card-copy-btn,
+.lane-collapsed:focus-visible .card-copy-btn {
+  opacity: 1;
 }
 
 .lane-collapsed-stats {
@@ -1639,6 +1670,9 @@ body {
 }
 
 .lane-cell .lane-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--white);

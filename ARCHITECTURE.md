@@ -419,6 +419,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug/symlink`                       | POST   | Register a project by symlinking an external JSON.         |
 | `/api/projects/:slug/reload`                        | POST   | Force one tracker file to be reloaded from disk.           |
 | `/api/reload`                                       | POST   | Force all tracker files to be reloaded from disk.          |
+| `/api/projects/:slug/swimlane-move`                 | POST   | Move one swimlane up or down in `meta.swimlanes`.          |
 | `/api/history/:slug`                                | GET    | Last 50 raw history lines.                                 |
 | `/healthz`                                          | GET    | Lightweight health probe: `{ok, projects, uptimeSeconds}`. |
 | `/README.md`                                        | GET    | Serve the workspace README.                                |
@@ -445,6 +446,7 @@ All errors return JSON: `{error, type?, hint?}`. Default body limit: 1 MB (overr
 | task `placement.priorityId`, `placement.swimlaneId`| LLM (shared with UI drag; last-write-wins)           |
 | `meta.name`, `meta.priorities`, `meta.swimlanes[].{id,label,description}`, `meta.scratchpad` | LLM |
 | `meta.swimlanes[].collapsed`                       | Human (UI)  |
+| `meta.swimlanes` order                             | Human (UI)  |
 | Task array order                                   | Hub (structural) |
 | `meta.updatedAt`, `meta.rev`, `task.updatedAt`, `task.rev` | Hub |
 

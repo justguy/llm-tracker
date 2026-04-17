@@ -547,7 +547,7 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
   `;
 }
 
-function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, onMove, onToggleCollapse, onDeleteTask, onSaveComment, onOpenTask }) {
+function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, onMove, onToggleCollapse, onMoveLane, onDeleteTask, onSaveComment, onOpenTask }) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
   const priorities = project.data.meta.priorities;
@@ -578,6 +578,9 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
   `;
 
   const rows = swimlanes.map((lane) => {
+    const laneIndex = swimlanes.findIndex((item) => item.id === lane.id);
+    const canMoveUp = laneIndex > 0;
+    const canMoveDown = laneIndex >= 0 && laneIndex < swimlanes.length - 1;
     const per = project.derived?.perSwimlane?.[lane.id] || { counts: {}, pct: 0, total: 0 };
     const active = per.counts.in_progress || 0;
     const allComplete = per.total > 0 && per.counts.complete === per.total;
@@ -601,7 +604,14 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
           title="Click to expand swimlane"
         >
           <span class="lane-chevron">${"\u25B6"}</span>
-          <div class="lane-collapsed-label">${lane.label}</div>
+          <div class="lane-collapsed-label">
+            <span class="lane-label-text">${lane.label}</span>
+            <${CopyInlineBtn}
+              value=${lane.label}
+              label="Lane name"
+              title=${`Copy lane name: ${lane.label}`}
+            />
+          </div>
           ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
           <div class="lane-collapsed-stats">
             <span>${per.total} tasks</span>
@@ -623,7 +633,30 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
             onClick=${() => onToggleCollapse(lane.id, true)}
             title="Collapse swimlane"
           >${"\u25BC"}</button>
-          <div class="lane-label">${lane.label}</div>
+          <div class="lane-label">
+            <span class="lane-label-text">${lane.label}</span>
+            <${CopyInlineBtn}
+              value=${lane.label}
+              label="Lane name"
+              title=${`Copy lane name: ${lane.label}`}
+            />
+          </div>
+        </div>
+        <div class="lane-order-actions">
+          <button
+            class="icon-btn small"
+            disabled=${!canMoveUp}
+            aria-label=${`Increase priority of lane ${lane.label}`}
+            title=${canMoveUp ? `Move ${lane.label} up` : `${lane.label} is already the top lane`}
+            onClick=${() => onMoveLane && onMoveLane(lane.id, "up")}
+          >[UP]</button>
+          <button
+            class="icon-btn small"
+            disabled=${!canMoveDown}
+            aria-label=${`Decrease priority of lane ${lane.label}`}
+            title=${canMoveDown ? `Move ${lane.label} down` : `${lane.label} is already the bottom lane`}
+            onClick=${() => onMoveLane && onMoveLane(lane.id, "down")}
+          >[DOWN]</button>
         </div>
         ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
         <div class="lane-stats">
@@ -765,6 +798,7 @@ function ProjectPane({
   blockFilters,
   onMove,
   onToggleCollapse,
+  onMoveLane,
   onDeleteTask,
   onSaveComment,
   onOpenTask,
@@ -824,6 +858,7 @@ function ProjectPane({
             fuzzyMatchMap=${fuzzyMatchMap}
             onMove=${(args) => onMove(slug, args)}
             onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
+            onMoveLane=${(laneId, direction) => onMoveLane(slug, laneId, direction)}
             onDeleteTask=${(task) => onDeleteTask(slug, task)}
             onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
             onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
@@ -1426,7 +1461,7 @@ function App() {
   const initialSettings = useMemo(() => loadSettings(), []);
   const [workspace, setWorkspace] = useState(null);
   const [projects, setProjects] = useState({});
-  const [activeSlug, setActiveSlug] = useState(null);
+  const [activeSlug, setActiveSlug] = useState(initialSettings.activeSlug || null);
   const [filter, setFilter] = useState("");
   const [searchMode, setSearchMode] = useState("filter");
   const [fuzzyState, setFuzzyState] = useState({
@@ -1474,8 +1509,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, drawerPinned, pinnedSlugs, scratchpadExpanded });
-  }, [theme, drawerPinned, pinnedSlugs, scratchpadExpanded]);
+    saveSettings({ theme, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug });
+  }, [theme, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -1627,13 +1662,34 @@ function App() {
   const onToggleCollapse = async (slug, swimlaneId, collapsed) => {
     if (!slug) return;
     try {
-      await fetch(`/api/projects/${slug}/swimlane-collapse`, {
+      const res = await fetch(`/api/projects/${slug}/swimlane-collapse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ swimlaneId, collapsed })
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(`Swimlane update failed: ${body.error || res.statusText}`);
+      }
     } catch (e) {
-      console.error("collapse toggle failed", e);
+      alert(`Swimlane update failed: ${e.message}`);
+    }
+  };
+
+  const onMoveLane = async (slug, swimlaneId, direction) => {
+    if (!slug || !swimlaneId) return;
+    try {
+      const res = await fetch(`/api/projects/${slug}/swimlane-move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ swimlaneId, direction })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(`Swimlane move failed: ${body.error || res.statusText}`);
+      }
+    } catch (e) {
+      alert(`Swimlane move failed: ${e.message}`);
     }
   };
 
@@ -1995,6 +2051,7 @@ function App() {
             blockFilters=${blockFilters}
             onMove=${onMove}
             onToggleCollapse=${onToggleCollapse}
+            onMoveLane=${onMoveLane}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
             onOpenTask=${onOpenTaskIntel}

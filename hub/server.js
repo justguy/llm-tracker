@@ -536,7 +536,29 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     }
     const r = await store.applyCollapse(req.params.slug, { swimlaneId, collapsed });
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
-    res.json({ ok: true });
+    const entry = store.get(req.params.slug);
+    broadcast({
+      type: "UPDATE",
+      slug: req.params.slug,
+      project: projectPayload(req.params.slug, entry)
+    });
+    res.json({ ok: true, noop: r.noop === true });
+  });
+
+  app.post("/api/projects/:slug/swimlane-move", async (req, res) => {
+    const { swimlaneId, direction } = req.body || {};
+    if (!swimlaneId || (direction !== "up" && direction !== "down")) {
+      return res.status(400).json({ error: "swimlaneId and direction (up|down) required" });
+    }
+    const r = await store.applySwimlaneMove(req.params.slug, { swimlaneId, direction });
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
+    const entry = store.get(req.params.slug);
+    broadcast({
+      type: "UPDATE",
+      slug: req.params.slug,
+      project: projectPayload(req.params.slug, entry)
+    });
+    res.json({ ok: true, noop: r.noop === true });
   });
 
   app.post("/api/projects/:slug/move", async (req, res) => {

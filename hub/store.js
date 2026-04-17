@@ -1006,4 +1006,65 @@ export class Store {
       return { ok: true, newRev };
     });
   }
+
+  async applySwimlaneMove(slug, { swimlaneId, direction }) {
+    return this.withLock(slug, async () => {
+      const current = this.projects.get(slug);
+      if (!current || !current.data) {
+        return { ok: false, status: 404, message: "project not found" };
+      }
+      if (!swimlaneId || (direction !== "up" && direction !== "down")) {
+        return { ok: false, status: 400, message: "swimlaneId and direction (up|down) required" };
+      }
+
+      const file = trackerPath(this.workspace, slug);
+      const newState = JSON.parse(JSON.stringify(current.data));
+      const lanes = newState.meta?.swimlanes;
+      if (!Array.isArray(lanes)) {
+        return { ok: false, status: 500, message: "project has no swimlanes" };
+      }
+
+      const index = lanes.findIndex((lane) => lane.id === swimlaneId);
+      if (index === -1) return { ok: false, status: 404, message: "swimlane not found" };
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= lanes.length) {
+        return { ok: true, noop: true, newRev: current.rev };
+      }
+
+      const [lane] = lanes.splice(index, 1);
+      lanes.splice(targetIndex, 0, lane);
+
+      const baseRev = current.rev;
+      const newRev = baseRev + 1;
+      newState.meta.rev = newRev;
+      newState.meta.updatedAt = new Date().toISOString();
+
+      const { ok, errors } = validateProject(newState);
+      if (!ok) return { ok: false, status: 400, message: errors.join("; ") };
+
+      const delta = computeDelta(current.data, newState);
+      const derived = deriveProject(newState);
+
+      this.projects.set(slug, {
+        data: newState,
+        derived,
+        path: file,
+        rev: newRev,
+        error: null,
+        notes: { ignored: [], warnings: [], appended: [], updated: [] }
+      });
+
+      writeSnapshot(this.workspace, slug, newRev, newState);
+      appendHistoryEntry(this.workspace, slug, {
+        rev: newRev,
+        ts: newState.meta.updatedAt,
+        delta,
+        summary: summarize(delta)
+      });
+
+      atomicWriteJson(file, newState);
+      return { ok: true, newRev };
+    });
+  }
 }

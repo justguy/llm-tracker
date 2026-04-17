@@ -118,6 +118,7 @@ If any is "no" or "unsure," ask the human before proceeding.
 **What the hub enforces (you can't break these even if you try):**
 
 - **Array order in `tasks[]`** — hub preserves its own order regardless of what you submit. Reorder happens only through the UI's drag endpoint.
+- **Swimlane order in `meta.swimlanes`** — row order is human/UI-controlled. Reorder happens only through the UI lane move controls.
 - **Deletion** — missing task IDs are kept, not deleted. To archive, set `status: "deferred"`. Deletion is human-only via the UI.
 - **Tombstones** — when a human deletes a task, the id is recorded in `meta.deleted_tasks`. Any incoming write that tries to re-add that id is dropped with an `ignored` note. Pick a **new id** if you really need to reopen the work.
 - **`meta.swimlanes[i].collapsed`** — human UI state. Hub always keeps the existing value; your submissions for this field are dropped.

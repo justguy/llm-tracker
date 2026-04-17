@@ -29,25 +29,47 @@ export function mergeProject(existing, incoming) {
       merged.meta[k] = v;
     }
     if (incoming.meta.swimlanes) {
-      const prev = new Map((existing.meta.swimlanes || []).map((l) => [l.id, l]));
-      merged.meta.swimlanes = incoming.meta.swimlanes.map((lane) => {
-        const p = prev.get(lane.id);
+      const existingLanes = existing.meta.swimlanes || [];
+      const incomingById = new Map((incoming.meta.swimlanes || []).map((lane) => [lane.id, lane]));
+      const existingIds = new Set(existingLanes.map((lane) => lane.id));
+      const nextLanes = [];
+
+      for (const prevLane of existingLanes) {
+        const lane = incomingById.get(prevLane.id);
+        if (!lane) {
+          nextLanes.push(prevLane);
+          continue;
+        }
         const out = { ...lane };
-        if (p && "collapsed" in p) {
-          if ("collapsed" in lane && lane.collapsed !== p.collapsed) {
+        if ("collapsed" in prevLane) {
+          if ("collapsed" in lane && lane.collapsed !== prevLane.collapsed) {
             notes.ignored.push(
               `meta.swimlanes[${lane.id}].collapsed is human-owned (kept existing)`
             );
           }
-          out.collapsed = p.collapsed;
+          out.collapsed = prevLane.collapsed;
         } else if ("collapsed" in lane) {
           notes.ignored.push(
             `meta.swimlanes[${lane.id}].collapsed is human-owned (dropped)`
           );
           delete out.collapsed;
         }
-        return out;
-      });
+        nextLanes.push(out);
+      }
+
+      for (const lane of incoming.meta.swimlanes) {
+        if (existingIds.has(lane.id)) continue;
+        const out = { ...lane };
+        if ("collapsed" in lane) {
+          notes.ignored.push(
+            `meta.swimlanes[${lane.id}].collapsed is human-owned (dropped)`
+          );
+          delete out.collapsed;
+        }
+        nextLanes.push(out);
+      }
+
+      merged.meta.swimlanes = nextLanes;
     }
   }
 
