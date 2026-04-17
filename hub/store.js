@@ -634,11 +634,19 @@ export class Store {
           message: "project not found — register by writing the full tracker file first"
         };
       }
-      let existing;
+      const current = this.projects.get(slug);
+      let existing = current?.data || null;
+      let currentRev = current?.rev ?? null;
       try {
-        existing = JSON.parse(readFileSync(file, "utf-8"));
+        if (!existing) existing = JSON.parse(readFileSync(file, "utf-8"));
       } catch (e) {
         return { ok: false, status: 500, message: `tracker file not parseable: ${e.message}` };
+      }
+      if (!existing) {
+        return { ok: false, status: 500, message: "project state is unavailable" };
+      }
+      if (!Number.isInteger(currentRev)) {
+        currentRev = Number.isInteger(existing?.meta?.rev) ? existing.meta.rev : 0;
       }
 
       const guard = validatePatchGuardrails(existing, patch);
@@ -663,8 +671,47 @@ export class Store {
         };
       }
 
+      const delta = computeDelta(existing, merged);
+      if (!hasChanges(delta)) {
+        if (!current || !current.data) {
+          this.projects.set(slug, {
+            data: existing,
+            derived: deriveProject(existing),
+            path: file,
+            rev: currentRev,
+            error: null,
+            notes: { ignored: [], warnings: [], appended: [], updated: [] }
+          });
+          clearErrorFile(this.workspace, slug);
+        }
+        return { ok: true, notes, noop: true, rev: currentRev };
+      }
+
+      const newRev = currentRev + 1;
+      merged.meta.rev = newRev;
+      merged.meta.updatedAt = new Date().toISOString();
+
+      const derived = deriveProject(merged);
+      this.projects.set(slug, {
+        data: merged,
+        derived,
+        path: file,
+        rev: newRev,
+        error: null,
+        notes
+      });
+
+      writeSnapshot(this.workspace, slug, newRev, merged);
+      appendHistoryEntry(this.workspace, slug, {
+        rev: newRev,
+        ts: merged.meta.updatedAt,
+        delta,
+        summary: summarize(delta)
+      });
+
       atomicWriteJson(file, merged);
-      return { ok: true, notes };
+      clearErrorFile(this.workspace, slug);
+      return { ok: true, notes, rev: newRev, noop: false };
     });
   }
 

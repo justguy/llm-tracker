@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -203,9 +203,17 @@ test("bearer token is required and browser UI uses a session cookie without expo
       body: JSON.stringify({ meta: { scratchpad: "ok" } })
     });
     assert.equal(good.status, 200);
+    const goodBody = await good.json();
+    assert.equal(goodBody.ok, true);
+    assert.equal(goodBody.noop, false);
+    assert.ok(Number.isInteger(goodBody.rev) && goodBody.rev >= 1);
+    assert.match(goodBody.updatedAt || "", /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(goodBody.file, realpathSync(join(workspace, "trackers", "test-project.json")));
 
     const read = await fetch(`http://127.0.0.1:${port}/api/projects/test-project`);
     assert.equal(read.status, 200);
+    const readBody = await read.json();
+    assert.equal(readBody.file, realpathSync(join(workspace, "trackers", "test-project.json")));
 
     const html = await fetch(`http://127.0.0.1:${port}/index.html`);
     assert.equal(html.status, 200);

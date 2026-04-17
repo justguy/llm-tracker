@@ -144,6 +144,10 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - the shared daemon automatically watches the linked tracker file for direct edits
 - the shared daemon automatically watches the shared workspace `patches/` directory
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
+- hub writes still land on the linked repo-local tracker file itself, so status / assignee / scratchpad / rev churn will dirty that repo-visible JSON today
+- that is sync, not relocation: the hub writes through the workspace registration to the linked repo-local file in place
+- today the tracker JSON still mixes durable task spec and day-to-day coordination churn in one file, so linked repo-local trackers will show that churn in Git
+- `GET /api/projects/<slug>` includes `file`, the effective tracker JSON path the hub will write
 
 ## Agent Help
 
@@ -323,6 +327,8 @@ curl -X POST http://localhost:4400/api/projects/<slug>/redo
 # Reload trackers from disk
 curl -X POST http://localhost:4400/api/projects/<slug>/reload
 ```
+
+Successful `POST /api/projects/<slug>/patch` responses are authoritative immediately. They now return the accepted post-write `rev`, `updatedAt`, `noop`, and `file` (the effective tracker JSON path the hub wrote, which is the repo-local target for linked projects).
 
 Patch payloads stay small. Typical shape:
 

@@ -381,6 +381,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 **Always use `--data-binary @file`, never inline `-d '...'`** — `-d` is curl's form-body mode and strips newlines + can URL-decode special characters, which corrupts JSON bodies. `--data-binary` sends file bytes verbatim.
 
+On success, the response is authoritative immediately: `{ok, rev, updatedAt, file, notes, noop}`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly.
+
 ---
 
 ## HTTP API reference
@@ -390,7 +392,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/workspace`                                    | GET    | Workspace paths (readme, root).                            |
 | `/api/settings`                                     | GET/PUT| Hub config (port).                                         |
 | `/api/projects`                                     | GET    | List of projects with derived counts.                      |
-| `/api/projects/:slug`                               | GET    | Full project state.                                        |
+| `/api/projects/:slug`                               | GET    | Full project state plus effective tracker `file` path.     |
 | `/api/projects/:slug`                               | PUT    | Create or replace a project (full body).                   |
 | `/api/projects/:slug`                               | DELETE | Remove the tracker file and append a `delete` history event. |
 | `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 tasks for agent pickup.  |
@@ -409,7 +411,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 | `/api/projects/:slug/restore`                       | POST   | Restore a deleted project from snapshots as a fresh rev.   |
 | `/api/projects/:slug/undo`                          | POST   | Restore the previous effective project state.              |
 | `/api/projects/:slug/redo`                          | POST   | Reapply the most recent undo.                              |
-| `/api/projects/:slug/patch`                         | POST   | Partial update merged with existing state.                 |
+| `/api/projects/:slug/patch`                         | POST   | Partial update merged with existing state; returns authoritative `rev` / `updatedAt` / `file` / `noop`. |
 | `/api/projects/:slug/move`                          | POST   | UI drag-drop: change task placement + array position.      |
 | `/api/projects/:slug/swimlane-collapse`             | POST   | Toggle `meta.swimlanes[i].collapsed`.                      |
 | `/api/projects/:slug/tasks/:taskId`                 | DELETE | Remove one task; hub scrubs its id from other deps.        |
@@ -474,6 +476,8 @@ Two deployment topologies are supported:
 2. Supported alternative: multiple isolated workspaces, each with its own daemon and port.
 
 In the recommended topology, repo-local tracker files are usually linked in via Option C. The shared daemon remains the source of truth for HTTP, `patches/`, `.runtime/`, and the central UI, while the linked repo-local file is watched for direct edits.
+
+That linked-file churn is sync, not relocation: hub writes go through the workspace registration and update the linked repo-local JSON in place. Today the tracker file still mixes durable task spec with day-to-day coordination churn, so linked repo-local trackers will show status / assignee / scratchpad / rev noise in Git.
 
 Daemon mode is explicit:
 

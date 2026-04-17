@@ -49,6 +49,9 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - `patches/` means `<shared-workspace>/patches/`, not `<repo>/.llm-tracker/patches/`
 - `.runtime/` means the shared workspace runtime metadata
 - HTTP calls should still target the shared daemon
+- hub writes still update the linked repo-local tracker file in place, so status / assignee / scratchpad / rev churn will dirty that repo-visible JSON today
+- that is sync, not relocation: the hub writes through the workspace registration to the linked repo-local file in place
+- today the tracker JSON still mixes durable task spec and day-to-day coordination churn in one file, so linked repo-local trackers will show that churn in Git
 
 ---
 
@@ -59,6 +62,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - **You write freely** — `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **Patch-mode new tasks must start open** — when you append a brand-new task through Mode A or Mode B, use `not_started` or `in_progress`, not `complete` or `deferred`.
 - **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
+- **When you need to confirm linked topology**, `GET /api/projects/<slug>` includes `file`, the effective tracker JSON path the hub will write.
 - **When the human asks a feature-shaped or fuzzy question**, prefer `GET /api/projects/<slug>/search?q=...` for semantic search or `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic lexical matching before rereading the full tracker.
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
 - **When you need the task rationale**, prefer `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
@@ -683,6 +687,8 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 **Always use `--data-binary @file`, never inline `-d '...'`.** `-d` is curl's form-body mode: it strips newlines and may URL-decode special characters, which produces invalid JSON for multi-line `notes` or anything past a few hundred bytes. `--data-binary` sends file bytes verbatim. Use `--data-raw` only for tiny payloads with no newlines/quotes.
 
 **On failure:** rerun with `curl -i` to capture the response. The hub returns structured JSON: `{error, type, hint}`.
+
+On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, and `noop`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly.
 
 ### Merge semantics (both modes)
 

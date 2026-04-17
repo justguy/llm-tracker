@@ -91,16 +91,13 @@ test("applyPatch bumps rev and writes history", async () => {
     const file = trackerPath(ws, "test-project");
     writeFileSync(file, JSON.stringify(validProject()));
     store.ingest(file, readFileSync(file, "utf-8"));
-    // Re-ingest after rev-stamp rewrite
-    store.ingest(file, readFileSync(file, "utf-8"));
 
-    await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
-    // The hub's file rewrite triggers what would be a chokidar event; simulate
-    // by calling ingest on the new file state.
-    store.ingest(file, readFileSync(file, "utf-8"));
+    const patch = await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
+    assert.equal(patch.ok, true);
 
     const entry = store.get("test-project");
     assert.ok(entry.rev >= 2);
+    assert.equal(patch.rev, entry.rev);
 
     const onDisk = JSON.parse(readFileSync(file, "utf-8"));
     assert.equal(onDisk.meta.rev, entry.rev);
@@ -124,7 +121,6 @@ test("rollback replays a prior snapshot as a new rev", async () => {
     const rev1 = store.get("test-project").rev;
 
     await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
     const rev2 = store.get("test-project").rev;
     assert.ok(rev2 > rev1);
     assert.equal(
@@ -175,11 +171,9 @@ test("undo restores the previous effective state and redo reapplies the undone s
     store.ingest(file, readFileSync(file, "utf-8"));
 
     await store.applyPatch("test-project", { tasks: { t1: { status: "in_progress" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
     const rev2 = store.get("test-project").rev;
 
     await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
     const rev3 = store.get("test-project").rev;
     assert.equal(JSON.parse(readFileSync(file, "utf-8")).tasks.find((t) => t.id === "t1").status, "complete");
 
@@ -212,7 +206,6 @@ test("redo requires the latest history event to be an undo", async () => {
     store.ingest(file, readFileSync(file, "utf-8"));
 
     await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
 
     const redo = await store.redo("test-project");
     assert.equal(redo.ok, false);
@@ -231,10 +224,8 @@ test("getSince returns only events after fromRev", async () => {
     store.ingest(file, readFileSync(file, "utf-8"));
 
     await store.applyPatch("test-project", { tasks: { t1: { status: "in_progress" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
 
     await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
 
     const currentRev = store.get("test-project").rev;
     const sinceRev1 = store.getSince("test-project", 1);
@@ -254,7 +245,6 @@ test("revisions lists every recorded rev", async () => {
     writeFileSync(file, JSON.stringify(validProject()));
     store.ingest(file, readFileSync(file, "utf-8"));
     await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
 
     const revs = store.revisions("test-project");
     assert.ok(revs.length >= 2);
@@ -276,9 +266,7 @@ test("history returns recent events with truncation metadata", async () => {
     store.ingest(file, readFileSync(file, "utf-8"));
 
     await store.applyPatch("test-project", { tasks: { t1: { status: "in_progress" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
     await store.applyPatch("test-project", { tasks: { t1: { status: "complete" } } });
-    store.ingest(file, readFileSync(file, "utf-8"));
 
     const history = store.history("test-project", { limit: 2 });
     assert.equal(history.events.length, 2);

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -72,6 +72,8 @@ test("symlink target edits propagate through the dedicated polling watcher", asy
 
     const initial = await fetch(`http://127.0.0.1:${port}/api/projects/linked`);
     assert.equal(initial.status, 200);
+    const initialBody = await initial.json();
+    assert.equal(initialBody.file, realpathSync(targetPath));
 
     // Edit the symlink target directly (not the workspace symlink) — the
     // polling watcher for the linked target must pick this up.

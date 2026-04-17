@@ -125,13 +125,20 @@ const MIME = {
 };
 
 function projectPayload(slug, entry) {
-  if (!entry) return { slug, data: null, derived: null, error: null };
+  if (!entry) return { slug, data: null, derived: null, error: null, file: null };
+  let file = entry.path || null;
+  if (file) {
+    try {
+      file = realpathSync(file);
+    } catch {}
+  }
   return {
     slug,
     data: entry.data,
     derived: entry.derived,
     rev: entry.rev,
-    error: entry.error || null
+    error: entry.error || null,
+    file
   };
 }
 
@@ -522,10 +529,20 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       });
     }
     const entry = store.get(req.params.slug);
+    if (r.noop !== true && entry) {
+      broadcast({
+        type: "UPDATE",
+        slug: req.params.slug,
+        project: projectPayload(req.params.slug, entry)
+      });
+    }
     res.json({
       ok: true,
-      rev: entry?.rev ?? null,
-      notes: r.notes
+      rev: r.rev ?? entry?.rev ?? null,
+      updatedAt: entry?.data?.meta?.updatedAt ?? null,
+      file: projectPayload(req.params.slug, entry).file,
+      notes: r.notes,
+      noop: r.noop === true
     });
   });
 
@@ -811,6 +828,13 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       } catch {}
       return;
     }
+    if (r.noop !== true) {
+      broadcast({
+        type: "UPDATE",
+        slug,
+        project: projectPayload(slug, store.get(slug))
+      });
+    }
     try {
       const { unlinkSync } = await import("node:fs");
       unlinkSync(patchPath);
@@ -851,7 +875,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       });
       trackLinkedTarget(result.slug);
     }
-    if (broadcastUpdate && result?.slug && result?.event) {
+    if (broadcastUpdate && result?.slug && result?.event && result?.noop !== true) {
       broadcast({
         type: result.event,
         slug: result.slug,
