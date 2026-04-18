@@ -5,6 +5,7 @@ import {
   realpathSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync
 } from "node:fs";
@@ -22,6 +23,10 @@ function atomicWriteJson(file, data) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, JSON.stringify(data, null, 2));
   renameSync(tmp, file);
+}
+
+function sameValue(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function ensureOverlayDir(workspace) {
@@ -69,6 +74,17 @@ export function readRuntimeOverlay(workspace, slug) {
   }
 }
 
+function overlayFileIsStaleComparedToTarget(workspace, slug, trackerPath) {
+  const overlayFile = runtimeOverlayPath(workspace, slug);
+  if (!existsSync(overlayFile)) return false;
+  try {
+    const targetFile = durableWritePath(trackerPath, true);
+    return statSync(targetFile).mtimeMs > statSync(overlayFile).mtimeMs;
+  } catch {
+    return false;
+  }
+}
+
 export function clearRuntimeOverlay(workspace, slug) {
   const file = runtimeOverlayPath(workspace, slug);
   if (!existsSync(file)) return;
@@ -103,15 +119,107 @@ export function applyRuntimeOverlay(baseProject, overlay) {
   return data;
 }
 
-export function loadProjectWithRuntimeOverlay({ workspace, slug, trackerPath, baseProject }) {
+function applyBaseRuntimeOverrides(baseProject, overlayAppliedProject, overlay) {
+  const data = clone(overlayAppliedProject);
+  if (!overlay || !data) return data;
+
+  if (data.meta && baseProject?.meta) {
+    for (const field of META_RUNTIME_FIELDS) {
+      const baseHas = field in baseProject.meta;
+      const overlayHas = !!overlay.meta && field in overlay.meta;
+      if (!overlayHas) continue;
+      if (baseHas && !sameValue(baseProject.meta[field], overlay.meta[field])) {
+        data.meta[field] = clone(baseProject.meta[field]);
+      } else if (!baseHas) {
+        delete data.meta[field];
+      }
+    }
+  }
+
+  if (Array.isArray(data.tasks) && Array.isArray(baseProject?.tasks)) {
+    const baseById = new Map(baseProject.tasks.map((task) => [task.id, task]));
+    data.tasks = data.tasks.map((task) => {
+      const baseTask = baseById.get(task.id);
+      const overlayTask = overlay.tasks?.[task.id];
+      if (!baseTask || !overlayTask) return task;
+      const next = { ...task };
+      for (const field of TASK_RUNTIME_FIELDS) {
+        const baseHas = field in baseTask;
+        const overlayHas = field in overlayTask;
+        if (!overlayHas) continue;
+        if (baseHas && !sameValue(baseTask[field], overlayTask[field])) {
+          next[field] = clone(baseTask[field]);
+        } else if (!baseHas) {
+          delete next[field];
+        }
+      }
+      return next;
+    });
+  }
+
+  return data;
+}
+
+function applyChangedBaseRuntimeFields(baseProject, overlayAppliedProject, previousBaseProject) {
+  const data = clone(overlayAppliedProject);
+  if (!previousBaseProject || !data) return data;
+
+  if (data.meta && baseProject?.meta && previousBaseProject?.meta) {
+    for (const field of META_RUNTIME_FIELDS) {
+      if (sameValue(baseProject.meta[field], previousBaseProject.meta[field])) continue;
+      if (field in baseProject.meta) {
+        data.meta[field] = clone(baseProject.meta[field]);
+      } else {
+        delete data.meta[field];
+      }
+    }
+  }
+
+  if (Array.isArray(data.tasks) && Array.isArray(baseProject?.tasks) && Array.isArray(previousBaseProject?.tasks)) {
+    const baseById = new Map(baseProject.tasks.map((task) => [task.id, task]));
+    const previousById = new Map(previousBaseProject.tasks.map((task) => [task.id, task]));
+    data.tasks = data.tasks.map((task) => {
+      const baseTask = baseById.get(task.id);
+      const previousTask = previousById.get(task.id);
+      if (!baseTask || !previousTask) return task;
+      const next = { ...task };
+      for (const field of TASK_RUNTIME_FIELDS) {
+        if (sameValue(baseTask[field], previousTask[field])) continue;
+        if (field in baseTask) {
+          next[field] = clone(baseTask[field]);
+        } else {
+          delete next[field];
+        }
+      }
+      return next;
+    });
+  }
+
+  return data;
+}
+
+export function loadProjectWithRuntimeOverlay({
+  workspace,
+  slug,
+  trackerPath,
+  baseProject,
+  previousBaseProject = null
+}) {
   const overlayEnabled = isOverlayBackedTracker(trackerPath);
   const base = clone(baseProject);
   if (!overlayEnabled) {
     return { base, data: clone(baseProject), overlayEnabled };
   }
+  const overlay = readRuntimeOverlay(workspace, slug);
+  const preferBaseRuntime = overlayFileIsStaleComparedToTarget(workspace, slug, trackerPath);
+  const overlaid = applyRuntimeOverlay(baseProject, overlay);
   return {
     base,
-    data: applyRuntimeOverlay(baseProject, readRuntimeOverlay(workspace, slug)),
+    data: previousBaseProject
+      ? applyChangedBaseRuntimeFields(baseProject, overlaid, previousBaseProject)
+      : preferBaseRuntime
+        ? applyBaseRuntimeOverrides(baseProject, overlaid, overlay)
+        : overlaid,
     overlayEnabled
   };
 }

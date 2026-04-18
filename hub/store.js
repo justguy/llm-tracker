@@ -168,7 +168,7 @@ export class Store {
     });
   }
 
-  _loadProjectState(slug, filePath, rawContents = null, notes = null) {
+  _loadProjectState(slug, filePath, rawContents = null, notes = null, previousBaseProject = null) {
     const raw = typeof rawContents === "string" ? rawContents : readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     const normalized = normalizeProjectStatuses(parsed, notes).data;
@@ -176,7 +176,8 @@ export class Store {
       workspace: this.workspace,
       slug,
       trackerPath: filePath,
-      baseProject: normalized
+      baseProject: normalized,
+      previousBaseProject
     });
   }
 
@@ -264,15 +265,20 @@ export class Store {
     const slug = slugFromFile(filePath);
     if (!slug) return { ok: false, reason: "not-a-tracker" };
 
+    let prev = this.projects.get(slug);
     let loadedIncoming;
     try {
       const normalizationNotes = { warnings: [] };
-      loadedIncoming = this._loadProjectState(slug, filePath, rawContents, normalizationNotes);
+      loadedIncoming = this._loadProjectState(
+        slug,
+        filePath,
+        rawContents,
+        normalizationNotes,
+        prev?.base || null
+      );
       let incoming = normalizeProjectStatuses(loadedIncoming.data, normalizationNotes).data;
       const incomingBase = loadedIncoming.base;
       const overlayEnabled = loadedIncoming.overlayEnabled;
-      
-      let prev = this.projects.get(slug);
 
       // Cold-start resume: if we don't have in-memory state but incoming matches
       // a known snapshot at incoming.meta.rev, adopt without bumping.
