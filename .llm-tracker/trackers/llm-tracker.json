@@ -45,9 +45,9 @@
         "label": "P3 / Later"
       }
     ],
-    "scratchpad": "t21 complete. The existing theme switch now drives A2 light tokens and the calmer Variant-C dark tokens, with Inter + JetBrains Mono loaded at the UI entrypoint. node --test passed out of sandbox.",
-    "rev": 23,
-    "updatedAt": "2026-04-18T15:32:30.419Z"
+    "scratchpad": "t27 inline drawer + t28 collapsed-row polish landed locally. Reusable task-intelligence views, focused UI tests, and node --check all pass. Pending live UI smoke before re-closing t23/t27/t28.",
+    "rev": 24,
+    "updatedAt": "2026-04-18T15:47:53.562Z"
   },
   "tasks": [
     {
@@ -528,7 +528,7 @@
       "id": "t22",
       "title": "Rebuild top bar: project + agent/history clusters + slash-K slot + overflow",
       "goal": "Replace the 14 amber header buttons with a 52px top bar: project name + REV badge on the left, and agent cluster ([NEXT][BLOCKERS][CHANGED][DECISIONS]) + history cluster ([UNDO][REDO]) + the slash-K input + overflow dot menu on the right.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p0"
@@ -618,9 +618,11 @@
         "tags": [
           "redesign",
           "card"
-        ]
+        ],
+        "notes": "Card function reworked in ui/app.js with three tiers (id+title / summary clamp / meta row) plus the bracket action row and preserved drag/delete/comment behaviors."
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "claude-sonnet-4-6"
     },
     {
       "dependencies": [
@@ -630,7 +632,7 @@
       "id": "t26",
       "title": "Collapse scratchpad to one-line NOTE row with expand/edit",
       "goal": "Render the scratchpad as a 36px truncated row (NOTE label + ellipsis text + edited timestamp + [EXPAND] [EDIT] soft brackets); [EXPAND] grows to a full-width box, [EDIT] swaps in an inline textarea that saves via PATCH meta.scratchpad on cmd+enter.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p1"
@@ -643,9 +645,11 @@
         "tags": [
           "redesign",
           "scratchpad"
-        ]
+        ],
+        "notes": "ScratchpadRow replaced the old block with a 36px NOTE row, inline expand/edit controls, and cmd+enter save via PATCH meta.scratchpad."
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "claude-sonnet-4-6"
     },
     {
       "dependencies": [
@@ -654,7 +658,7 @@
       "id": "t27",
       "title": "Replace task modal with inline task drawer",
       "goal": "Expand the task card in place to render the brief pack (goal, dependencies, references, snippets, recent history) instead of opening the current overlay modal; keep the board visible as context. [WHY]/[EXEC]/[VERIFY] content shapes land in t35.",
-      "status": "not_started",
+      "status": "in_progress",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p1"
@@ -668,9 +672,22 @@
           "redesign",
           "drawer",
           "brief"
-        ]
+        ],
+        "files_touched": [
+          "ui/app.js",
+          "ui/task-drawer.js",
+          "ui/modals/intelligence.js",
+          "ui/modals/intelligence-shared.js",
+          "ui/modals/task-intelligence-view.js",
+          "ui/modals/project-intelligence-view.js",
+          "test/ui-intelligence.test.js",
+          "ui/styles.css"
+        ],
+        "notes": "Task detail now expands inline under the active card instead of opening the task modal. The drawer reuses TaskIntelligenceView, fetches the brief pack directly, and keeps WHY/EXEC/VERIFY as visible t35 placeholders while focused tests and node --check pass."
       },
-      "effort": "l"
+      "effort": "l",
+      "assignee": "codex",
+      "outcome": "partial_slice_landed"
     },
     {
       "dependencies": [
@@ -680,7 +697,7 @@
       "id": "t28",
       "title": "Refresh collapsed swimlane rows to 44px status strip",
       "goal": "Render each collapsed lane as a single 44px row (lane name + optional LIVE dot + tasks/active/done counts + inline progress bar + percentage), with a 1px ink-3 hover accent and up/down brackets that fade in on hover.",
-      "status": "not_started",
+      "status": "in_progress",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p2"
@@ -693,9 +710,16 @@
         "tags": [
           "redesign",
           "swimlanes"
-        ]
+        ],
+        "files_touched": [
+          "ui/app.js",
+          "ui/styles.css"
+        ],
+        "notes": "Collapsed swimlane row now enforces the 44px strip, a 1px ink-3 hover accent, focus-visible bracket fade, and an optional LIVE badge via lane.live while keeping the existing expand and move controls."
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "codex",
+      "outcome": "partial_slice_landed"
     },
     {
       "dependencies": [
@@ -770,7 +794,7 @@
       "id": "t31",
       "title": "Implement Bracket button primitive",
       "goal": "Single reusable component with variants default | active | soft | tone=ok|warn|block that renders correctly in light and dark; consumed by top bar (t22), task card (t25), scratchpad (t26), lane rows (t28), and the hero callout (t23).",
-      "status": "in_progress",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p0"
@@ -784,7 +808,8 @@
           "redesign",
           "primitive",
           "bracket"
-        ]
+        ],
+        "notes": "Bracket primitive added at ui/app.js:181 + styles at ui/styles.css:2398-2450. Variants: default / active / soft / tone=ok|warn|block. Tone modifiers compose with active via compound rules. Callers pass inner text only (label=\"NEXT\" renders [NEXT]). Commit 1b67216."
       },
       "effort": "s",
       "assignee": "claude-sonnet-4-6"

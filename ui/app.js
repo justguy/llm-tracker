@@ -4,7 +4,7 @@ import { html } from "htm/preact";
 import { buildHeroReason, buildHeroSummary } from "./lib/hero-strip.js";
 import { buildCardMetaFacts } from "./lib/intelligence.js";
 import { HistoryModal } from "./modals/history.js";
-import { ProjectIntelligenceModal } from "./modals/intelligence.js";
+import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
 import { TaskInlineDrawer } from "./task-drawer.js";
 import { humanizeTaskOutcome } from "./task-outcomes.js";
 
@@ -366,7 +366,8 @@ function Card({
   onDragEnd,
   onDelete,
   onSaveComment,
-  onOpenTask
+  onToggleExpand,
+  onOpenTaskModal
 }) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
@@ -394,7 +395,7 @@ function Card({
       data-task-id=${task.id}
       onDragStart=${(e) => onDragStart(e, task)}
       onDragEnd=${onDragEnd}
-      onClick=${() => onOpenTask && onOpenTask(task, "brief")}
+      onClick=${() => onToggleExpand && onToggleExpand(task)}
     >
       <button
         class="card-delete"
@@ -469,21 +470,30 @@ function Card({
       </div>
 
       <div class="card__action-row" onMouseDown=${(e) => e.stopPropagation()}>
+        <${Bracket}
+          label="READ"
+          active=${expanded}
+          title=${`Brief for ${task.id} — expand inline`}
+          onClick=${(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onToggleExpand && onToggleExpand(task);
+          }}
+        />
         ${[
-          ["brief", "READ"],
-          ["why", "WHY", false],
-          ["execute", "EXEC", false],
-          ["verify", "VERIFY", false]
+          ["why", "WHY"],
+          ["execute", "EXEC"],
+          ["verify", "VERIFY"]
         ].map(([mode, label]) => html`
           <${Bracket}
             key=${mode}
             label=${label}
-            active=${expanded ? activeMode === mode : mode === "brief"}
-            title=${`${label} ${task.id}`}
+            title=${`${label} — ${task.id}`}
             onClick=${(e) => {
               e.stopPropagation();
               e.preventDefault();
-              onOpenTask && onOpenTask(task, mode);
+              // TODO(t35): inline WHY/EXEC/VERIFY content
+              onOpenTaskModal && onOpenTaskModal(task, mode);
             }}
           />
         `)}
@@ -516,7 +526,8 @@ function Cell({
   onDeleteTask,
   onSaveComment,
   onOpenTask,
-  onCloseTask
+  onCloseTask,
+  onOpenTaskModal
 }) {
   const ref = useRef(null);
   const [over, setOver] = useState(false);
@@ -608,14 +619,15 @@ function Cell({
               onDragEnd=${() => setDragState({ taskId: null })}
               onDelete=${onDeleteTask}
               onSaveComment=${onSaveComment}
-              onOpenTask=${onOpenTask}
+              onToggleExpand=${(task) => onOpenTask && onOpenTask(task, "brief")}
+              onOpenTaskModal=${onOpenTaskModal}
             />
             ${activeTask?.id === t.id
               ? html`<${TaskInlineDrawer}
                   slug=${slug}
                   task=${activeTask}
-                  initialMode=${activeTaskMode || "brief"}
-                  onOpenTask=${onOpenTask}
+                  onOpenTask=${(taskId, mode) => onOpenTask && onOpenTask({ id: taskId }, mode)}
+                  onOpenTaskModal=${onOpenTaskModal}
                   onClose=${onCloseTask}
                 />`
               : null}
@@ -642,7 +654,8 @@ function Matrix({
   onDeleteTask,
   onSaveComment,
   onOpenTask,
-  onCloseTask
+  onCloseTask,
+  onOpenTaskModal
 }) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
@@ -809,6 +822,7 @@ function Matrix({
             onSaveComment=${onSaveComment}
             onOpenTask=${onOpenTask}
             onCloseTask=${onCloseTask}
+            onOpenTaskModal=${onOpenTaskModal}
           />
         `
       )}
@@ -927,6 +941,7 @@ function ProjectPane({
   openTaskId,
   openTaskMode,
   onCloseTask,
+  onOpenTaskModal,
   scratchpadExpanded,
   onToggleScratchpad,
   onSaveScratchpad
@@ -995,6 +1010,7 @@ function ProjectPane({
             onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
             onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
             onCloseTask=${onCloseTask}
+            onOpenTaskModal=${(task, mode) => onOpenTaskModal && onOpenTaskModal(slug, task, mode)}
           />`
         : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
     </section>
@@ -1866,6 +1882,7 @@ function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [projectIntel, setProjectIntel] = useState(null);
   const [taskDrawer, setTaskDrawer] = useState(null);
+  const [taskModal, setTaskModal] = useState(null);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
 
@@ -2098,7 +2115,21 @@ function App() {
       : taskOrId;
     if (!task?.id) return;
     setActiveSlug(slug);
-    setTaskDrawer({ slug, taskId: task.id, mode: initialMode });
+    if (taskDrawer?.slug === slug && taskDrawer?.taskId === task.id) {
+      setTaskDrawer(null);
+    } else {
+      setTaskDrawer({ slug, taskId: task.id, mode: initialMode });
+    }
+  };
+
+  const onOpenTaskModalHandler = (slug, taskOrId, mode = "brief") => {
+    if (!slug || !taskOrId) return;
+    const projectTasks = projects[slug]?.data?.tasks || [];
+    const task = typeof taskOrId === "string"
+      ? projectTasks.find((item) => item.id === taskOrId) || { id: taskOrId, title: taskOrId }
+      : taskOrId;
+    if (!task?.id) return;
+    setTaskModal({ slug, task, mode });
   };
 
   const onOpenProjectIntel = (initialMode = "next") => {
@@ -2294,6 +2325,15 @@ function App() {
         onClose=${() => setProjectIntel(null)}
       />`
     : null;
+  const taskModalEl = taskModal
+    ? html`<${TaskIntelligenceModal}
+        slug=${taskModal.slug}
+        task=${taskModal.task}
+        initialMode=${taskModal.mode}
+        onOpenTask=${(taskId, mode) => onOpenTaskDrawer(taskModal.slug, taskId, mode)}
+        onClose=${() => setTaskModal(null)}
+      />`
+    : null;
 
   const shellPinned = drawerOpen && drawerPinned;
   const shellClass = `app-shell ${shellPinned ? "drawer-pinned" : ""}`;
@@ -2349,6 +2389,7 @@ function App() {
         ${helpEl}
         ${settingsEl}
         ${historyEl}
+        ${taskModalEl}
       </div>
     `;
   }
@@ -2393,6 +2434,7 @@ function App() {
         ${settingsEl}
         ${historyEl}
         ${projectIntelEl}
+        ${taskModalEl}
       </div>
     `;
   }
@@ -2475,6 +2517,7 @@ function App() {
             onCloseTask=${() =>
               setTaskDrawer((current) => (current?.slug === s ? null : current))
             }
+            onOpenTaskModal=${(task, mode) => onOpenTaskModalHandler(s, task, mode)}
             scratchpadExpanded=${!!scratchpadExpanded[s]}
             onToggleScratchpad=${onToggleScratchpad}
             onSaveScratchpad=${onSaveScratchpad}
@@ -2487,6 +2530,7 @@ function App() {
       ${settingsEl}
       ${historyEl}
       ${projectIntelEl}
+      ${taskModalEl}
     </div>
   `;
 }

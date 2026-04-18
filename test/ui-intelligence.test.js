@@ -7,7 +7,24 @@ import {
   historyActionText,
   isIntelModeLoading
 } from "../ui/lib/intelligence.js";
+import { TaskIntelligenceView } from "../ui/modals/task-intelligence-view.js";
 import { humanizeTaskOutcome, TASK_OUTCOME_VALUES } from "../ui/task-outcomes.js";
+
+function collectVNodeText(node) {
+  if (Array.isArray(node)) {
+    return node.map((item) => collectVNodeText(item)).join(" ");
+  }
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return "";
+  }
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (typeof node.type === "function") {
+    return collectVNodeText(node.type(node.props || {}));
+  }
+  return collectVNodeText(node.props?.children);
+}
 
 test("defaultChangedFromRev clamps at zero", () => {
   assert.equal(defaultChangedFromRev(null), 0);
@@ -77,4 +94,51 @@ test("isIntelModeLoading derives loading per mode from cache and errors", () => 
   assert.equal(isIntelModeLoading({ why: { packType: "why" } }, {}, "why"), false);
   assert.equal(isIntelModeLoading({}, { why: "request failed" }, "why"), false);
   assert.equal(isIntelModeLoading({}, {}, null), false);
+});
+
+test("TaskIntelligenceView renders reusable task intelligence sections for drawer consumers", () => {
+  const vnode = TaskIntelligenceView({
+    task: {
+      id: "t7",
+      title: "Prepare inline drawer reuse",
+      status: "in_progress",
+      priorityId: "p0",
+      swimlaneId: "exec"
+    },
+    mode: "why",
+    payload: {
+      task: {
+        id: "t7",
+        title: "Prepare inline drawer reuse",
+        status: "in_progress",
+        priorityId: "p0",
+        swimlaneId: "exec",
+        goal: "Share the task intelligence view across shells",
+        comment: "Keep modal behavior unchanged",
+        blocker_reason: "Waiting on reuse-ready exports"
+      },
+      why: [{ kind: "unblock", text: "Drawer work depends on the shared task view" }],
+      blockedBy: [{ id: "t6", title: "Prep shared helpers", status: "done" }],
+      unblocks: [{ id: "t8", title: "Wire inline drawer", status: "not_started" }],
+      references: [{ value: "ui/modals/intelligence.js:1", selectedBecause: "current task shell" }],
+      recentHistory: [{ rev: 14, ts: "2026-04-18T00:00:00.000Z", summary: [{ kind: "edit", id: "t7" }] }],
+      truncation: { history: { returned: 1 } }
+    },
+    error: null,
+    loading: false,
+    onRetry() {},
+    onSelectMode() {},
+    onOpenTask() {}
+  });
+
+  const text = collectVNodeText(vnode).replace(/\s+/g, " ").trim();
+
+  assert.match(text, /\[READ\]/);
+  assert.match(text, /\[WHY\]/);
+  assert.match(text, /Prepare inline drawer reuse/);
+  assert.match(text, /Share the task intelligence view across shells/);
+  assert.match(text, /Keep modal behavior unchanged/);
+  assert.match(text, /Waiting on reuse-ready exports/);
+  assert.match(text, /Drawer work depends on the shared task view/);
+  assert.match(text, /ui\/modals\/intelligence\.js:1/);
 });
