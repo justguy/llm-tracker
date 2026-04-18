@@ -7,6 +7,7 @@ import { HistoryModal } from "./modals/history.js";
 import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
 import { TaskInlineDrawer } from "./task-drawer.js";
 import { humanizeTaskOutcome } from "./task-outcomes.js";
+import { CommandPalette } from "./palette.js";
 
 const STATUS_ORDER = ["complete", "in_progress", "not_started", "deferred"];
 
@@ -1496,7 +1497,8 @@ function Header({
   onRedo,
   onDeleteProject,
   onCollapseAll,
-  onExpandAll
+  onExpandAll,
+  onOpenPalette
 }) {
   const meta = project?.data?.meta;
   const projectName = meta?.name || activeSlug || "AWAITING PROJECT";
@@ -1634,8 +1636,8 @@ function Header({
 
         <div
           class="top-bar__palette"
-          onClick=${() => console.info("⌘K: palette stub — t24 wires the real command palette")}
-          title="Search and run commands (coming soon)"
+          onClick=${() => onOpenPalette && onOpenPalette()}
+          title="Search and run commands (⌘K)"
         >
           <span class="top-bar__palette-hint">⌘K</span>
           <span class="top-bar__palette-text">filter · search · run command</span>
@@ -1883,6 +1885,7 @@ function App() {
   const [projectIntel, setProjectIntel] = useState(null);
   const [taskDrawer, setTaskDrawer] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
 
@@ -1911,6 +1914,18 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("theme-light", theme === "light");
   }, [theme]);
+
+  // Global ⌘K / Ctrl+K toggle
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   useEffect(() => {
     fetch("/api/workspace").then((r) => r.json()).then(setWorkspace).catch(() => {});
@@ -2162,6 +2177,27 @@ function App() {
 
   const onToggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
+  const paletteActions = [
+    { label: "Collapse all lanes",        icon: "⊟", run: () => onCollapseAll() },
+    { label: "Expand all lanes",          icon: "⊠", run: () => onExpandAll() },
+    { label: "Jump to Recommended Next",  icon: "→", run: () => onOpenProjectIntel("next") },
+    { label: "Show blockers",             icon: "⚠", run: () => onOpenProjectIntel("blockers") },
+    { label: "Show changed since rev",    icon: "Δ", run: () => onOpenProjectIntel("changed") },
+    { label: "Show decisions",            icon: "◈", run: () => onOpenProjectIntel("decisions") },
+    { label: "Undo",                      icon: "↩", hint: "U", run: () => onUndo() },
+    { label: "Redo",                      icon: "↪", hint: "R", run: () => onRedo() },
+    { label: "Open history",              icon: "⎌", run: () => setHistoryOpen(true) },
+    { label: "Open overview drawer",      icon: "◧", run: () => setDrawerOpen(true) },
+    { label: "Open settings",             icon: "⚙", run: () => setSettingsOpen(true) },
+    { label: "Open help",                 icon: "?", run: () => setHelpOpen(true) },
+    { label: "Toggle theme",              icon: "☼", hint: theme, run: () => onToggleTheme() },
+    ...Object.keys(projects).sort().map((s) => ({
+      label: `Switch project: ${projects[s]?.data?.meta?.name || s}`,
+      icon: "◧",
+      run: () => { setActiveSlug(s); if (!drawerPinned) setDrawerOpen(false); }
+    }))
+  ];
+
   const onTogglePin = () => setDrawerPinned((p) => !p);
 
   const onTogglePinProject = (slug) => {
@@ -2358,6 +2394,18 @@ function App() {
         onToggleDrawerPin=${onTogglePin}
       />`
     : null;
+  const paletteEl = html`
+    <${CommandPalette}
+      open=${paletteOpen}
+      onClose=${() => setPaletteOpen(false)}
+      projects=${projects}
+      activeSlug=${activeSlug}
+      actions=${paletteActions}
+      onOpenTaskDrawer=${onOpenTaskDrawer}
+      setActive=${setActiveSlug}
+      onToggleCollapse=${onToggleCollapse}
+    />
+  `;
   const validPinned = pinnedSlugs.filter((s) => projects[s]);
   const paneSlugs = validPinned.length > 0 ? validPinned : [activeSlug];
   const pinnedProjectNames = paneSlugs
@@ -2394,6 +2442,7 @@ function App() {
           onDeleteProject=${onDeleteProject}
           onCollapseAll=${onCollapseAll}
           onExpandAll=${onExpandAll}
+          onOpenPalette=${() => setPaletteOpen(true)}
         />
         <${EmptyState} workspace=${workspace} onOpenHelp=${() => setHelpOpen(true)} />
         <${ConnectionPip} up=${wsUp} />
@@ -2402,6 +2451,7 @@ function App() {
         ${settingsEl}
         ${historyEl}
         ${taskModalEl}
+        ${paletteEl}
       </div>
     `;
   }
@@ -2437,6 +2487,7 @@ function App() {
           onDeleteProject=${onDeleteProject}
           onCollapseAll=${onCollapseAll}
           onExpandAll=${onExpandAll}
+          onOpenPalette=${() => setPaletteOpen(true)}
         />
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
         <div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>
@@ -2447,6 +2498,7 @@ function App() {
         ${historyEl}
         ${projectIntelEl}
         ${taskModalEl}
+        ${paletteEl}
       </div>
     `;
   }
@@ -2483,6 +2535,7 @@ function App() {
         onDeleteProject=${onDeleteProject}
         onCollapseAll=${onCollapseAll}
         onExpandAll=${onExpandAll}
+        onOpenPalette=${() => setPaletteOpen(true)}
       />
       <${HeroStrip}
         project=${active}
@@ -2543,6 +2596,7 @@ function App() {
       ${historyEl}
       ${projectIntelEl}
       ${taskModalEl}
+      ${paletteEl}
     </div>
   `;
 }

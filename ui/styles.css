@@ -3438,3 +3438,143 @@ html.theme-light .cell.lane-cell--drag-over {
   background: var(--bg);
 }
 
+/* ─── Command palette (t24) ─── */
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.palette-panel {
+  width: 100%;
+  max-width: 640px;
+  margin-top: 84px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.palette-mode {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 1px;
+  padding: 6px 18px 0;
+  user-select: none;
+}
+
+.palette-input {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 18px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 14px 18px;
+  caret-color: var(--accent);
+}
+
+.palette-input::placeholder {
+  color: var(--ink-3);
+}
+
+.palette-divider {
+  height: 1px;
+  background: var(--rule);
+  flex-shrink: 0;
+}
+
+.palette-results {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.palette-row:hover,
+.palette-row--active {
+  background: var(--pill);
+}
+
+.palette-row--info {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  cursor: default;
+  padding: 10px 14px;
+}
+
+.palette-row--info:hover {
+  background: transparent;
+}
+
+.palette-row__icon {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.palette-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.palette-row__label {
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.palette-row__sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.palette-row__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.palette-footer {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  padding: 6px 14px;
+  border-top: 1px solid var(--rule);
+  user-select: none;
+}
+
+html.theme-light .palette-backdrop { background: rgba(0, 0, 0, 0.25); }
+html.theme-light .palette-panel { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); }
+
