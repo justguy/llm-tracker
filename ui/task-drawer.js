@@ -54,16 +54,7 @@ const PRIORITY_LABEL = {
   p3: "P3",
 };
 
-function DrawerSection({ label, children, empty = "— none —" }) {
-  return html`
-    <div class="card__drawer-section">
-      <div class="card__drawer-label">${label}</div>
-      <div class="card__drawer-body">
-        ${children ?? html`<span class="card__drawer-placeholder">${empty}</span>`}
-      </div>
-    </div>
-  `;
-}
+const NONE = html`<span class="card__drawer-placeholder">— none —</span>`;
 
 function BriefContent({ payload, onOpenTask }) {
   if (!payload) return null;
@@ -75,37 +66,52 @@ function BriefContent({ payload, onOpenTask }) {
   const history = payload.recentHistory || [];
 
   return html`
-    <${DrawerSection} label="GOAL">
-      ${goal ? html`<p class="card__drawer-body">${goal}</p>` : null}
-    </${DrawerSection}>
+    <div class="card__drawer-section">
+      <div class="card__drawer-label">GOAL</div>
+      <div class="card__drawer-body">
+        ${goal ? html`<p style="margin:0">${goal}</p>` : NONE}
+      </div>
+    </div>
 
-    <${DrawerSection} label="DEPENDENCIES">
-      ${deps.length > 0
-        ? html`<${TaskSummaryList} items=${deps} empty="none" onOpenTask=${onOpenTask} />`
-        : null}
-    </${DrawerSection}>
+    <div class="card__drawer-section">
+      <div class="card__drawer-label">DEPENDENCIES</div>
+      <div class="card__drawer-body">
+        ${deps.length > 0
+          ? html`<${TaskSummaryList} items=${deps} empty="none" onOpenTask=${onOpenTask} />`
+          : NONE}
+      </div>
+    </div>
 
-    <${DrawerSection} label="REFERENCES">
-      ${refs.length > 0
-        ? html`<${ReferenceList} items=${refs} />`
-        : null}
-    </${DrawerSection}>
+    <div class="card__drawer-section">
+      <div class="card__drawer-label">REFERENCES</div>
+      <div class="card__drawer-body">
+        ${refs.length > 0
+          ? html`<${ReferenceList} items=${refs} />`
+          : NONE}
+      </div>
+    </div>
 
-    <${DrawerSection} label="SNIPPETS">
-      ${snippets.length > 0
-        ? html`<${SnippetList} items=${snippets} />`
-        : null}
-    </${DrawerSection}>
+    <div class="card__drawer-section">
+      <div class="card__drawer-label">SNIPPETS</div>
+      <div class="card__drawer-body">
+        ${snippets.length > 0
+          ? html`<${SnippetList} items=${snippets} />`
+          : NONE}
+      </div>
+    </div>
 
-    <${DrawerSection} label="RECENT HISTORY">
-      ${history.length > 0
-        ? html`<${HistoryList} items=${history} />`
-        : null}
-    </${DrawerSection}>
+    <div class="card__drawer-section">
+      <div class="card__drawer-label">RECENT HISTORY</div>
+      <div class="card__drawer-body">
+        ${history.length > 0
+          ? html`<${HistoryList} items=${history} />`
+          : NONE}
+      </div>
+    </div>
   `;
 }
 
-export function TaskInlineDrawer({ slug, task, initialMode = "brief", onOpenTask, onOpenTaskModal, onClose }) {
+export function TaskInlineDrawer({ slug, task, onOpenTask, onOpenTaskModal, onClose }) {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -151,16 +157,6 @@ export function TaskInlineDrawer({ slug, task, initialMode = "brief", onOpenTask
 
   const status = task?.status || "not_started";
   const priority = task?.placement?.priorityId || null;
-
-  const handleTabClick = (mode) => {
-    if (mode === "brief") {
-      // [READ] toggles the drawer closed (re-clicking current tab closes)
-      onClose();
-    } else {
-      // TODO(t35): inline WHY/EXEC/VERIFY content
-      onOpenTaskModal && onOpenTaskModal(task, mode);
-    }
-  };
 
   return html`
     <div

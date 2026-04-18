@@ -1010,7 +1010,7 @@ function ProjectPane({
             onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
             onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
             onCloseTask=${onCloseTask}
-            onOpenTaskModal=${(task, mode) => onOpenTaskModal && onOpenTaskModal(slug, task, mode)}
+            onOpenTaskModal=${onOpenTaskModal}
           />`
         : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
     </section>
@@ -2230,6 +2230,18 @@ function App() {
       setTaskDrawer(null);
     }
   }, [taskDrawer, projects]);
+
+  useEffect(() => {
+    if (!taskModal) return;
+    const project = projects[taskModal.slug];
+    if (!project?.data) {
+      setTaskModal(null);
+      return;
+    }
+    if (!project.data.tasks.some((t) => t.id === taskModal.task?.id)) {
+      setTaskModal(null);
+    }
+  }, [taskModal, projects]);
 
   const onDeleteTask = async (slug, task) => {
     if (!slug) return;
