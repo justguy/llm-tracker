@@ -570,9 +570,17 @@ function Cell({
     onDrop({ taskId: dragState.taskId, swimlaneId: laneId, priorityId, targetIndex: idx });
   };
 
+  const isOrigin = dragState.taskId &&
+    dragState.originLaneId === laneId &&
+    dragState.originPriorityId === priorityId;
+
   return html`
     <div
-      class=${`cell ${over ? "drop-target" : ""}`}
+      class=${[
+        "cell",
+        over ? "lane-cell--drag-over" : "",
+        isOrigin ? "lane-cell--drag-origin" : "",
+      ].filter(Boolean).join(" ")}
       ref=${ref}
       onDragOver=${handleDragOver}
       onDragLeave=${handleDragLeave}
@@ -595,7 +603,7 @@ function Cell({
               onDragStart=${(e, task) => {
                 e.dataTransfer.effectAllowed = "move";
                 e.dataTransfer.setData("text/plain", task.id);
-                setDragState({ taskId: task.id });
+                setDragState({ taskId: task.id, originLaneId: laneId, originPriorityId: priorityId });
               }}
               onDragEnd=${() => setDragState({ taskId: null })}
               onDelete=${onDeleteTask}
@@ -697,6 +705,12 @@ function Matrix({
         >
           <div class="lane-row__label">
             <span class="lane-row__chevron">▸</span>
+            ${lane.live
+              ? html`<span class="lane-row__live" title="Live swimlane" aria-label="Live swimlane">
+                  <span class="lane-row__live-dot"></span>
+                  <span>LIVE</span>
+                </span>`
+              : null}
             <span class="lane-row__title" title=${lane.label}>${lane.label}</span>
           </div>
           <div class="lane-row__stats">

@@ -848,6 +848,18 @@ body {
   outline: none;
 }
 
+.intel-notice {
+  border: 1px dashed var(--hairline-strong);
+  background: var(--rule-soft);
+  color: var(--white-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+
 .intel-snippets {
   display: flex;
   flex-direction: column;
@@ -1793,11 +1805,6 @@ body {
   transition: background 0.1s ease, box-shadow 0.1s ease;
 }
 
-.cell.drop-target {
-  background: var(--amber-soft);
-  box-shadow: inset 0 0 0 1px var(--amber);
-}
-
 .cell-empty {
   font-size: 10px;
   color: var(--dim);
@@ -1863,7 +1870,6 @@ body {
 }
 .card-delete:hover { color: var(--red); background: var(--red-soft); }
 .card:active { cursor: grabbing; }
-.card.dragging { opacity: 0.25; }
 
 .card-id-row,
 .card-title-row {
@@ -2304,18 +2310,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.task-inline-drawer__notice {
-  border: 1px dashed var(--hairline-strong);
-  background: var(--rule-soft);
-  color: var(--white-dim);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  line-height: 1.5;
-  padding: 8px 10px;
-  text-transform: uppercase;
 }
 
 /* ─────── Error banner ─────── */
@@ -2961,23 +2955,24 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   display: grid;
   grid-template-columns: 240px 1fr;
   align-items: center;
-  padding: 14px 20px;
+  min-height: 44px;
+  height: 44px;
+  padding: 0 20px;
   background: var(--paper);
   border-bottom: 1px solid var(--rule);
   position: relative;
   cursor: pointer;
   outline: none;
-  /* box-shadow used for left accent on hover to avoid layout shift */
-  box-shadow: inset 3px 0 0 0 transparent;
+  box-shadow: inset 1px 0 0 0 transparent;
   transition: box-shadow 80ms ease;
 }
 
 .lane-row--collapsed:hover {
-  box-shadow: inset 3px 0 0 0 var(--ink-3);
+  box-shadow: inset 1px 0 0 0 var(--ink-3);
 }
 
 .lane-row--collapsed:focus-visible {
-  box-shadow: inset 3px 0 0 0 var(--ink-3), inset 0 0 0 1px var(--accent);
+  box-shadow: inset 1px 0 0 0 var(--ink-3), inset 0 0 0 1px var(--accent);
 }
 
 .lane-row__label {
@@ -2985,6 +2980,26 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.lane-row__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.lane-row__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  display: inline-block;
 }
 
 .lane-row__chevron {
@@ -3052,7 +3067,8 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   transition: opacity 120ms ease;
 }
 
-.lane-row--collapsed:hover .lane-row__actions {
+.lane-row--collapsed:hover .lane-row__actions,
+.lane-row--collapsed:focus-visible .lane-row__actions {
   opacity: 1;
 }
 
@@ -3240,4 +3256,26 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   font-size: 11px;
   color: var(--ink-3);
   flex-shrink: 0;
+}
+
+/* ─── Drag & drop visuals (t34) ─── */
+.card.dragging {
+  opacity: 0.9;
+  transform: scale(1.01);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 6px 16px rgba(0, 0, 0, 0.12);
+  cursor: grabbing;
+}
+
+.cell.lane-cell--drag-over {
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 0 0 2px var(--ink-3);
+}
+
+html.theme-light .cell.lane-cell--drag-over {
+  background: rgba(0, 0, 0, 0.02);
+  box-shadow: inset 0 0 0 2px var(--ink-3);
+}
+
+.cell.lane-cell--drag-origin {
+  opacity: 0.6;
 }
