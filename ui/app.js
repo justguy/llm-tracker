@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { html } from "htm/preact";
+import { buildHeroReason, buildHeroSummary } from "./lib/hero-strip.js";
 import { buildCardMetaFacts } from "./lib/intelligence.js";
 import { HistoryModal } from "./modals/history.js";
 import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
@@ -727,14 +728,21 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
   `;
 }
 
-// ─────── Scratchpad block (one per project pane) ───────
-function ScratchpadBlock({ slug, text, expanded, onToggleExpand, onSave }) {
+// ─────── Scratchpad row (t26 — collapsed one-liner with expand/edit) ───────
+function relativeTime(iso) {
+  if (!iso) return "";
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function ScratchpadRow({ slug, text, updatedAt, expanded, onToggleExpand, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef(null);
-
-  const hasText = !!(text && text.length > 0);
 
   const startEdit = (e) => {
     e?.stopPropagation();
@@ -757,54 +765,44 @@ function ScratchpadBlock({ slug, text, expanded, onToggleExpand, onSave }) {
     if (editing) textareaRef.current?.focus();
   }, [editing]);
 
-  if (editing) {
-    return html`
-      <div class="scratchpad scratchpad-editing" onClick=${(e) => e.stopPropagation()} onMouseDown=${(e) => e.stopPropagation()}>
-        <div class="scratchpad-edit-header">
-          <span class="scratchpad-label">scratchpad</span>
-          <span class="scratchpad-counter">${draft.length} / 5000</span>
-        </div>
-        <textarea
-          ref=${textareaRef}
-          class="scratchpad-textarea"
-          maxlength="5000"
-          placeholder="plain text — ≤ 5000 chars"
-          value=${draft}
-          onInput=${(e) => setDraft(e.currentTarget.value)}
-          onKeyDown=${(e) => {
-            if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
-          }}
-        />
-        <div class="scratchpad-edit-actions">
-          <button class="icon-btn small" onClick=${cancelEdit} disabled=${saving}>[CANCEL]</button>
-          <button class="icon-btn small" onClick=${commit} disabled=${saving || draft.length > 5000}>
-            ${saving ? "[SAVING…]" : "[SAVE]"}
-          </button>
-        </div>
-      </div>
-    `;
-  }
+  const stamp = relativeTime(updatedAt);
+  const rowClass = [
+    "scratchpad-row",
+    expanded ? "scratchpad-row--expanded" : "",
+    editing ? "scratchpad-row--editing" : "",
+  ].filter(Boolean).join(" ");
 
   return html`
-    <div class=${`scratchpad ${expanded ? "expanded" : "collapsed"} ${hasText ? "" : "empty"}`}>
-      <span class="scratchpad-label">scratchpad</span>
-      <span class="scratchpad-body">${hasText ? text : html`<em class="muted">(none)</em>`}</span>
-      <span class="scratchpad-actions">
-        ${hasText
-          ? html`<button
-              class="scratchpad-toggle"
-              onClick=${(e) => { e.stopPropagation(); onToggleExpand(slug); }}
-              title=${expanded ? "Collapse" : "Expand"}
-            >${expanded ? "[−]" : "[+]"}</button>`
-          : null}
-        <button
-          class="scratchpad-edit"
-          onClick=${startEdit}
-          onMouseDown=${(e) => e.stopPropagation()}
-          title="Edit scratchpad"
-        >[EDIT]</button>
-      </span>
+    <div class=${rowClass} onClick=${(e) => e.stopPropagation()} onMouseDown=${(e) => e.stopPropagation()}>
+      <span class="scratchpad-row__label">NOTE</span>
+      ${editing
+        ? html`<textarea
+            ref=${textareaRef}
+            class="scratchpad-row__textarea"
+            maxlength="5000"
+            placeholder="plain text — ≤ 5000 chars"
+            value=${draft}
+            onInput=${(e) => setDraft(e.currentTarget.value)}
+            onKeyDown=${(e) => {
+              if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+            }}
+          />`
+        : html`<span class="scratchpad-row__text">${text || html`<em style="color:var(--ink-3);font-style:normal">(empty)</em>`}</span>`
+      }
+      ${stamp && !editing ? html`<span class="scratchpad-row__stamp">${stamp}</span>` : null}
+      <${Bracket}
+        label=${editing ? "CANCEL" : expanded ? "COLLAPSE" : "EXPAND"}
+        soft
+        onClick=${editing ? cancelEdit : () => onToggleExpand(slug)}
+        disabled=${saving}
+      />
+      <${Bracket}
+        label=${saving ? "SAVING…" : editing ? "SAVE" : "EDIT"}
+        soft
+        onClick=${editing ? commit : startEdit}
+        disabled=${saving || (editing && draft.length > 5000)}
+      />
     </div>
   `;
 }
@@ -854,9 +852,10 @@ function ProjectPane({
           : null}
       </div>
       ${data
-        ? html`<${ScratchpadBlock}
+        ? html`<${ScratchpadRow}
             slug=${slug}
             text=${meta?.scratchpad || ""}
+            updatedAt=${meta?.updatedAt || null}
             expanded=${!!scratchpadExpanded}
             onToggleExpand=${onToggleScratchpad}
             onSave=${onSaveScratchpad}
@@ -1523,106 +1522,80 @@ function Header({
 function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
   const [nextData, setNextData] = useState(null);
   const [nextLoading, setNextLoading] = useState(false);
+  const [nextError, setNextError] = useState("");
 
   useEffect(() => {
     if (!slug) return;
+    let cancelled = false;
     setNextLoading(true);
+    setNextError("");
     fetch(`/api/projects/${slug}/next?limit=1`)
-      .then((r) => r.json())
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          throw new Error(body.error || r.statusText || "request failed");
+        }
+        return body;
+      })
       .then((body) => {
+        if (cancelled) return;
         setNextData(body);
         setNextLoading(false);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (cancelled) return;
         setNextData(null);
+        setNextError(error?.message || "request failed");
         setNextLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [slug, project?.rev]);
 
   if (!project?.data) return null;
 
-  const data = project.data;
-  const meta = data.meta;
-  const tasks = data.tasks || [];
-  const derived = project.derived || {};
-
-  const total = derived.total ?? tasks.length;
-  const counts = derived.counts || {};
-  const complete = counts.complete || 0;
-  const inProgress = counts.in_progress || 0;
-  const notStarted = counts.not_started || 0;
-  const deferred = counts.deferred || 0;
-
-  const blockedByReason = tasks.filter(
-    (t) => typeof t.blocker_reason === "string" && t.blocker_reason.trim()
-  ).length;
-  const blockedByDeps = Object.keys(derived.blocked || {}).length;
-  const blockedCount = Math.max(blockedByReason, blockedByDeps);
-
-  const pct = total === 0 ? 0 : Math.round((complete / total) * 100);
-
-  const completeW = total === 0 ? 0 : (complete / total) * 100;
-  const warnW = total === 0 ? 0 : (inProgress / total) * 100;
-  const blockedW = total === 0 ? 0 : (blockedCount / total) * 100;
-
-  const projectName = meta?.name || slug;
-  const workspacePath = meta?.workspace
-    ? meta.workspace.replace(/^.*\/([^/]+\/[^/]+)$/, "~/$1")
-    : (meta?.slug ? `~/${meta.slug}` : "");
-  const swimlaneCount = (meta?.swimlanes || []).length;
-  const updatedAt = meta?.updatedAt
-    ? new Date(meta.updatedAt).toLocaleTimeString()
-    : "—";
-
-  const statusTiles = [
-    { label: "Complete", key: "complete", count: complete, color: "var(--ok)", strong: true },
-    { label: "In progress", key: "in_progress", count: inProgress, color: "var(--warn)", strong: false },
-    { label: "Not started", key: "not_started", count: notStarted, color: "var(--ink-3)", strong: false },
-    { label: "Deferred", key: "deferred", count: deferred, color: "var(--ink-3)", strong: false },
-    { label: "Blocked", key: "blocked", count: blockedCount, color: "var(--block)", strong: false },
-    { label: "Open", key: "open", count: total, color: "var(--ink-2)", strong: true },
-  ];
-
+  const summary = buildHeroSummary(project, slug);
   const nextTask = nextData?.next?.[0] ?? null;
-
-  function buildReason(task) {
-    if (!task) return "";
-    const parts = [];
-    if (task.ready) parts.push("highest-ranked ready task");
-    if (task.priorityId) parts.push(task.priorityId);
-    if (task.dependenciesResolved) parts.push("dependencies satisfied");
-    if (task.status === "in_progress") parts.push("already in progress");
-    if (Array.isArray(task.requires_approval) && task.requires_approval.length > 0) {
-      parts.push(`requires ${task.requires_approval.join(", ")} approval`);
-    }
-    return parts.join(" · ") || "ready for work";
-  }
-
   const reasonStr = Array.isArray(nextTask?.reason) && nextTask.reason.length > 0
     ? nextTask.reason.join(" · ")
-    : buildReason(nextTask);
+    : buildHeroReason(nextTask);
+  const nextTitle = nextLoading
+    ? "Loading ranked shortlist"
+    : nextError
+      ? "Recommendation unavailable"
+      : nextTask?.title || "No ready task";
+  const nextReason = nextLoading
+    ? "Fetching the current top-ranked task from /next."
+    : nextError
+      ? nextError
+      : nextTask
+        ? reasonStr
+        : "No ready task is available from the current ranking.";
+  const nextTaskId = nextTask?.id || "—";
 
   return html`
     <div class="hero-strip">
       <div class="hero-col hero-col--left">
         <div class="hero-eyebrow">PROJECT</div>
-        <div class="hero-title">${projectName}</div>
-        ${workspacePath ? html`<div class="hero-path">${workspacePath}</div>` : null}
-        <div class="hero-meta">${swimlaneCount} swimlane${swimlaneCount !== 1 ? "s" : ""} · ${total} tasks · updated ${updatedAt}</div>
+        <div class="hero-title-row">
+          <div class="hero-title">${summary.projectName}</div>
+          ${summary.trackerPath ? html`<div class="hero-path">${summary.trackerPath}</div>` : null}
+        </div>
+        <div class="hero-meta">${summary.swimlaneCount} swimlane${summary.swimlaneCount !== 1 ? "s" : ""} · ${summary.total} tasks · updated ${summary.updatedAt}</div>
         <div class="hero-display">
-          <span class="hero-display__pct">${pct}<span class="hero-display__unit">%</span></span>
-          <span class="hero-display__text">${complete} of ${total} tasks complete</span>
+          <span class="hero-display__pct">${summary.pct}<span class="hero-display__unit">%</span></span>
+          <span class="hero-display__text">${summary.complete} of ${summary.total} tasks complete</span>
         </div>
         <div class="hero-progress">
-          ${completeW > 0 ? html`<span class="hero-progress__segment--complete" style=${`width:${completeW}%`}></span>` : null}
-          ${warnW > 0 ? html`<span class="hero-progress__segment--warn" style=${`left:${completeW}%;width:${warnW}%`}></span>` : null}
-          ${blockedCount > 0 ? html`<span class="hero-progress__blocked" style=${`width:${blockedW}%`}></span>` : null}
+          ${summary.completeW > 0 ? html`<span class="hero-progress__segment--complete" style=${`width:${summary.completeW}%`}></span>` : null}
+          ${summary.warnW > 0 ? html`<span class="hero-progress__segment--warn" style=${`left:${summary.completeW}%;width:${summary.warnW}%`}></span>` : null}
         </div>
       </div>
       <div class="hero-col hero-col--status">
         <div class="hero-eyebrow">STATUS</div>
         <div class="hero-status__grid">
-          ${statusTiles.map((tile) => html`
+          ${summary.statusTiles.map((tile) => html`
             <div key=${tile.key} class=${`hero-tile ${tile.strong ? "hero-tile--strong" : ""}`}>
               <span class="hero-tile__dot" style=${`background:${tile.color}`}></span>
               <span class="hero-tile__label">${tile.label}</span>
@@ -1632,33 +1605,31 @@ function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
         </div>
       </div>
       <div class="hero-col hero-col--next">
-        ${nextLoading
-          ? html`<div class="hero-eyebrow">RECOMMENDED NEXT</div><div class="hero-next__reason">Loading…</div>`
-          : !nextTask
-            ? html`
-                <div class="hero-eyebrow">RECOMMENDED NEXT</div>
-                <div class="hero-next__reason">No ready task</div>
-              `
-            : html`
-                <div class="hero-next">
-                  <div class="hero-next__head">
-                    <span>★ RECOMMENDED NEXT</span>
-                    <span>${nextTask.id}</span>
-                  </div>
-                  <div class="hero-next__title">${nextTask.title}</div>
-                  <div class="hero-next__reason">${reasonStr}</div>
-                  <div class="hero-next__actions">
-                    <button
-                      class="hero-next__btn--pick"
-                      onClick=${() => onPickTask && onPickTask(slug, nextTask.id)}
-                    >[PICK]</button>
-                    <button
-                      class="hero-next__btn--read"
-                      onClick=${() => onOpenTask && onOpenTask(slug, nextTask.id, "brief")}
-                    >[READ]</button>
-                  </div>
-                </div>
-              `}
+        <div class="hero-next">
+          <div class="hero-next__head">
+            <span>★ RECOMMENDED NEXT</span>
+            <span>${nextTaskId}</span>
+          </div>
+          <div class="hero-next__title">${nextTitle}</div>
+          <div class="hero-next__reason">${nextReason}</div>
+          <div class="hero-next__actions">
+            <${Bracket}
+              label="PICK"
+              active
+              tone="ok"
+              disabled=${!nextTask}
+              title=${nextTask ? "Claim the recommended task" : "No ready task to pick"}
+              onClick=${() => nextTask && onPickTask && onPickTask(slug, nextTask.id)}
+            />
+            <${Bracket}
+              label="READ"
+              tone="ok"
+              disabled=${!nextTask}
+              title=${nextTask ? "Open the task brief" : "No ready task to read"}
+              onClick=${() => nextTask && onOpenTask && onOpenTask(slug, nextTask.id, "brief")}
+            />
+          </div>
+        </div>
       </div>
     </div>
   `;
