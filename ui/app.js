@@ -1,10 +1,6 @@
 import { render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { html } from "htm/preact";
-import { buildCardMetaFacts } from "./lib/intelligence.js";
-import { HistoryModal } from "./modals/history.js";
-import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
-import { humanizeTaskOutcome } from "./task-outcomes.js";
 
 const STATUS_ORDER = ["complete", "in_progress", "not_started", "deferred"];
 
@@ -178,56 +174,6 @@ function IconBtn({ label, onClick, active, title }) {
   `;
 }
 
-async function copyText(text) {
-  if (!text) return false;
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {}
-  }
-
-  try {
-    const input = document.createElement("textarea");
-    input.value = text;
-    input.setAttribute("readonly", "");
-    input.style.position = "absolute";
-    input.style.left = "-9999px";
-    document.body.appendChild(input);
-    input.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(input);
-    return !!ok;
-  } catch {
-    return false;
-  }
-}
-
-function CopyInlineBtn({ value, label, title }) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return undefined;
-    const timer = setTimeout(() => setCopied(false), 1200);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  return html`
-    <button
-      class=${`card-copy-btn ${copied ? "copied" : ""}`}
-      title=${copied ? `${label} copied` : title}
-      aria-label=${copied ? `${label} copied` : title}
-      onMouseDown=${(e) => e.stopPropagation()}
-      onClick=${async (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        const ok = await copyText(value);
-        if (ok) setCopied(true);
-      }}
-    >${copied ? "✓" : "⧉"}</button>
-  `;
-}
-
 // ─────── Custom dropdown ───────
 function Dropdown({ value, options, onChange, renderLabel, className }) {
   const [open, setOpen] = useState(false);
@@ -326,29 +272,13 @@ function FilterToggles({ counts, statusFilters, toggleStatus, blockedCount, open
 
 // ─────── Card / Cell / Matrix ───────
 
-function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart, onDragEnd, onDelete, onSaveComment, onOpenTask }) {
+function Card({ task, blockedBy, dragging, onDragStart, onDragEnd, onDelete, onSaveComment }) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
-  const cardFacts = buildCardMetaFacts(task, blockedBy || []);
-  const outcome = humanizeTaskOutcome(task.outcome);
-  const approvals = Array.isArray(task.approval_required_for)
-    ? task.approval_required_for.filter((value) => typeof value === "string" && value.trim())
-    : [];
-  const references = Array.isArray(task.references) && task.references.length
-    ? task.references
-    : task.reference
-      ? [task.reference]
-      : [];
   const extraKeys = Object.keys(ctx).filter(
     (k) => k !== "tags" && k !== "notes" && k !== "files_touched"
   );
-  const classes = [
-    "card",
-    `status-${task.status}`,
-    dragging ? "dragging" : "",
-    searchMatch ? "fuzzy-hit" : "",
-    fuzzyActive && !searchMatch ? "fuzzy-dim" : ""
-  ].join(" ");
+  const classes = ["card", `status-${task.status}`, dragging ? "dragging" : ""].join(" ");
 
   return html`
     <div
@@ -360,7 +290,6 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
     >
       <button
         class="card-delete"
-        aria-label=${`Delete task ${task.id}`}
         title=${`Delete task ${task.id}`}
         onMouseDown=${(e) => e.stopPropagation()}
         onClick=${(e) => {
@@ -369,58 +298,12 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
           onDelete && onDelete(task);
         }}
       >×</button>
-      <div class="card-id-row">
-        <div class="card-id">${task.id}</div>
-        <${CopyInlineBtn}
-          value=${task.id}
-          label="Task id"
-          title=${`Copy task id ${task.id}`}
-        />
-      </div>
-      <div class="card-title">
-        <span class="card-title-text">${task.title}</span>
-        <${CopyInlineBtn}
-          value=${task.title}
-          label="Task title"
-          title=${`Copy task title: ${task.title}`}
-        />
-      </div>
+      <div class="card-id">${task.id}</div>
+      <div class="card-title">${task.title}</div>
       ${task.goal ? html`<div class="card-goal">${task.goal}</div>` : null}
       ${ctx.notes ? html`<div class="card-goal">${ctx.notes}</div>` : null}
       ${extraKeys.length > 0
         ? html`<div class="card-context"><b>${extraKeys[0]}:</b> ${String(ctx[extraKeys[0]])}</div>`
-        : null}
-      <div class="card-intel-actions">
-        ${[
-          ["brief", "[READ]"],
-          ["why", "[WHY]"],
-          ["execute", "[EXEC]"],
-          ["verify", "[VERIFY]"]
-        ].map(([mode, label]) => html`
-          <button
-            key=${mode}
-            class="card-intel-btn"
-            title=${`${label.replaceAll("[", "").replaceAll("]", "")} ${task.id}`}
-            onMouseDown=${(e) => e.stopPropagation()}
-            onClick=${(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              onOpenTask && onOpenTask(task, mode);
-            }}
-          >${label}</button>
-        `)}
-      </div>
-      ${cardFacts.length > 0
-        ? html`
-            <div class="card-subfacts">
-              ${cardFacts.map((fact) => html`
-                <span key=${`${fact.label}:${fact.value}`} class=${`card-subfact ${fact.tone || ""}`}>
-                  <b>${fact.label}</b>
-                  <span>${fact.value}</span>
-                </span>
-              `)}
-            </div>
-          `
         : null}
       <${CommentBadge}
         comment=${task.comment}
@@ -428,34 +311,23 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
       />
       <div class="card-footer">
         <${Badge} kind=${`status-${task.status}`}>${task.status.replace("_", " ")}</${Badge}>
-        ${outcome
-          ? html`<${Badge} kind="outcome" title=${`Outcome marker: ${outcome}`}>outcome · ${outcome}</${Badge}>`
-          : null}
-        ${task.effort ? html`<${Badge} kind="tag" title=${`Estimated effort ${task.effort}`}>effort · ${task.effort}</${Badge}>` : null}
         ${blockedBy && blockedBy.length > 0
           ? html`<${Badge} kind="blocked" title=${`Blocked by ${blockedBy.join(", ")}`}>blocked · ${blockedBy.length}</${Badge}>`
           : null}
-        ${approvals.length > 0
-          ? html`<${Badge} kind="blocked" title=${`Requires approval for ${approvals.join(", ")}`}>approval · ${approvals.length}</${Badge}>`
-          : null}
         ${task.assignee ? html`<${Badge} kind="assignee">${task.assignee}</${Badge}>` : null}
-        ${references[0]
+        ${task.reference
           ? html`<button
               class="card-reference"
-              title=${`Copy reference: ${references[0]}`}
+              title=${`Copy reference: ${task.reference}`}
               onMouseDown=${(e) => e.stopPropagation()}
               onClick=${(e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                copyText(references[0]).catch(() => {});
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(task.reference).catch(() => {});
+                }
               }}
-            >${references[0]}</button>`
-          : null}
-        ${references.length > 1
-          ? html`<${Badge} kind="tag" title=${references.join("\n")}>refs · ${references.length}</${Badge}>`
-          : null}
-        ${searchMatch && Number.isFinite(searchMatch.score)
-          ? html`<${Badge} kind="tag" title=${`Fuzzy match ${searchMatch.score.toFixed(3)}`}>match · ${searchMatch.score.toFixed(2)}</${Badge}>`
+            >${task.reference}</button>`
           : null}
         ${tags.map((t) => html`<${Badge} kind="tag">${t}</${Badge}>`)}
       </div>
@@ -463,7 +335,7 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
   `;
 }
 
-function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, dragState, setDragState, onDrop, onDeleteTask, onSaveComment, onOpenTask }) {
+function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, dragState, setDragState, onDrop, onDeleteTask, onSaveComment }) {
   const ref = useRef(null);
   const [over, setOver] = useState(false);
 
@@ -533,8 +405,6 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
             key=${t.id}
             task=${t}
             blockedBy=${blocked[t.id]}
-            searchMatch=${fuzzyMatchMap?.get(t.id) || null}
-            fuzzyActive=${!!(fuzzyQuery && fuzzyQuery.trim())}
             dragging=${dragState.taskId === t.id}
             onDragStart=${(e, task) => {
               e.dataTransfer.effectAllowed = "move";
@@ -544,7 +414,6 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
             onDragEnd=${() => setDragState({ taskId: null })}
             onDelete=${onDeleteTask}
             onSaveComment=${onSaveComment}
-            onOpenTask=${onOpenTask}
           />
         `
       )}
@@ -552,7 +421,7 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
   `;
 }
 
-function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, onMove, onToggleCollapse, onMoveLane, onDeleteTask, onSaveComment, onOpenTask }) {
+function Matrix({ project, filterQuery, statusFilters, blockFilters, onMove, onToggleCollapse, onDeleteTask, onSaveComment }) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
   const priorities = project.data.meta.priorities;
@@ -583,9 +452,6 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
   `;
 
   const rows = swimlanes.map((lane) => {
-    const laneIndex = swimlanes.findIndex((item) => item.id === lane.id);
-    const canMoveUp = laneIndex > 0;
-    const canMoveDown = laneIndex >= 0 && laneIndex < swimlanes.length - 1;
     const per = project.derived?.perSwimlane?.[lane.id] || { counts: {}, pct: 0, total: 0 };
     const active = per.counts.in_progress || 0;
     const allComplete = per.total > 0 && per.counts.complete === per.total;
@@ -609,14 +475,7 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
           title="Click to expand swimlane"
         >
           <span class="lane-chevron">${"\u25B6"}</span>
-          <div class="lane-collapsed-label">
-            <span class="lane-label-text">${lane.label}</span>
-            <${CopyInlineBtn}
-              value=${lane.label}
-              label="Lane name"
-              title=${`Copy lane name: ${lane.label}`}
-            />
-          </div>
+          <div class="lane-collapsed-label">${lane.label}</div>
           ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
           <div class="lane-collapsed-stats">
             <span>${per.total} tasks</span>
@@ -634,34 +493,10 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
         <div class="lane-cell-head">
           <button
             class="lane-chevron"
-            aria-label="Collapse swimlane"
             onClick=${() => onToggleCollapse(lane.id, true)}
             title="Collapse swimlane"
           >${"\u25BC"}</button>
-          <div class="lane-label">
-            <span class="lane-label-text">${lane.label}</span>
-            <${CopyInlineBtn}
-              value=${lane.label}
-              label="Lane name"
-              title=${`Copy lane name: ${lane.label}`}
-            />
-          </div>
-        </div>
-        <div class="lane-order-actions">
-          <button
-            class="icon-btn small"
-            disabled=${!canMoveUp}
-            aria-label=${`Increase priority of lane ${lane.label}`}
-            title=${canMoveUp ? `Move ${lane.label} up` : `${lane.label} is already the top lane`}
-            onClick=${() => onMoveLane && onMoveLane(lane.id, "up")}
-          >[UP]</button>
-          <button
-            class="icon-btn small"
-            disabled=${!canMoveDown}
-            aria-label=${`Decrease priority of lane ${lane.label}`}
-            title=${canMoveDown ? `Move ${lane.label} down` : `${lane.label} is already the bottom lane`}
-            onClick=${() => onMoveLane && onMoveLane(lane.id, "down")}
-          >[DOWN]</button>
+          <div class="lane-label">${lane.label}</div>
         </div>
         ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
         <div class="lane-stats">
@@ -681,14 +516,11 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
             filterQuery=${filterQuery}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}
-            fuzzyQuery=${fuzzyQuery}
-            fuzzyMatchMap=${fuzzyMatchMap}
             dragState=${dragState}
             setDragState=${setDragState}
             onDrop=${onMove}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
-            onOpenTask=${onOpenTask}
           />
         `
       )}
@@ -797,16 +629,12 @@ function ProjectPane({
   onFocus,
   onTogglePin,
   filter,
-  searchMode,
-  fuzzyMatchMap,
   statusFilters,
   blockFilters,
   onMove,
   onToggleCollapse,
-  onMoveLane,
   onDeleteTask,
   onSaveComment,
-  onOpenTask,
   scratchpadExpanded,
   onToggleScratchpad,
   onSaveScratchpad
@@ -856,17 +684,13 @@ function ProjectPane({
       ${data
         ? html`<${Matrix}
             project=${project}
-            filterQuery=${searchMode === "filter" ? filter : ""}
+            filterQuery=${filter}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}
-            fuzzyQuery=${searchMode === "fuzzy" ? filter : ""}
-            fuzzyMatchMap=${fuzzyMatchMap}
             onMove=${(args) => onMove(slug, args)}
             onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
-            onMoveLane=${(laneId, direction) => onMoveLane(slug, laneId, direction)}
             onDeleteTask=${(task) => onDeleteTask(slug, task)}
             onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
-            onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
           />`
         : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
     </section>
@@ -880,7 +704,7 @@ function HelpModal({ workspace, onClose }) {
   const wsPath = workspace?.workspace || "~/.llm-tracker";
 
   const promptFile =
-    "Read http://localhost:" + port + "/help (or " + readme + " on disk) and register this project as <slug>.\n\n" +
+    "Read " + readme + " and register this project as <slug>.\n\n" +
     "WORKSPACE IS AT: " + wsPath + "\n" +
     "Every path you read or write MUST begin with that absolute path. " +
     "Do NOT create a new .llm-tracker/ folder anywhere else. " +
@@ -895,7 +719,7 @@ function HelpModal({ workspace, onClose }) {
     "Read the tracker only at decision points (claiming next task, resolving a blocker). Writes are fire-and-forget.";
 
   const promptHttp =
-    "Read http://localhost:" + port + "/help for the live contract, then use HTTP-only (no file paths, no fs writes).\n\n" +
+    "Read " + readme + " for the contract, then use HTTP-only (no file paths, no fs writes).\n\n" +
     "IMPORTANT — ALWAYS use --data-binary @file.json, never inline -d '...'.\n" +
     "Inline curl -d strips newlines and corrupts JSON bodies that contain quotes, " +
     "newlines, or special characters. Write the body to a file first, then send it with " +
@@ -920,9 +744,6 @@ function HelpModal({ workspace, onClose }) {
 
   const [mode, setMode] = useState("file");
   const [copied, setCopied] = useState(false);
-  const [liveHelp, setLiveHelp] = useState("");
-  const [helpError, setHelpError] = useState(null);
-  const [helpCopied, setHelpCopied] = useState(false);
   const activePrompt = mode === "file" ? promptFile : promptHttp;
 
   const copy = async () => {
@@ -930,15 +751,6 @@ function HelpModal({ workspace, onClose }) {
       await navigator.clipboard.writeText(activePrompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
-    } catch {}
-  };
-
-  const copyHelp = async () => {
-    if (!liveHelp) return;
-    try {
-      await navigator.clipboard.writeText(liveHelp);
-      setHelpCopied(true);
-      setTimeout(() => setHelpCopied(false), 1800);
     } catch {}
   };
 
@@ -950,25 +762,12 @@ function HelpModal({ workspace, onClose }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    fetch("/help")
-      .then((response) => {
-        if (!response.ok) throw new Error(response.statusText);
-        return response.text();
-      })
-      .then((text) => {
-        setLiveHelp(text);
-        setHelpError(null);
-      })
-      .catch((error) => setHelpError(error.message));
-  }, []);
-
   return html`
     <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal help-modal" role="dialog" aria-modal="true" aria-label="Help" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal help-modal" onClick=${(e) => e.stopPropagation()}>
         <div class="modal-header">
           <span class="brand">[HELP] · LLM PROJECT TRACKER</span>
-          <button class="icon-btn" aria-label="Close dialog" onClick=${onClose} title="Close (Esc)">×</button>
+          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
         </div>
 
         <div class="modal-body">
@@ -1001,20 +800,6 @@ function HelpModal({ workspace, onClose }) {
               <button class="copy-btn">${copied ? "[COPIED]" : "[COPY]"}</button>
             </div>
             <p class="muted">Replace <code>${"<slug>"}</code> with the project ID you want (lowercase, dash-separated).</p>
-          </section>
-
-          <section>
-            <h3>Live Contract (/help)</h3>
-            ${helpError
-              ? html`<p class="muted">failed to load /help: ${helpError}</p>`
-              : liveHelp
-                ? html`
-                    <div class="copy-block contract-block" onClick=${copyHelp}>
-                      <code class="copy-block-text">${liveHelp}</code>
-                      <button class="copy-btn">${helpCopied ? "[COPIED]" : "[COPY]"}</button>
-                    </div>
-                  `
-                : html`<p class="muted">loading /help…</p>`}
           </section>
 
           <section>
@@ -1126,10 +911,10 @@ function SettingsModal({ onClose, theme, onToggleTheme, drawerPinned, onToggleDr
 
   return html`
     <div class="modal-overlay" onClick=${onClose}>
-      <div class="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal settings-modal" onClick=${(e) => e.stopPropagation()}>
         <div class="modal-header">
           <span class="brand">[SETTINGS]</span>
-          <button class="icon-btn" aria-label="Close dialog" onClick=${onClose} title="Close (Esc)">×</button>
+          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
         </div>
 
         <div class="modal-body">
@@ -1196,6 +981,121 @@ function SettingsModal({ onClose, theme, onToggleTheme, drawerPinned, onToggleDr
   `;
 }
 
+// ─────── History modal ───────
+function summaryItemText(it) {
+  switch (it?.kind) {
+    case "added": return `+ ${it.id} "${it.title || ""}" (${it.status || "?"})`;
+    case "removed": return `− ${it.id} removed`;
+    case "status": return `${it.id} → ${it.to}`;
+    case "placement": return `${it.id} moved`;
+    case "assignee": return `${it.id} assignee: ${it.to ?? "—"}`;
+    case "edit": return `${it.id} edited (${(it.keys || []).join(", ")})`;
+    case "meta": return `meta.${it.key} updated`;
+    case "reorder": return `reorder (${it.total} tasks)`;
+    default: return JSON.stringify(it);
+  }
+}
+
+function HistoryModal({ slug, onClose }) {
+  const [entries, setEntries] = useState(null);
+  const [error, setError] = useState(null);
+  const [rollingBack, setRollingBack] = useState(null);
+
+  const load = async () => {
+    try {
+      const res = await fetch(`/api/projects/${slug}/revisions`);
+      if (!res.ok) throw new Error(res.statusText);
+      const body = await res.json();
+      const recent = [...(body.revisions || [])].sort((a, b) => b.rev - a.rev).slice(0, 10);
+      setEntries(recent);
+      setError(null);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  useEffect(() => { load(); }, [slug]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const rollbackTo = async (rev) => {
+    const ok = window.confirm(
+      `Roll back to rev ${rev}?\n\nThe current state becomes a new rev on top of this rollback — nothing is discarded, you can undo the rollback the same way.`
+    );
+    if (!ok) return;
+    setRollingBack(rev);
+    try {
+      const res = await fetch(`/api/projects/${slug}/rollback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: rev })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || res.statusText);
+      }
+      await load();
+    } catch (e) {
+      alert(`Rollback failed: ${e.message}`);
+    }
+    setRollingBack(null);
+  };
+
+  return html`
+    <div class="modal-overlay" onClick=${onClose}>
+      <div class="modal history-modal" onClick=${(e) => e.stopPropagation()}>
+        <div class="modal-header">
+          <span class="brand">[HISTORY] · ${slug}</span>
+          <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
+        </div>
+        <div class="modal-body">
+          ${error
+            ? html`<div class="settings-msg error">failed to load: ${error}</div>`
+            : entries === null
+              ? html`<p class="muted">loading…</p>`
+              : entries.length === 0
+                ? html`<p class="muted">no history yet.</p>`
+                : html`<ul class="history-list">
+                    ${entries.map((e, idx) => {
+                      const shown = (e.summary || []).slice(0, 3);
+                      const rest = (e.summary || []).length - shown.length;
+                      return html`
+                        <li key=${e.rev} class="history-entry">
+                          <div class="history-meta">
+                            <span class="history-rev">rev ${e.rev}</span>
+                            <span class="history-ts">${new Date(e.ts).toLocaleString()}</span>
+                            ${e.rolledBackTo !== undefined
+                              ? html`<span class="badge">rolled back to ${e.rolledBackTo}</span>`
+                              : null}
+                          </div>
+                          <ul class="history-gist">
+                            ${shown.length === 0
+                              ? html`<li class="muted">no structured changes</li>`
+                              : shown.map((it, i) => html`<li key=${i}>${summaryItemText(it)}</li>`)}
+                            ${rest > 0 ? html`<li class="muted">…and ${rest} more</li>` : null}
+                          </ul>
+                          <div class="history-actions">
+                            <button
+                              class="icon-btn"
+                              disabled=${idx === 0 || rollingBack !== null}
+                              onClick=${() => rollbackTo(e.rev)}
+                              title=${idx === 0 ? "This is the current revision" : `Roll back to rev ${e.rev}`}
+                            >${rollingBack === e.rev ? "[ROLLING BACK…]" : idx === 0 ? "[CURRENT]" : "[UNDO TO HERE]"}</button>
+                          </div>
+                        </li>
+                      `;
+                    })}
+                  </ul>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ─────── Overview drawer ───────
 function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSelect, onDelete, pinnedSlugs, onTogglePinProject }) {
   useEffect(() => {
@@ -1221,7 +1121,7 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
               onClick=${onTogglePin}
               title=${pinned ? "Unpin" : "Pin drawer (persists)"}
             >${pinned ? "[PINNED]" : "[PIN]"}</button>
-            <button class="icon-btn" aria-label="Close drawer" onClick=${onClose} title="Close (Esc)">×</button>
+            <button class="icon-btn" onClick=${onClose} title="Close (Esc)">×</button>
           </div>
         </div>
         <div class="drawer-body">
@@ -1256,7 +1156,6 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
                         : null}
                       <button
                         class="drawer-project-delete"
-                        aria-label=${`Delete project ${s}`}
                         title=${`Delete ${s}`}
                         onClick=${(e) => {
                           e.stopPropagation();
@@ -1321,54 +1220,35 @@ function Header({
   activeSlug,
   setActive,
   project,
-  pinnedProjectNames,
   workspace,
   filter,
   setFilter,
-  searchMode,
-  onSearchModeChange,
-  searchMeta,
   theme,
   onToggleTheme,
   onOpenHelp,
   onOpenDrawer,
   onOpenSettings,
   onOpenHistory,
-  onOpenIntel,
   onUndo,
-  onRedo,
   onDeleteProject
 }) {
   const meta = project?.data?.meta;
   const labelFor = (s) => projects?.[s]?.data?.meta?.name || s;
-  const multiPinned = Array.isArray(pinnedProjectNames) && pinnedProjectNames.length > 1;
-  const pinnedSummary = multiPinned ? pinnedProjectNames.join(" · ") : null;
 
   return html`
     <div class="app-header">
       <div>
         <div class="brand">LLM PROJECT TRACKER</div>
         <div class="project-select">
-          ${multiPinned
-            ? html`
-                <div
-                  class="project-title-multi"
-                  title=${`${pinnedSummary} — click any project pane to change the active project`}
-                >${pinnedSummary}</div>
-              `
-            : html`
-                <${Dropdown}
-                  value=${activeSlug}
-                  options=${slugs}
-                  onChange=${setActive}
-                  renderLabel=${labelFor}
-                  className="project-dropdown"
-                />
-              `}
+          <${Dropdown}
+            value=${activeSlug}
+            options=${slugs}
+            onChange=${setActive}
+            renderLabel=${labelFor}
+            className="project-dropdown"
+          />
         </div>
         <div class="project-meta">
-          ${multiPinned ? html`<span class="kv"><b>view</b>${pinnedProjectNames.length} pinned</span>` : null}
-          ${multiPinned && meta?.name ? html`<span class="kv"><b>active</b>${meta.name}</span>` : null}
           ${meta ? html`<span class="kv"><b>slug</b>${meta.slug}</span>` : null}
           ${meta ? html`<span class="kv"><b>swimlanes</b>${meta.swimlanes.length}</span>` : null}
           ${meta ? html`<span class="kv"><b>tasks</b>${project.data.tasks.length}</span>` : null}
@@ -1381,40 +1261,10 @@ function Header({
         <div class="header-actions">
           <button
             class="icon-btn"
-            onClick=${() => onOpenIntel("next")}
-            disabled=${!project?.slug}
-            title="Deterministic next-task shortlist"
-          >[NEXT]</button>
-          <button
-            class="icon-btn"
-            onClick=${() => onOpenIntel("blockers")}
-            disabled=${!project?.slug}
-            title="Blocked tasks and blockers"
-          >[BLOCKERS]</button>
-          <button
-            class="icon-btn"
-            onClick=${() => onOpenIntel("changed")}
-            disabled=${!project?.slug}
-            title="Recent changed tasks"
-          >[CHANGED]</button>
-          <button
-            class="icon-btn"
-            onClick=${() => onOpenIntel("decisions")}
-            disabled=${!project?.slug}
-            title="Recent decision notes"
-          >[DECISIONS]</button>
-          <button
-            class="icon-btn"
             onClick=${onUndo}
             disabled=${!project?.rev || project.rev < 2}
-            title=${project?.rev >= 2 ? "Undo the most recent effective change" : "Nothing to undo"}
+            title=${project?.rev >= 2 ? `Undo (rev ${project.rev} → ${project.rev - 1})` : "Nothing to undo"}
           >[UNDO]</button>
-          <button
-            class="icon-btn"
-            onClick=${onRedo}
-            disabled=${!project?.slug}
-            title="Redo the latest undo if available"
-          >[REDO]</button>
           <button
             class="icon-btn"
             onClick=${onOpenHistory}
@@ -1427,34 +1277,18 @@ function Header({
             title="Delete this project"
           >[DELETE]</button>
           <button class="icon-btn" onClick=${onOpenDrawer} title="Project overview">[OVERVIEW]</button>
-          <button class="icon-btn" aria-label=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} onClick=${onToggleTheme} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
+          <button class="icon-btn" onClick=${onToggleTheme} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
             ${theme === "dark" ? "[☼]" : "[☾]"}
           </button>
           <button class="icon-btn" onClick=${onOpenSettings} title="Settings">[SETTINGS]</button>
-          <button class="icon-btn" aria-label="Help" onClick=${onOpenHelp} title="Help">[?]</button>
+          <button class="icon-btn" onClick=${onOpenHelp} title="Help">[?]</button>
         </div>
-        <div class="search-controls">
-          <input
-            class="filter-input"
-            value=${filter}
-            onInput=${(e) => setFilter(e.currentTarget.value)}
-            placeholder=${searchMode === "fuzzy" ? "Fuzzy search — approximate title, id, tag" : "Filter tasks — title, id, tag"}
-          />
-          <div class="search-mode-tabs">
-            <button
-              class=${`search-mode-tab ${searchMode === "filter" ? "active" : ""}`}
-              onClick=${() => onSearchModeChange("filter")}
-              title="Current exact board filter"
-            >[FILTER]</button>
-            <button
-              class=${`search-mode-tab ${searchMode === "fuzzy" ? "active" : ""}`}
-              onClick=${() => onSearchModeChange("fuzzy")}
-              title="Approximate lexical search that keeps the board intact"
-              disabled=${!project?.slug}
-            >[FUZZY]</button>
-          </div>
-        </div>
-        ${searchMeta ? html`<div class=${`search-meta ${searchMeta.kind || ""}`}>${searchMeta.text}</div>` : null}
+        <input
+          class="filter-input"
+          value=${filter}
+          onInput=${(e) => setFilter(e.currentTarget.value)}
+          placeholder="Filter tasks — title, id, tag"
+        />
         ${workspace ? html`<div class="workspace-path">WORKSPACE · ${workspace.workspace}</div>` : null}
       </div>
     </div>
@@ -1466,16 +1300,8 @@ function App() {
   const initialSettings = useMemo(() => loadSettings(), []);
   const [workspace, setWorkspace] = useState(null);
   const [projects, setProjects] = useState({});
-  const [activeSlug, setActiveSlug] = useState(initialSettings.activeSlug || null);
+  const [activeSlug, setActiveSlug] = useState(null);
   const [filter, setFilter] = useState("");
-  const [searchMode, setSearchMode] = useState("filter");
-  const [fuzzyState, setFuzzyState] = useState({
-    slug: null,
-    query: "",
-    matches: [],
-    loading: false,
-    error: null
-  });
   const [wsUp, setWsUp] = useState(false);
   const [theme, setTheme] = useState(initialSettings.theme || "dark");
   const [drawerOpen, setDrawerOpen] = useState(!!initialSettings.drawerPinned);
@@ -1491,8 +1317,6 @@ function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [projectIntel, setProjectIntel] = useState(null);
-  const [taskIntel, setTaskIntel] = useState(null);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
 
@@ -1514,8 +1338,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug });
-  }, [theme, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug]);
+    saveSettings({ theme, drawerPinned, pinnedSlugs, scratchpadExpanded });
+  }, [theme, drawerPinned, pinnedSlugs, scratchpadExpanded]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -1525,66 +1349,6 @@ function App() {
   useEffect(() => {
     fetch("/api/workspace").then((r) => r.json()).then(setWorkspace).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (searchMode !== "fuzzy" || !activeSlug || !filter.trim()) {
-      setFuzzyState((prev) => ({
-        ...prev,
-        slug: activeSlug,
-        query: filter,
-        matches: [],
-        loading: false,
-        error: null
-      }));
-      return undefined;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      setFuzzyState((prev) => ({
-        ...prev,
-        slug: activeSlug,
-        query: filter,
-        loading: true,
-        error: null
-      }));
-
-      fetch(`/api/projects/${activeSlug}/fuzzy-search?q=${encodeURIComponent(filter)}&limit=12`, {
-        signal: controller.signal
-      })
-        .then(async (response) => {
-          const body = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(body.error || response.statusText || "request failed");
-          return body;
-        })
-        .then((payload) => {
-          setFuzzyState({
-            slug: activeSlug,
-            query: filter,
-            matches: payload.matches || [],
-            model: payload.model || null,
-            loading: false,
-            error: null
-          });
-        })
-        .catch((error) => {
-          if (controller.signal.aborted) return;
-          setFuzzyState({
-            slug: activeSlug,
-            query: filter,
-            matches: [],
-            model: null,
-            loading: false,
-            error: error.message
-          });
-        });
-    }, 250);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [searchMode, activeSlug, filter]);
 
   useEffect(() => {
     let ws;
@@ -1667,79 +1431,19 @@ function App() {
   const onToggleCollapse = async (slug, swimlaneId, collapsed) => {
     if (!slug) return;
     try {
-      const res = await fetch(`/api/projects/${slug}/swimlane-collapse`, {
+      await fetch(`/api/projects/${slug}/swimlane-collapse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ swimlaneId, collapsed })
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        alert(`Swimlane update failed: ${body.error || res.statusText}`);
-      }
     } catch (e) {
-      alert(`Swimlane update failed: ${e.message}`);
-    }
-  };
-
-  const onMoveLane = async (slug, swimlaneId, direction) => {
-    if (!slug || !swimlaneId) return;
-    try {
-      const res = await fetch(`/api/projects/${slug}/swimlane-move`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ swimlaneId, direction })
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        alert(`Swimlane move failed: ${body.error || res.statusText}`);
-      }
-    } catch (e) {
-      alert(`Swimlane move failed: ${e.message}`);
+      console.error("collapse toggle failed", e);
     }
   };
 
   const onSelectProject = (slug) => {
     setActiveSlug(slug);
     if (!drawerPinned) setDrawerOpen(false);
-  };
-
-  const onOpenTaskIntel = (slug, taskOrId, initialMode = "brief") => {
-    if (!slug || !taskOrId) return;
-    const projectTasks = projects[slug]?.data?.tasks || [];
-    const task = typeof taskOrId === "string"
-      ? projectTasks.find((item) => item.id === taskOrId) || { id: taskOrId, title: taskOrId }
-      : taskOrId;
-    if (!task?.id) return;
-    setActiveSlug(slug);
-    setTaskIntel({ slug, task, initialMode });
-  };
-
-  const onOpenProjectIntel = (initialMode = "next") => {
-    if (!activeSlug) return;
-    setProjectIntel({ slug: activeSlug, initialMode });
-  };
-
-  const onPickTask = async (slug, taskId = null) => {
-    if (!slug) return;
-    try {
-      const res = await fetch(`/api/projects/${slug}/pick`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(taskId ? { taskId } : {})
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(`Pick failed: ${body.error || res.statusText}`);
-        return;
-      }
-      const pickedId = body.task?.id || body.pickedTaskId || taskId;
-      if (pickedId) {
-        setProjectIntel(null);
-        onOpenTaskIntel(slug, pickedId, "execute");
-      }
-    } catch (e) {
-      alert(`Pick failed: ${e.message}`);
-    }
   };
 
   const onToggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
@@ -1778,34 +1482,6 @@ function App() {
 
   const slugs = Object.keys(projects).sort();
   const active = activeSlug ? projects[activeSlug] : null;
-  const fuzzyMatchMap = useMemo(
-    () => new Map((fuzzyState.matches || []).map((match) => [match.id, match])),
-    [fuzzyState.matches]
-  );
-  const searchMeta = useMemo(() => {
-    if (searchMode !== "fuzzy") return null;
-    if (!filter.trim()) {
-      return { kind: "muted", text: "FUZZY · deterministic lexical highlight mode keeps the board intact and marks near matches in context." };
-    }
-    if (fuzzyState.loading) return { kind: "muted", text: `FUZZY · searching "${filter}"…` };
-    if (fuzzyState.error) return { kind: "error", text: `FUZZY · ${fuzzyState.error}` };
-    return {
-      kind: fuzzyState.matches.length > 0 ? "ok" : "muted",
-      text: `FUZZY · ${fuzzyState.matches.length} hit${fuzzyState.matches.length === 1 ? "" : "s"} for "${filter}"`
-    };
-  }, [searchMode, filter, fuzzyState]);
-
-  useEffect(() => {
-    if (projectIntel && !projects[projectIntel.slug]) {
-      setProjectIntel(null);
-    }
-  }, [projectIntel, projects]);
-
-  useEffect(() => {
-    if (taskIntel && !projects[taskIntel.slug]) {
-      setTaskIntel(null);
-    }
-  }, [taskIntel, projects]);
 
   const onDeleteTask = async (slug, task) => {
     if (!slug) return;
@@ -1844,32 +1520,24 @@ function App() {
   };
 
   const onUndo = async () => {
-    if (!activeSlug || !active || !active.rev || active.rev < 2) return;
+    if (!active || !active.rev || active.rev < 2) return;
+    const targetRev = active.rev - 1;
     const ok = window.confirm(
-      `Undo the most recent effective change for ${activeSlug}?`
+      `Undo last change?\n\nRolls rev ${active.rev} back to the state at rev ${targetRev}.\nNo redo — you can undo again to go further back.`
     );
     if (!ok) return;
     try {
-      const res = await fetch(`/api/projects/${activeSlug}/undo`, { method: "POST" });
+      const res = await fetch(`/api/projects/${activeSlug}/rollback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: targetRev })
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(`Undo failed: ${body.error || res.statusText}`);
       }
     } catch (e) {
       alert(`Undo failed: ${e.message}`);
-    }
-  };
-
-  const onRedo = async () => {
-    if (!activeSlug) return;
-    try {
-      const res = await fetch(`/api/projects/${activeSlug}/redo`, { method: "POST" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        alert(`Redo failed: ${body.error || res.statusText}`);
-      }
-    } catch (e) {
-      alert(`Redo failed: ${e.message}`);
     }
   };
 
@@ -1891,25 +1559,6 @@ function App() {
   const historyEl = historyOpen && activeSlug
     ? html`<${HistoryModal} slug=${activeSlug} onClose=${() => setHistoryOpen(false)} />`
     : null;
-  const projectIntelEl = projectIntel
-    ? html`<${ProjectIntelligenceModal}
-        slug=${projectIntel.slug}
-        project=${projects[projectIntel.slug]}
-        initialMode=${projectIntel.initialMode}
-        onOpenTask=${(taskId, mode) => onOpenTaskIntel(projectIntel.slug, taskId, mode)}
-        onPickTask=${(taskId) => onPickTask(projectIntel.slug, taskId)}
-        onClose=${() => setProjectIntel(null)}
-      />`
-    : null;
-  const taskIntelEl = taskIntel
-    ? html`<${TaskIntelligenceModal}
-        slug=${taskIntel.slug}
-        task=${taskIntel.task}
-        initialMode=${taskIntel.initialMode}
-        onOpenTask=${(taskId, mode) => onOpenTaskIntel(taskIntel.slug, taskId, mode)}
-        onClose=${() => setTaskIntel(null)}
-      />`
-    : null;
 
   const shellPinned = drawerOpen && drawerPinned;
   const shellClass = `app-shell ${shellPinned ? "drawer-pinned" : ""}`;
@@ -1922,11 +1571,6 @@ function App() {
         onToggleDrawerPin=${onTogglePin}
       />`
     : null;
-  const validPinned = pinnedSlugs.filter((s) => projects[s]);
-  const paneSlugs = validPinned.length > 0 ? validPinned : [activeSlug];
-  const pinnedProjectNames = paneSlugs
-    .map((slug) => projects[slug]?.data?.meta?.name || slug)
-    .filter(Boolean);
 
   if (slugs.length === 0) {
     return html`
@@ -1938,11 +1582,11 @@ function App() {
           </div>
           <div class="header-right">
             <div class="header-actions">
-              <button class="icon-btn" aria-label=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} onClick=${onToggleTheme}>
+              <button class="icon-btn" onClick=${onToggleTheme}>
                 ${theme === "dark" ? "[☼]" : "[☾]"}
               </button>
               <button class="icon-btn" onClick=${() => setSettingsOpen(true)}>[SETTINGS]</button>
-              <button class="icon-btn" aria-label="Help" onClick=${() => setHelpOpen(true)}>[?]</button>
+              <button class="icon-btn" onClick=${() => setHelpOpen(true)}>[?]</button>
             </div>
           </div>
         </div>
@@ -1966,22 +1610,16 @@ function App() {
           activeSlug=${activeSlug}
           setActive=${setActiveSlug}
           project=${active}
-          pinnedProjectNames=${pinnedProjectNames}
           workspace=${workspace}
           filter=${filter}
           setFilter=${setFilter}
-          searchMode=${searchMode}
-          onSearchModeChange=${setSearchMode}
-          searchMeta=${searchMeta}
           theme=${theme}
           onToggleTheme=${onToggleTheme}
           onOpenHelp=${() => setHelpOpen(true)}
           onOpenDrawer=${() => setDrawerOpen(true)}
           onOpenSettings=${() => setSettingsOpen(true)}
           onOpenHistory=${() => setHistoryOpen(true)}
-          onOpenIntel=${onOpenProjectIntel}
           onUndo=${onUndo}
-          onRedo=${onRedo}
           onDeleteProject=${onDeleteProject}
         />
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
@@ -1991,13 +1629,13 @@ function App() {
         ${helpEl}
         ${settingsEl}
         ${historyEl}
-        ${projectIntelEl}
-        ${taskIntelEl}
       </div>
     `;
   }
 
   const derived = active.derived;
+  const validPinned = pinnedSlugs.filter((s) => projects[s]);
+  const paneSlugs = validPinned.length > 0 ? validPinned : [activeSlug];
   const solo = paneSlugs.length === 1 && validPinned.length === 1;
 
   return html`
@@ -2008,22 +1646,16 @@ function App() {
         activeSlug=${activeSlug}
         setActive=${setActiveSlug}
         project=${active}
-        pinnedProjectNames=${pinnedProjectNames}
         workspace=${workspace}
         filter=${filter}
         setFilter=${setFilter}
-        searchMode=${searchMode}
-        onSearchModeChange=${setSearchMode}
-        searchMeta=${searchMeta}
         theme=${theme}
         onToggleTheme=${onToggleTheme}
         onOpenHelp=${() => setHelpOpen(true)}
         onOpenDrawer=${() => setDrawerOpen(true)}
         onOpenSettings=${() => setSettingsOpen(true)}
         onOpenHistory=${() => setHistoryOpen(true)}
-        onOpenIntel=${onOpenProjectIntel}
         onUndo=${onUndo}
-        onRedo=${onRedo}
         onDeleteProject=${onDeleteProject}
       />
       <div class="banner-row">
@@ -2050,16 +1682,12 @@ function App() {
             onFocus=${setActiveSlug}
             onTogglePin=${onTogglePinProject}
             filter=${filter}
-            searchMode=${searchMode}
-            fuzzyMatchMap=${fuzzyMatchMap}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}
             onMove=${onMove}
             onToggleCollapse=${onToggleCollapse}
-            onMoveLane=${onMoveLane}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
-            onOpenTask=${onOpenTaskIntel}
             scratchpadExpanded=${!!scratchpadExpanded[s]}
             onToggleScratchpad=${onToggleScratchpad}
             onSaveScratchpad=${onSaveScratchpad}
@@ -2071,8 +1699,6 @@ function App() {
       ${helpEl}
       ${settingsEl}
       ${historyEl}
-      ${projectIntelEl}
-      ${taskIntelEl}
     </div>
   `;
 }

@@ -1,4 +1,4 @@
-import { STATUS_VALUES } from "./status-vocabulary.js";
+import { STATUS_VALUES } from "./validator.js";
 
 const SCORE = { not_started: 0, in_progress: 0.5, complete: 1, deferred: 0 };
 
