@@ -79,12 +79,47 @@ test("accepts a task reference with a line range", () => {
   assert.equal(ok, true);
 });
 
+test("accepts additive references[] alongside legacy reference", () => {
+  const p = validProject();
+  p.tasks[0].reference = "hub/store.js:1-20";
+  p.tasks[0].references = ["ARCHITECTURE.md:10-40", "hub/server.js:1-20"];
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("accepts the partial_slice_landed outcome marker", () => {
+  const p = validProject();
+  p.tasks[0].outcome = "partial_slice_landed";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("rejects unsupported outcome values", () => {
+  const p = validProject();
+  p.tasks[0].outcome = "half_done";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("outcome")));
+  assert.ok(errors.some((e) => e.includes("must be one of")));
+});
+
+test("rejects malformed references[] entries", () => {
+  const p = validProject();
+  p.tasks[0].references = ["hub/server.js"];
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("references")));
+  assert.ok(errors.some((e) => e.includes("path:line")));
+  assert.ok(errors.some((e) => e.includes("bare URLs are invalid")));
+});
+
 test("rejects a task reference without a line number", () => {
   const p = validProject();
   p.tasks[0].reference = "src/hub/store.js";
   const { ok, errors } = validateProject(p);
   assert.equal(ok, false);
   assert.ok(errors.some((e) => e.includes("reference")));
+  assert.ok(errors.some((e) => e.includes("path:line")));
 });
 
 test("allows task reference to be null (clears the field)", () => {
@@ -99,6 +134,21 @@ test("accepts a task comment under 500 chars", () => {
   p.tasks[0].comment = "needs review from @claude before merging";
   const { ok } = validateProject(p);
   assert.equal(ok, true);
+});
+
+test("accepts supported effort values", () => {
+  const p = validProject();
+  p.tasks[0].effort = "m";
+  const { ok } = validateProject(p);
+  assert.equal(ok, true);
+});
+
+test("rejects unsupported effort values", () => {
+  const p = validProject();
+  p.tasks[0].effort = "xxl";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("effort")));
 });
 
 test("rejects a task comment over 500 chars", () => {

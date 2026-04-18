@@ -1,7 +1,7 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-
-export const STATUS_VALUES = ["not_started", "in_progress", "complete", "deferred"];
+import { EFFORT_VALUES, REFERENCE_PATTERN_SOURCE } from "./references.js";
+import { STATUS_VALUES, TASK_OUTCOME_VALUES } from "./status-vocabulary.js";
 
 const schema = {
   type: "object",
@@ -42,7 +42,12 @@ const schema = {
           }
         },
         scratchpad: { type: "string", maxLength: 5000 },
-        updatedAt: { type: ["string", "null"] }
+        updatedAt: { type: ["string", "null"] },
+        deleted_tasks: {
+          type: ["array", "null"],
+          items: { type: "string", minLength: 1 },
+          uniqueItems: true
+        }
       }
     },
     tasks: {
@@ -56,6 +61,9 @@ const schema = {
           title: { type: "string", minLength: 1 },
           goal: { type: "string" },
           status: { enum: STATUS_VALUES },
+          outcome: {
+            enum: [...TASK_OUTCOME_VALUES, null]
+          },
           placement: {
             type: "object",
             required: ["swimlaneId", "priorityId"],
@@ -68,13 +76,47 @@ const schema = {
           assignee: { type: ["string", "null"] },
           reference: {
             type: ["string", "null"],
-            pattern: "^.+:\\d+(-\\d+)?$"
+            pattern: REFERENCE_PATTERN_SOURCE
+          },
+          references: {
+            type: ["array", "null"],
+            items: {
+              type: "string",
+              pattern: REFERENCE_PATTERN_SOURCE
+            }
+          },
+          effort: {
+            enum: [...EFFORT_VALUES, null]
+          },
+          related: {
+            type: ["array", "null"],
+            items: { type: "string" }
           },
           comment: {
             type: ["string", "null"],
             maxLength: 500
           },
-          blocker_reason: { type: ["string", "null"] },
+          blocker_reason: { type: ["string", "null"], maxLength: 2000 },
+          definition_of_done: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          constraints: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          expected_changes: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          allowed_paths: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
+          approval_required_for: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          },
           context: { type: "object" },
           updatedAt: { type: ["string", "null"] },
           rev: { type: ["integer", "null"] }
@@ -97,6 +139,9 @@ function formatAjvError(err) {
     return `${path}: missing required field "${err.params.missingProperty}"`;
   }
   if (err.keyword === "pattern") {
+    if (path.includes("/reference") || path.includes("/references/")) {
+      return `${path}: reference must use path:line or path:line-line; bare URLs are invalid`;
+    }
     return `${path}: does not match pattern ${err.params.pattern}`;
   }
   return `${path}: ${err.message}`;

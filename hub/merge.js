@@ -11,10 +11,17 @@ export function mergeProject(existing, incoming) {
 
   const merged = JSON.parse(JSON.stringify(existing));
 
+  // Tombstone list of task ids the human has explicitly deleted. Hub-owned —
+  // incoming writes cannot set or clear it, and incoming task updates that
+  // target a tombstoned id are dropped with a warning.
+  const tombstones = new Set(
+    Array.isArray(existing?.meta?.deleted_tasks) ? existing.meta.deleted_tasks : []
+  );
+
   // ── meta ─────────────────────────────────────────────────────────
   if (incoming && incoming.meta) {
     for (const [k, v] of Object.entries(incoming.meta)) {
-      if (k === "updatedAt" || k === "rev") {
+      if (k === "updatedAt" || k === "rev" || k === "deleted_tasks") {
         notes.ignored.push(`meta.${k} is hub-owned`);
         continue;
       }
@@ -22,25 +29,47 @@ export function mergeProject(existing, incoming) {
       merged.meta[k] = v;
     }
     if (incoming.meta.swimlanes) {
-      const prev = new Map((existing.meta.swimlanes || []).map((l) => [l.id, l]));
-      merged.meta.swimlanes = incoming.meta.swimlanes.map((lane) => {
-        const p = prev.get(lane.id);
+      const existingLanes = existing.meta.swimlanes || [];
+      const incomingById = new Map((incoming.meta.swimlanes || []).map((lane) => [lane.id, lane]));
+      const existingIds = new Set(existingLanes.map((lane) => lane.id));
+      const nextLanes = [];
+
+      for (const prevLane of existingLanes) {
+        const lane = incomingById.get(prevLane.id);
+        if (!lane) {
+          nextLanes.push(prevLane);
+          continue;
+        }
         const out = { ...lane };
-        if (p && "collapsed" in p) {
-          if ("collapsed" in lane && lane.collapsed !== p.collapsed) {
+        if ("collapsed" in prevLane) {
+          if ("collapsed" in lane && lane.collapsed !== prevLane.collapsed) {
             notes.ignored.push(
               `meta.swimlanes[${lane.id}].collapsed is human-owned (kept existing)`
             );
           }
-          out.collapsed = p.collapsed;
+          out.collapsed = prevLane.collapsed;
         } else if ("collapsed" in lane) {
           notes.ignored.push(
             `meta.swimlanes[${lane.id}].collapsed is human-owned (dropped)`
           );
           delete out.collapsed;
         }
-        return out;
-      });
+        nextLanes.push(out);
+      }
+
+      for (const lane of incoming.meta.swimlanes) {
+        if (existingIds.has(lane.id)) continue;
+        const out = { ...lane };
+        if ("collapsed" in lane) {
+          notes.ignored.push(
+            `meta.swimlanes[${lane.id}].collapsed is human-owned (dropped)`
+          );
+          delete out.collapsed;
+        }
+        nextLanes.push(out);
+      }
+
+      merged.meta.swimlanes = nextLanes;
     }
   }
 
@@ -70,11 +99,16 @@ export function mergeProject(existing, incoming) {
       }
     }
     for (const inc of incomingArr) {
-      if (!existingIds.has(inc.id)) {
-        const defaulted = { dependencies: [], ...inc };
-        next.push(defaulted);
-        notes.appended.push(inc.id);
+      if (existingIds.has(inc.id)) continue;
+      if (tombstones.has(inc.id)) {
+        notes.ignored.push(
+          `task ${inc.id} was deleted by a human; refusing to resurrect (pick a new id if you need to reopen the work)`
+        );
+        continue;
       }
+      const defaulted = { dependencies: [], ...inc };
+      next.push(defaulted);
+      notes.appended.push(inc.id);
     }
     merged.tasks = next;
   }
