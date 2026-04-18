@@ -1386,7 +1386,9 @@ function Header({
   onOpenIntel,
   onUndo,
   onRedo,
-  onDeleteProject
+  onDeleteProject,
+  onCollapseAll,
+  onExpandAll
 }) {
   const meta = project?.data?.meta;
   const projectName = meta?.name || activeSlug || "AWAITING PROJECT";
@@ -1399,6 +1401,13 @@ function Header({
 
   useOutsideClose(projectRef, () => setProjectOpen(false), projectOpen);
   useOutsideClose(overflowRef, () => setOverflowOpen(false), overflowOpen);
+
+  useEffect(() => {
+    if (!overflowOpen) return undefined;
+    const handler = (e) => { if (e.key === "Escape") setOverflowOpen(false); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [overflowOpen]);
 
   const hasProject = !!project?.slug;
 
@@ -1494,37 +1503,82 @@ function Header({
             title="More actions"
           />
           ${overflowOpen ? html`
-            <div class="top-bar__overflow-dropdown">
-              <ul class="top-bar__dropdown-list" role="menu">
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => setOverflowOpen(false)}
-                >Collapse all lanes</li>
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => { onOpenHistory(); setOverflowOpen(false); }}
-                >Open history</li>
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => { onOpenDrawer(); setOverflowOpen(false); }}
-                >Overview</li>
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => { onOpenSettings(); setOverflowOpen(false); }}
-                >Settings</li>
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => { onDeleteProject(project?.slug); setOverflowOpen(false); }}
-                >Delete project</li>
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => { onOpenHelp(); setOverflowOpen(false); }}
-                >Help</li>
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => setOverflowOpen(false)}
-                >Pin project</li>
-                <li class="top-bar__dropdown-item" role="menuitem"
-                  onClick=${() => setOverflowOpen(false)}
-                >Toggle comments</li>
-                <li class="top-bar__dropdown-item top-bar__dropdown-item--active" role="menuitem"
-                  onClick=${() => { onToggleTheme(); setOverflowOpen(false); }}
-                >Toggle theme (${theme === "dark" ? "→ light" : "→ dark"})</li>
-              </ul>
-            </div>
+            <ul class="overflow-menu" role="menu">
+
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => { onCollapseAll && onCollapseAll(); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">⊟</span>
+                <span class="overflow-menu__label">Collapse all lanes</span>
+              </li>
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => { onExpandAll && onExpandAll(); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">⊠</span>
+                <span class="overflow-menu__label">Expand all lanes</span>
+              </li>
+
+              <li class="overflow-menu__divider" role="separator"></li>
+
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => { onOpenHistory(); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">⎌</span>
+                <span class="overflow-menu__label">Open history</span>
+              </li>
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => { onOpenDrawer(); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">◧</span>
+                <span class="overflow-menu__label">Overview</span>
+              </li>
+
+              <li class="overflow-menu__divider" role="separator"></li>
+
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => setOverflowOpen(false)}
+                title="No pin-overview handler found (t33 stub)"
+              >
+                <span class="overflow-menu__icon">⚲</span>
+                <span class="overflow-menu__label">Pin overview</span>
+              </li>
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => setOverflowOpen(false)}
+                title="No comments toggle found (t33 stub)"
+              >
+                <span class="overflow-menu__icon">✎</span>
+                <span class="overflow-menu__label">Toggle comments on cards</span>
+              </li>
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => { onToggleTheme(); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">☼</span>
+                <span class="overflow-menu__label">Toggle theme</span>
+                <span class="overflow-menu__hint">${theme}</span>
+              </li>
+
+              <li class="overflow-menu__divider" role="separator"></li>
+
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => { onOpenSettings(); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">⚙</span>
+                <span class="overflow-menu__label">Settings</span>
+              </li>
+              <li class="overflow-menu__item" role="menuitem"
+                onClick=${() => { onOpenHelp(); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">?</span>
+                <span class="overflow-menu__label">Help</span>
+              </li>
+              <li class="overflow-menu__item overflow-menu__item--destructive" role="menuitem"
+                onClick=${() => { onDeleteProject(project?.slug); setOverflowOpen(false); }}
+              >
+                <span class="overflow-menu__icon">⌫</span>
+                <span class="overflow-menu__label">Delete project</span>
+              </li>
+
+            </ul>
           ` : null}
         </div>
 
@@ -1888,6 +1942,20 @@ function App() {
     }
   };
 
+  const onCollapseAll = () => {
+    const slug = activeSlug;
+    const lanes = projects[slug]?.data?.meta?.swimlanes;
+    if (!slug || !lanes) return;
+    for (const lane of lanes) onToggleCollapse(slug, lane.id, true);
+  };
+
+  const onExpandAll = () => {
+    const slug = activeSlug;
+    const lanes = projects[slug]?.data?.meta?.swimlanes;
+    if (!slug || !lanes) return;
+    for (const lane of lanes) onToggleCollapse(slug, lane.id, false);
+  };
+
   const onSelectProject = (slug) => {
     setActiveSlug(slug);
     if (!drawerPinned) setDrawerOpen(false);
@@ -2146,6 +2214,8 @@ function App() {
           onUndo=${onUndo}
           onRedo=${onRedo}
           onDeleteProject=${onDeleteProject}
+          onCollapseAll=${onCollapseAll}
+          onExpandAll=${onExpandAll}
         />
         <${EmptyState} workspace=${workspace} onOpenHelp=${() => setHelpOpen(true)} />
         <${ConnectionPip} up=${wsUp} />
@@ -2186,6 +2256,8 @@ function App() {
           onUndo=${onUndo}
           onRedo=${onRedo}
           onDeleteProject=${onDeleteProject}
+          onCollapseAll=${onCollapseAll}
+          onExpandAll=${onExpandAll}
         />
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
         <div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>
@@ -2230,6 +2302,8 @@ function App() {
         onUndo=${onUndo}
         onRedo=${onRedo}
         onDeleteProject=${onDeleteProject}
+        onCollapseAll=${onCollapseAll}
+        onExpandAll=${onExpandAll}
       />
       <${HeroStrip}
         project=${active}

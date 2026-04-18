@@ -2779,6 +2779,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 .top-bar__project-dropdown {
   position: absolute;
   top: calc(100% + 2px);
+  left: 0;
   background: var(--paper);
   border: 1px solid var(--rule);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
@@ -2787,11 +2788,15 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 }
 
 .top-bar__overflow-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
   right: 0;
-}
-
-.top-bar__project-dropdown {
-  left: 0;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  min-width: 220px;
+  padding: 4px 0;
 }
 
 .top-bar__dropdown-list {
@@ -3004,4 +3009,74 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 
 .lane-row--collapsed:hover .lane-row__actions {
   opacity: 1;
+}
+
+/* ─── Overflow menu (t33) ─── */
+.overflow-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  min-width: 220px;
+  padding: 4px 0;
+  list-style: none;
+  margin: 0;
+}
+
+.overflow-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  transition: background 80ms;
+  white-space: nowrap;
+}
+
+.overflow-menu__item:hover {
+  background: var(--pill);
+}
+
+.overflow-menu__item--destructive {
+  color: var(--block);
+}
+
+.overflow-menu__item--destructive:hover {
+  background: var(--pill);
+}
+
+.overflow-menu__icon {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--ink-2);
+}
+
+.overflow-menu__item--destructive .overflow-menu__icon {
+  color: var(--block);
+}
+
+.overflow-menu__label {
+  flex: 1;
+}
+
+.overflow-menu__hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.overflow-menu__divider {
+  border-top: 1px solid var(--rule-soft);
+  margin: 4px 0;
 }
