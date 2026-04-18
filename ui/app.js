@@ -1505,6 +1505,151 @@ function Header({
   `;
 }
 
+// ─────── Hero strip (t23) ───────
+function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
+  const [nextData, setNextData] = useState(null);
+  const [nextLoading, setNextLoading] = useState(false);
+
+  useEffect(() => {
+    if (!slug) return;
+    setNextLoading(true);
+    fetch(`/api/projects/${slug}/next?limit=1`)
+      .then((r) => r.json())
+      .then((body) => {
+        setNextData(body);
+        setNextLoading(false);
+      })
+      .catch(() => {
+        setNextData(null);
+        setNextLoading(false);
+      });
+  }, [slug, project?.rev]);
+
+  if (!project?.data) return null;
+
+  const data = project.data;
+  const meta = data.meta;
+  const tasks = data.tasks || [];
+  const derived = project.derived || {};
+
+  const total = derived.total ?? tasks.length;
+  const counts = derived.counts || {};
+  const complete = counts.complete || 0;
+  const inProgress = counts.in_progress || 0;
+  const notStarted = counts.not_started || 0;
+  const deferred = counts.deferred || 0;
+
+  const blockedByReason = tasks.filter(
+    (t) => typeof t.blocker_reason === "string" && t.blocker_reason.trim()
+  ).length;
+  const blockedByDeps = Object.keys(derived.blocked || {}).length;
+  const blockedCount = Math.max(blockedByReason, blockedByDeps);
+
+  const pct = total === 0 ? 0 : Math.round((complete / total) * 100);
+
+  const completeW = total === 0 ? 0 : (complete / total) * 100;
+  const warnW = total === 0 ? 0 : (inProgress / total) * 100;
+  const blockedW = total === 0 ? 0 : (blockedCount / total) * 100;
+
+  const projectName = meta?.name || slug;
+  const workspacePath = meta?.workspace
+    ? meta.workspace.replace(/^.*\/([^/]+\/[^/]+)$/, "~/$1")
+    : (meta?.slug ? `~/${meta.slug}` : "");
+  const swimlaneCount = (meta?.swimlanes || []).length;
+  const updatedAt = meta?.updatedAt
+    ? new Date(meta.updatedAt).toLocaleTimeString()
+    : "—";
+
+  const statusTiles = [
+    { label: "Complete", key: "complete", count: complete, color: "var(--ok)", strong: true },
+    { label: "In progress", key: "in_progress", count: inProgress, color: "var(--warn)", strong: false },
+    { label: "Not started", key: "not_started", count: notStarted, color: "var(--ink-3)", strong: false },
+    { label: "Deferred", key: "deferred", count: deferred, color: "var(--ink-3)", strong: false },
+    { label: "Blocked", key: "blocked", count: blockedCount, color: "var(--block)", strong: false },
+    { label: "Open", key: "open", count: total, color: "var(--ink-2)", strong: true },
+  ];
+
+  const nextTask = nextData?.next?.[0] ?? null;
+
+  function buildReason(task) {
+    if (!task) return "";
+    const parts = [];
+    if (task.ready) parts.push("highest-ranked ready task");
+    if (task.priorityId) parts.push(task.priorityId);
+    if (task.dependenciesResolved) parts.push("dependencies satisfied");
+    if (task.status === "in_progress") parts.push("already in progress");
+    if (Array.isArray(task.requires_approval) && task.requires_approval.length > 0) {
+      parts.push(`requires ${task.requires_approval.join(", ")} approval`);
+    }
+    return parts.join(" · ") || "ready for work";
+  }
+
+  const reasonStr = Array.isArray(nextTask?.reason) && nextTask.reason.length > 0
+    ? nextTask.reason.join(" · ")
+    : buildReason(nextTask);
+
+  return html`
+    <div class="hero-strip">
+      <div class="hero-col hero-col--left">
+        <div class="hero-eyebrow">PROJECT</div>
+        <div class="hero-title">${projectName}</div>
+        ${workspacePath ? html`<div class="hero-path">${workspacePath}</div>` : null}
+        <div class="hero-meta">${swimlaneCount} swimlane${swimlaneCount !== 1 ? "s" : ""} · ${total} tasks · updated ${updatedAt}</div>
+        <div class="hero-display">
+          <span class="hero-display__pct">${pct}<span class="hero-display__unit">%</span></span>
+          <span class="hero-display__text">${complete} of ${total} tasks complete</span>
+        </div>
+        <div class="hero-progress">
+          ${completeW > 0 ? html`<span class="hero-progress__segment--complete" style=${`width:${completeW}%`}></span>` : null}
+          ${warnW > 0 ? html`<span class="hero-progress__segment--warn" style=${`left:${completeW}%;width:${warnW}%`}></span>` : null}
+          ${blockedCount > 0 ? html`<span class="hero-progress__blocked" style=${`width:${blockedW}%`}></span>` : null}
+        </div>
+      </div>
+      <div class="hero-col hero-col--status">
+        <div class="hero-eyebrow">STATUS</div>
+        <div class="hero-status__grid">
+          ${statusTiles.map((tile) => html`
+            <div key=${tile.key} class=${`hero-tile ${tile.strong ? "hero-tile--strong" : ""}`}>
+              <span class="hero-tile__dot" style=${`background:${tile.color}`}></span>
+              <span class="hero-tile__label">${tile.label}</span>
+              <span class="hero-tile__count" style=${tile.count === 0 ? "color:var(--ink-3)" : ""}>${tile.count}</span>
+            </div>
+          `)}
+        </div>
+      </div>
+      <div class="hero-col hero-col--next">
+        ${nextLoading
+          ? html`<div class="hero-eyebrow">RECOMMENDED NEXT</div><div class="hero-next__reason">Loading…</div>`
+          : !nextTask
+            ? html`
+                <div class="hero-eyebrow">RECOMMENDED NEXT</div>
+                <div class="hero-next__reason">No ready task</div>
+              `
+            : html`
+                <div class="hero-next">
+                  <div class="hero-next__head">
+                    <span>★ RECOMMENDED NEXT</span>
+                    <span>${nextTask.id}</span>
+                  </div>
+                  <div class="hero-next__title">${nextTask.title}</div>
+                  <div class="hero-next__reason">${reasonStr}</div>
+                  <div class="hero-next__actions">
+                    <button
+                      class="hero-next__btn--pick"
+                      onClick=${() => onPickTask && onPickTask(slug, nextTask.id)}
+                    >[PICK]</button>
+                    <button
+                      class="hero-next__btn--read"
+                      onClick=${() => onOpenTask && onOpenTask(slug, nextTask.id, "brief")}
+                    >[READ]</button>
+                  </div>
+                </div>
+              `}
+      </div>
+    </div>
+  `;
+}
+
 // ─────── App ───────
 function App() {
   const initialSettings = useMemo(() => loadSettings(), []);
@@ -2074,6 +2219,12 @@ function App() {
         onUndo=${onUndo}
         onRedo=${onRedo}
         onDeleteProject=${onDeleteProject}
+      />
+      <${HeroStrip}
+        project=${active}
+        slug=${activeSlug}
+        onPickTask=${onPickTask}
+        onOpenTask=${onOpenTaskIntel}
       />
       <div class="banner-row">
         <div class="banner-spacer"></div>

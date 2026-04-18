@@ -2448,3 +2448,253 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 .bracket--active.bracket--tone-ok    { color: var(--ok); }
 .bracket--active.bracket--tone-warn  { color: var(--warn); }
 .bracket--active.bracket--tone-block { color: var(--block); }
+
+/* ─── Hero strip (t23) ─── */
+.hero-strip {
+  display: grid;
+  grid-template-columns: 1.1fr 1.2fr 340px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  flex-shrink: 0;
+}
+
+.hero-col {
+  padding: 14px 20px;
+}
+
+.hero-col + .hero-col {
+  border-left: 1px solid var(--rule);
+}
+
+.hero-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+
+.hero-title {
+  font-family: var(--font-sans);
+  font-size: var(--type-title-size);
+  font-weight: 600;
+  letter-spacing: var(--type-title-tracking);
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.hero-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.hero-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 4px;
+}
+
+.hero-display {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.hero-display__pct {
+  font-family: var(--font-sans);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.hero-display__unit {
+  font-size: 18px;
+  color: var(--ink-3);
+}
+
+.hero-display__text {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+.hero-progress {
+  position: relative;
+  height: 5px;
+  background: var(--rule-soft);
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.hero-progress__segment--complete {
+  display: inline-block;
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: var(--ok);
+}
+
+.hero-progress__segment--warn {
+  display: inline-block;
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: var(--warn);
+}
+
+.hero-progress__blocked {
+  display: inline-block;
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--block);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.hero-col--status {
+  display: flex;
+  flex-direction: column;
+}
+
+.hero-status__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.hero-tile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--rule-soft);
+  background: transparent;
+}
+
+.hero-tile--strong {
+  background: var(--pill);
+  border-color: transparent;
+}
+
+.hero-tile__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hero-tile__label {
+  font-size: 12px;
+  color: var(--ink-2);
+  flex: 1 1 auto;
+}
+
+.hero-tile__count {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+
+.hero-col--next {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.hero-next {
+  background: var(--ok-soft);
+  border: 1px solid rgba(43, 138, 74, 0.27);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.hero-next__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  font-weight: 600;
+  color: var(--ok);
+  text-transform: uppercase;
+}
+
+.hero-next__title {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.hero-next__reason {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  flex: 1 1 auto;
+}
+
+.hero-next__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hero-next__btn--pick {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  background: var(--ok);
+  color: var(--paper);
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+  border-radius: var(--radius-0);
+}
+
+.hero-next__btn--pick:hover {
+  opacity: 0.88;
+}
+
+.hero-next__btn--read {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid rgba(43, 138, 74, 0.33);
+  cursor: pointer;
+  line-height: 1;
+  border-radius: var(--radius-0);
+}
+
+.hero-next__btn--read:hover {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* when no nextTask: pad the plain eyebrow + reason in --next col */
+.hero-col--next > .hero-eyebrow,
+.hero-col--next > .hero-next__reason {
+  padding: 14px 20px 0;
+}
