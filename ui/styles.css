@@ -2904,3 +2904,104 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 .scratchpad-row--editing {
   align-items: flex-start;
 }
+
+/* ─── Lane row collapsed (t28) ─── */
+.lane-row--collapsed {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  align-items: center;
+  padding: 14px 20px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+  cursor: pointer;
+  outline: none;
+  /* box-shadow used for left accent on hover to avoid layout shift */
+  box-shadow: inset 3px 0 0 0 transparent;
+  transition: box-shadow 80ms ease;
+}
+
+.lane-row--collapsed:hover {
+  box-shadow: inset 3px 0 0 0 var(--ink-3);
+}
+
+.lane-row--collapsed:focus-visible {
+  box-shadow: inset 3px 0 0 0 var(--ink-3), inset 0 0 0 1px var(--accent);
+}
+
+.lane-row__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lane-row__chevron {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.lane-row__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lane-row__stats {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  min-width: 0;
+}
+
+.lane-row__progress {
+  flex: 1;
+  margin-left: 10px;
+  height: 4px;
+  background: var(--rule-soft);
+  position: relative;
+}
+
+.lane-row__progress-fill {
+  height: 100%;
+  background: var(--ok);
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.lane-row__progress-warn {
+  height: 100%;
+  background: var(--warn);
+  position: absolute;
+  top: 0;
+}
+
+.lane-row__pct {
+  color: var(--ink-2);
+  min-width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.lane-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.lane-row--collapsed:hover .lane-row__actions {
+  opacity: 1;
+}

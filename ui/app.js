@@ -612,9 +612,13 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
       lane.collapsed !== undefined ? lane.collapsed : allComplete;
 
     if (effectiveCollapsed) {
+      const done = per.counts.complete || 0;
+      const inProg = per.counts.in_progress || 0;
+      const donePct = per.total === 0 ? 0 : (done / per.total) * 100;
+      const inProgPct = per.total === 0 ? 0 : (inProg / per.total) * 100;
       return html`
         <div
-          class="lane-collapsed"
+          class="lane-row--collapsed"
           key=${`lane-${lane.id}`}
           onClick=${() => onToggleCollapse(lane.id, false)}
           role="button"
@@ -627,26 +631,37 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
           }}
           title="Click to expand swimlane"
         >
-          <div class="lane-collapsed-head">
-            <span class="lane-chevron">${"\u25B6"}</span>
-            <div class="lane-collapsed-label">
-              <span class="lane-label-text" title=${lane.label}>${lane.label}</span>
-              <${CopyInlineBtn}
-                value=${lane.label}
-                label="Lane name"
-                title=${`Copy lane name: ${lane.label}`}
+          <div class="lane-row__label">
+            <span class="lane-row__chevron">▸</span>
+            <span class="lane-row__title" title=${lane.label}>${lane.label}</span>
+          </div>
+          <div class="lane-row__stats">
+            <span>${per.total} tasks</span>
+            <span>· ${active} active</span>
+            <span>· ${done} done</span>
+            <div class="lane-row__progress">
+              <div class="lane-row__progress-fill" style=${`width: ${donePct}%`}></div>
+              ${inProg > 0 ? html`<div class="lane-row__progress-warn" style=${`left: ${donePct}%; width: ${inProgPct}%`}></div>` : null}
+            </div>
+            <span class="lane-row__pct">${per.pct}%</span>
+            <div class="lane-row__actions" onClick=${(e) => e.stopPropagation()}>
+              <${Bracket}
+                label="↑"
+                soft
+                disabled=${!canMoveUp}
+                title=${canMoveUp ? `Move ${lane.label} up` : `${lane.label} is already the top lane`}
+                ariaLabel=${`Move lane ${lane.label} up`}
+                onClick=${() => onMoveLane && onMoveLane(lane.id, "up")}
+              />
+              <${Bracket}
+                label="↓"
+                soft
+                disabled=${!canMoveDown}
+                title=${canMoveDown ? `Move ${lane.label} down` : `${lane.label} is already the bottom lane`}
+                ariaLabel=${`Move lane ${lane.label} down`}
+                onClick=${() => onMoveLane && onMoveLane(lane.id, "down")}
               />
             </div>
-          </div>
-          <div class="lane-collapsed-main">
-            ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
-            <div class="lane-collapsed-stats">
-              <span>${per.total} tasks</span>
-              <span class="active">· ${active} active</span>
-              <span>· ${per.counts.complete || 0} done</span>
-            </div>
-            <${SegBar} counts=${per.counts} total=${per.total} thin />
-            <span class="lane-collapsed-pct">${per.pct}%</span>
           </div>
         </div>
       `;
