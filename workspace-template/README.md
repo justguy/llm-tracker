@@ -50,6 +50,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - `.runtime/` means the shared workspace runtime metadata
 - HTTP calls should still target the shared daemon
 - durable tracker writes still update the linked repo-local tracker file in place; that is sync, not relocation
+- if that repo-local tracker JSON is versioned in the project, expect successful patch writes that change durable fields to update that repo-visible JSON file in place
 - linked trackers store runtime churn in `<shared-workspace>/.runtime/overlays/<slug>.json`
 - for linked trackers, task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer need to dirty the repo-visible JSON
 
@@ -691,7 +692,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 **On failure:** rerun with `curl -i` to capture the response. The hub returns structured JSON: `{error, type, hint}`.
 
-On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, and `noop`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly.
+On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, and `noop`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly. If that target lives in the repo, durable patch writes are expected to update that visible JSON file immediately.
 
 ### Merge semantics (both modes)
 

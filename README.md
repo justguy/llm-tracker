@@ -145,6 +145,7 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - the shared daemon automatically watches the shared workspace `patches/` directory
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
 - durable tracker writes still land on the linked repo-local tracker file itself; that is sync, not relocation
+- if that linked tracker JSON is versioned inside the repo, expect successful patch writes that change durable fields to update the repo-visible JSON file in place
 - linked trackers now split high-churn runtime state into the shared workspace overlay at `.runtime/overlays/<slug>.json`
 - for linked trackers, runtime churn such as task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer needs to dirty the repo-visible JSON
 - durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
@@ -328,7 +329,7 @@ curl -X POST http://localhost:4400/api/projects/<slug>/redo
 curl -X POST http://localhost:4400/api/projects/<slug>/reload
 ```
 
-Successful `POST /api/projects/<slug>/patch` responses are authoritative immediately. They now return the accepted post-write `rev`, `updatedAt`, `noop`, and `file` (the effective tracker JSON path the hub wrote, which is the repo-local target for linked projects).
+Successful `POST /api/projects/<slug>/patch` responses are authoritative immediately. They now return the accepted post-write `rev`, `updatedAt`, `noop`, and `file` (the effective tracker JSON path the hub wrote, which is the repo-local target for linked projects). When `file` points at a repo-local tracker, durable patch writes are expected to update that visible JSON file right away.
 
 Patch payloads stay small. Typical shape:
 

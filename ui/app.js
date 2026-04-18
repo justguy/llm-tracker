@@ -610,7 +610,7 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
         >
           <span class="lane-chevron">${"\u25B6"}</span>
           <div class="lane-collapsed-label">
-            <span class="lane-label-text">${lane.label}</span>
+            <span class="lane-label-text" title=${lane.label}>${lane.label}</span>
             <${CopyInlineBtn}
               value=${lane.label}
               label="Lane name"
@@ -639,7 +639,7 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
             title="Collapse swimlane"
           >${"\u25BC"}</button>
           <div class="lane-label">
-            <span class="lane-label-text">${lane.label}</span>
+            <span class="lane-label-text" title=${lane.label}>${lane.label}</span>
             <${CopyInlineBtn}
               value=${lane.label}
               label="Lane name"
@@ -1328,6 +1328,8 @@ function Header({
   searchMode,
   onSearchModeChange,
   searchMeta,
+  headerCollapsed,
+  onToggleHeaderCollapse,
   theme,
   onToggleTheme,
   onOpenHelp,
@@ -1343,119 +1345,139 @@ function Header({
   const labelFor = (s) => projects?.[s]?.data?.meta?.name || s;
   const multiPinned = Array.isArray(pinnedProjectNames) && pinnedProjectNames.length > 1;
   const pinnedSummary = multiPinned ? pinnedProjectNames.join(" · ") : null;
+  const collapsedTitle = multiPinned
+    ? pinnedSummary
+    : meta?.name || labelFor(activeSlug) || "AWAITING PROJECT";
 
   return html`
-    <div class="app-header">
+    <div class=${`app-header ${headerCollapsed ? "collapsed" : ""}`}>
       <div>
         <div class="brand">LLM PROJECT TRACKER</div>
-        <div class="project-select">
-          ${multiPinned
-            ? html`
-                <div
-                  class="project-title-multi"
-                  title=${`${pinnedSummary} — click any project pane to change the active project`}
-                >${pinnedSummary}</div>
-              `
-            : html`
-                <${Dropdown}
-                  value=${activeSlug}
-                  options=${slugs}
-                  onChange=${setActive}
-                  renderLabel=${labelFor}
-                  className="project-dropdown"
-                />
-              `}
-        </div>
-        <div class="project-meta">
-          ${multiPinned ? html`<span class="kv"><b>view</b>${pinnedProjectNames.length} pinned</span>` : null}
-          ${multiPinned && meta?.name ? html`<span class="kv"><b>active</b>${meta.name}</span>` : null}
-          ${meta ? html`<span class="kv"><b>slug</b>${meta.slug}</span>` : null}
-          ${meta ? html`<span class="kv"><b>swimlanes</b>${meta.swimlanes.length}</span>` : null}
-          ${meta ? html`<span class="kv"><b>tasks</b>${project.data.tasks.length}</span>` : null}
-          ${project?.data?.meta?.updatedAt
-            ? html`<span class="kv"><b>updated</b>${new Date(project.data.meta.updatedAt).toLocaleTimeString()}</span>`
-            : null}
-        </div>
+        ${headerCollapsed
+          ? html`<div class="project-title-collapsed" title=${collapsedTitle}>${collapsedTitle}</div>`
+          : html`
+              <div class="project-select">
+                ${multiPinned
+                  ? html`
+                      <div
+                        class="project-title-multi"
+                        title=${`${pinnedSummary} — click any project pane to change the active project`}
+                      >${pinnedSummary}</div>
+                    `
+                  : html`
+                      <${Dropdown}
+                        value=${activeSlug}
+                        options=${slugs}
+                        onChange=${setActive}
+                        renderLabel=${labelFor}
+                        className="project-dropdown"
+                      />
+                    `}
+              </div>
+              <div class="project-meta">
+                ${multiPinned ? html`<span class="kv"><b>view</b>${pinnedProjectNames.length} pinned</span>` : null}
+                ${multiPinned && meta?.name ? html`<span class="kv"><b>active</b>${meta.name}</span>` : null}
+                ${meta ? html`<span class="kv"><b>slug</b>${meta.slug}</span>` : null}
+                ${meta ? html`<span class="kv"><b>swimlanes</b>${meta.swimlanes.length}</span>` : null}
+                ${meta ? html`<span class="kv"><b>tasks</b>${project.data.tasks.length}</span>` : null}
+                ${project?.data?.meta?.updatedAt
+                  ? html`<span class="kv"><b>updated</b>${new Date(project.data.meta.updatedAt).toLocaleTimeString()}</span>`
+                  : null}
+              </div>
+              ${workspace ? html`<div class="workspace-path project-workspace-path">WORKSPACE · ${workspace.workspace}</div>` : null}
+            `}
       </div>
       <div class="header-right">
         <div class="header-actions">
           <button
             class="icon-btn"
-            onClick=${() => onOpenIntel("next")}
-            disabled=${!project?.slug}
-            title="Deterministic next-task shortlist"
-          >[NEXT]</button>
-          <button
-            class="icon-btn"
-            onClick=${() => onOpenIntel("blockers")}
-            disabled=${!project?.slug}
-            title="Blocked tasks and blockers"
-          >[BLOCKERS]</button>
-          <button
-            class="icon-btn"
-            onClick=${() => onOpenIntel("changed")}
-            disabled=${!project?.slug}
-            title="Recent changed tasks"
-          >[CHANGED]</button>
-          <button
-            class="icon-btn"
-            onClick=${() => onOpenIntel("decisions")}
-            disabled=${!project?.slug}
-            title="Recent decision notes"
-          >[DECISIONS]</button>
-          <button
-            class="icon-btn"
-            onClick=${onUndo}
-            disabled=${!project?.rev || project.rev < 2}
-            title=${project?.rev >= 2 ? "Undo the most recent effective change" : "Nothing to undo"}
-          >[UNDO]</button>
-          <button
-            class="icon-btn"
-            onClick=${onRedo}
-            disabled=${!project?.slug}
-            title="Redo the latest undo if available"
-          >[REDO]</button>
-          <button
-            class="icon-btn"
-            onClick=${onOpenHistory}
-            disabled=${!project?.slug}
-            title="Recent revisions with rollback"
-          >[HISTORY]</button>
-          <button
-            class="icon-btn danger"
-            onClick=${() => onDeleteProject(project?.slug)}
-            title="Delete this project"
-          >[DELETE]</button>
-          <button class="icon-btn" onClick=${onOpenDrawer} title="Project overview">[OVERVIEW]</button>
-          <button class="icon-btn" aria-label=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} onClick=${onToggleTheme} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
-            ${theme === "dark" ? "[☼]" : "[☾]"}
-          </button>
-          <button class="icon-btn" onClick=${onOpenSettings} title="Settings">[SETTINGS]</button>
-          <button class="icon-btn" aria-label="Help" onClick=${onOpenHelp} title="Help">[?]</button>
+            onClick=${onToggleHeaderCollapse}
+            title=${headerCollapsed ? "Expand header" : "Collapse header"}
+          >${headerCollapsed ? "[EXPAND]" : "[COLLAPSE]"}</button>
+          ${headerCollapsed
+            ? null
+            : html`
+                <button
+                  class="icon-btn"
+                  onClick=${() => onOpenIntel("next")}
+                  disabled=${!project?.slug}
+                  title="Deterministic next-task shortlist"
+                >[NEXT]</button>
+                <button
+                  class="icon-btn"
+                  onClick=${() => onOpenIntel("blockers")}
+                  disabled=${!project?.slug}
+                  title="Blocked tasks and blockers"
+                >[BLOCKERS]</button>
+                <button
+                  class="icon-btn"
+                  onClick=${() => onOpenIntel("changed")}
+                  disabled=${!project?.slug}
+                  title="Recent changed tasks"
+                >[CHANGED]</button>
+                <button
+                  class="icon-btn"
+                  onClick=${() => onOpenIntel("decisions")}
+                  disabled=${!project?.slug}
+                  title="Recent decision notes"
+                >[DECISIONS]</button>
+                <button
+                  class="icon-btn"
+                  onClick=${onUndo}
+                  disabled=${!project?.rev || project.rev < 2}
+                  title=${project?.rev >= 2 ? "Undo the most recent effective change" : "Nothing to undo"}
+                >[UNDO]</button>
+                <button
+                  class="icon-btn"
+                  onClick=${onRedo}
+                  disabled=${!project?.slug}
+                  title="Redo the latest undo if available"
+                >[REDO]</button>
+                <button
+                  class="icon-btn"
+                  onClick=${onOpenHistory}
+                  disabled=${!project?.slug}
+                  title="Recent revisions with rollback"
+                >[HISTORY]</button>
+                <button
+                  class="icon-btn danger"
+                  onClick=${() => onDeleteProject(project?.slug)}
+                  title="Delete this project"
+                >[DELETE]</button>
+                <button class="icon-btn" onClick=${onOpenDrawer} title="Project overview">[OVERVIEW]</button>
+                <button class="icon-btn" aria-label=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`} onClick=${onToggleTheme} title=${`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
+                  ${theme === "dark" ? "[☼]" : "[☾]"}
+                </button>
+                <button class="icon-btn" onClick=${onOpenSettings} title="Settings">[SETTINGS]</button>
+                <button class="icon-btn" aria-label="Help" onClick=${onOpenHelp} title="Help">[?]</button>
+              `}
         </div>
-        <div class="search-controls">
-          <input
-            class="filter-input"
-            value=${filter}
-            onInput=${(e) => setFilter(e.currentTarget.value)}
-            placeholder=${searchMode === "fuzzy" ? "Fuzzy search — approximate title, id, tag" : "Filter tasks — title, id, tag"}
-          />
-          <div class="search-mode-tabs">
-            <button
-              class=${`search-mode-tab ${searchMode === "filter" ? "active" : ""}`}
-              onClick=${() => onSearchModeChange("filter")}
-              title="Current exact board filter"
-            >[FILTER]</button>
-            <button
-              class=${`search-mode-tab ${searchMode === "fuzzy" ? "active" : ""}`}
-              onClick=${() => onSearchModeChange("fuzzy")}
-              title="Approximate lexical search that keeps the board intact"
-              disabled=${!project?.slug}
-            >[FUZZY]</button>
-          </div>
-        </div>
-        ${searchMeta ? html`<div class=${`search-meta ${searchMeta.kind || ""}`}>${searchMeta.text}</div>` : null}
-        ${workspace ? html`<div class="workspace-path">WORKSPACE · ${workspace.workspace}</div>` : null}
+        ${headerCollapsed
+          ? null
+          : html`
+              <div class="search-controls">
+                <input
+                  class="filter-input"
+                  value=${filter}
+                  onInput=${(e) => setFilter(e.currentTarget.value)}
+                  placeholder=${searchMode === "fuzzy" ? "Fuzzy search — approximate title, id, tag" : "Filter tasks — title, id, tag"}
+                />
+                <div class="search-mode-tabs">
+                  <button
+                    class=${`search-mode-tab ${searchMode === "filter" ? "active" : ""}`}
+                    onClick=${() => onSearchModeChange("filter")}
+                    title="Current exact board filter"
+                  >[FILTER]</button>
+                  <button
+                    class=${`search-mode-tab ${searchMode === "fuzzy" ? "active" : ""}`}
+                    onClick=${() => onSearchModeChange("fuzzy")}
+                    title="Approximate lexical search that keeps the board intact"
+                    disabled=${!project?.slug}
+                  >[FUZZY]</button>
+                </div>
+              </div>
+              ${searchMeta ? html`<div class=${`search-meta ${searchMeta.kind || ""}`}>${searchMeta.text}</div>` : null}
+            `}
       </div>
     </div>
   `;
@@ -1478,6 +1500,7 @@ function App() {
   });
   const [wsUp, setWsUp] = useState(false);
   const [theme, setTheme] = useState(initialSettings.theme || "dark");
+  const [headerCollapsed, setHeaderCollapsed] = useState(!!initialSettings.headerCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(!!initialSettings.drawerPinned);
   const [drawerPinned, setDrawerPinned] = useState(!!initialSettings.drawerPinned);
   const [pinnedSlugs, setPinnedSlugs] = useState(() =>
@@ -1514,8 +1537,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug });
-  }, [theme, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug]);
+    saveSettings({ theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug });
+  }, [theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -1973,6 +1996,8 @@ function App() {
           searchMode=${searchMode}
           onSearchModeChange=${setSearchMode}
           searchMeta=${searchMeta}
+          headerCollapsed=${headerCollapsed}
+          onToggleHeaderCollapse=${() => setHeaderCollapsed((v) => !v)}
           theme=${theme}
           onToggleTheme=${onToggleTheme}
           onOpenHelp=${() => setHelpOpen(true)}
@@ -2015,6 +2040,8 @@ function App() {
         searchMode=${searchMode}
         onSearchModeChange=${setSearchMode}
         searchMeta=${searchMeta}
+        headerCollapsed=${headerCollapsed}
+        onToggleHeaderCollapse=${() => setHeaderCollapsed((v) => !v)}
         theme=${theme}
         onToggleTheme=${onToggleTheme}
         onOpenHelp=${() => setHelpOpen(true)}

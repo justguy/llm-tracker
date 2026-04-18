@@ -89,6 +89,22 @@ body {
   padding: 0 20px;
 }
 
+.app-header.collapsed {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.app-header.collapsed > div:first-child {
+  min-width: 0;
+}
+
+.app-header.collapsed > div:last-child {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .brand {
   font-size: 10px;
   letter-spacing: 0.22em;
@@ -216,6 +232,12 @@ body {
   justify-content: center;
 }
 
+.app-header.collapsed .header-right {
+  gap: 0;
+  justify-content: center;
+  align-items: flex-end;
+}
+
 .search-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -302,6 +324,10 @@ body {
   text-transform: uppercase;
 }
 
+.project-workspace-path {
+  margin-top: 6px;
+}
+
 .project-title-placeholder {
   font-size: 18px;
   font-weight: 700;
@@ -322,12 +348,30 @@ body {
   max-width: min(64vw, 760px);
 }
 
+.project-title-collapsed {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--white);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ─────── Header button cluster ─────── */
 .header-actions {
   display: flex;
   gap: 6px;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.app-header.collapsed .header-actions {
+  flex-wrap: nowrap;
 }
 
 .icon-btn {
@@ -1609,7 +1653,7 @@ body {
 .lane-collapsed:hover .lane-chevron { color: var(--amber); background: var(--amber-soft); }
 .lane-collapsed:focus-visible { box-shadow: inset 0 0 0 1px var(--amber); }
 .lane-collapsed > .lane-chevron { flex-shrink: 0; }
-.lane-collapsed > .lane-collapsed-label { flex-shrink: 0; min-width: 180px; }
+.lane-collapsed > .lane-collapsed-label { flex: 0 1 320px; min-width: 0; }
 .lane-collapsed > .lane-desc { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lane-collapsed > .lane-collapsed-stats { flex-shrink: 0; margin-left: auto; }
 .lane-collapsed > .seg-bar { flex: 0 1 260px; min-width: 160px; }
@@ -1627,7 +1671,11 @@ body {
 }
 
 .lane-label-text {
+  display: block;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lane-label .card-copy-btn,
