@@ -14,7 +14,9 @@
   --ok: #5cbd6a;
   --ok-soft: rgba(92, 189, 106, 0.15);
   --warn: #e3a052;
+  --warn-soft: rgba(227, 160, 82, 0.14);
   --block: #d46b5e;
+  --block-soft: rgba(212, 107, 94, 0.14);
 
   --space-2: 4px;
   --space-3: 8px;
@@ -1810,35 +1812,34 @@ body {
 /* ─────── Cards ─────── */
 .card {
   position: relative;
-  background: var(--panel-elev);
-  border: 1px solid var(--hairline-strong);
+  background: var(--paper);
+  border: 1px solid var(--rule);
   border-left: 3px solid var(--status-not-started);
   border-radius: 0;
-  padding: 8px 10px;
-  cursor: grab;
-  transition: border-color 0.1s ease, background 0.1s ease;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: border-color 0.1s ease;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 10px;
   min-width: 0;
   overflow: hidden;
 }
 
-.card.status-complete    { border-left-color: var(--status-complete); }
-.card.status-in_progress { border-left-color: var(--status-in-progress); }
-.card.status-not_started { border-left-color: var(--status-not-started); }
-.card.status-deferred    { border-left-color: var(--status-deferred); opacity: 0.6; }
+.card.status-complete    { border-left-color: var(--ok); }
+.card.status-in_progress { border-left-color: var(--warn); }
+.card.status-not_started { border-left-color: var(--ink-3); }
+.card.status-deferred    { border-left-color: var(--ink-3); opacity: 0.6; }
+.card.status-blocked     { border-left-color: var(--block); }
 
 .card:hover {
-  background: var(--bg);
-  border-color: var(--amber);
+  border-top-color: var(--ink-3);
+  border-right-color: var(--ink-3);
+  border-bottom-color: var(--ink-3);
 }
-.card:hover .card-title { color: var(--amber); }
 .card:hover .card-delete { opacity: 1; }
 .card:hover .card-copy-btn,
-.card:focus-within .card-copy-btn,
-.card:hover .card-intel-actions,
-.card:focus-within .card-intel-actions { opacity: 1; }
+.card:focus-within .card-copy-btn { opacity: 1; }
 
 .card-delete {
   position: absolute;
@@ -1869,23 +1870,20 @@ body {
 }
 
 .card-id {
-  font-size: 9.5px;
-  color: var(--muted);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.5px;
   font-weight: 400;
   min-width: 0;
 }
-.card-id::before { content: "["; }
-.card-id::after { content: "]"; }
 
 .card-title {
-  font-weight: 700;
-  font-size: 12px;
-  color: var(--white);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
   line-height: 1.3;
-  letter-spacing: 0.02em;
-  transition: color 0.1s ease;
   min-width: 0;
 }
 
@@ -1914,9 +1912,9 @@ body {
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 1px solid var(--cyan);
+  border: 1px solid var(--rule);
   background: transparent;
-  color: var(--cyan);
+  color: var(--ink-3);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1;
@@ -1927,8 +1925,8 @@ body {
 
 .card-copy-btn:hover,
 .card-copy-btn:focus-visible {
-  color: var(--cyan);
-  border-color: var(--cyan);
+  color: var(--ink-2);
+  border-color: var(--ink-3);
   outline: none;
 }
 
@@ -1939,15 +1937,98 @@ body {
 }
 
 .card-goal {
-  font-size: 10.5px;
-  color: var(--white-dim);
-  line-height: 1.4;
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-word;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* ─── Task card (t25) ─── */
+.card__tier-1 {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-right: 20px;
+}
+
+.card__tier-2 {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__tier-3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.card__status-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.card__status-pill.status-complete    { color: var(--ok);    background: var(--ok-soft); }
+.card__status-pill.status-in_progress { color: var(--warn);  background: var(--warn-soft); }
+.card__status-pill.status-not_started { color: var(--ink-2); background: transparent; border: 1px solid var(--rule); }
+.card__status-pill.status-deferred    { color: var(--ink-3); background: transparent; border: 1px solid var(--rule); }
+.card__status-pill.status-blocked     { color: var(--block); background: var(--block-soft); }
+
+.card__assignee-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  padding: 3px 6px;
+  border: 1px solid var(--rule);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.card__tag-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+
+.card__meta-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+
+.card__meta-chip.ok   { color: var(--ok); }
+.card__meta-chip.warn { color: var(--warn); }
+
+.card__action-row {
+  display: flex;
+  gap: 4px;
+  border-top: 1px dashed var(--rule);
+  padding-top: 10px;
 }
 
 .card-intel-actions {
@@ -2011,8 +2092,8 @@ body {
 }
 
 .card.fuzzy-hit {
-  border-color: var(--cyan);
-  box-shadow: 0 0 0 1px var(--cyan-soft), 0 0 18px var(--cyan-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft), 0 0 18px var(--accent-soft);
 }
 
 .card.fuzzy-dim {
@@ -2099,21 +2180,21 @@ body {
   position: absolute;
   bottom: 6px;
   right: 6px;
-  color: var(--amber);
-  background: var(--amber-soft);
-  border-color: var(--amber-dim);
+  color: var(--ink-2);
+  background: transparent;
+  border-color: var(--rule);
   cursor: pointer;
   outline: none;
   z-index: 2;
 }
 .badge.comment-badge.empty {
-  color: var(--muted);
+  color: var(--ink-3);
   background: transparent;
-  border-color: var(--hairline-strong);
-  opacity: 0.55;
+  border-color: var(--rule);
+  opacity: 0.5;
 }
 .card:hover .badge.comment-badge.empty { opacity: 1; }
-.badge.comment-badge:focus-visible { box-shadow: 0 0 0 2px var(--amber); }
+.badge.comment-badge:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 
 .comment-popover {
   position: fixed;
@@ -2318,7 +2399,9 @@ html.theme-light {
   --ok: #2b8a4a;
   --ok-soft: #e4f1e6;
   --warn: #a8741a;
+  --warn-soft: rgba(168, 116, 26, 0.14);
   --block: #a83838;
+  --block-soft: rgba(168, 56, 56, 0.14);
 
   --hairline: var(--rule-soft);
   --hairline-strong: var(--rule);

@@ -344,22 +344,25 @@ function FilterToggles({ counts, statusFilters, toggleStatus, blockedCount, open
 
 // ─────── Card / Cell / Matrix ───────
 
+const STATUS_PILL_LABEL = {
+  complete: "COMPLETE",
+  in_progress: "IN PROGRESS",
+  not_started: "NOT STARTED",
+  deferred: "DEFERRED",
+  blocked: "BLOCKED",
+};
+
 function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart, onDragEnd, onDelete, onSaveComment, onOpenTask }) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
   const cardFacts = buildCardMetaFacts(task, blockedBy || []);
   const outcome = humanizeTaskOutcome(task.outcome);
-  const approvals = Array.isArray(task.approval_required_for)
-    ? task.approval_required_for.filter((value) => typeof value === "string" && value.trim())
-    : [];
   const references = Array.isArray(task.references) && task.references.length
     ? task.references
     : task.reference
       ? [task.reference]
       : [];
-  const extraKeys = Object.keys(ctx).filter(
-    (k) => k !== "tags" && k !== "notes" && k !== "files_touched"
-  );
+  const summary = task.goal || ctx.notes || "";
   const classes = [
     "card",
     `status-${task.status}`,
@@ -375,6 +378,7 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
       data-task-id=${task.id}
       onDragStart=${(e) => onDragStart(e, task)}
       onDragEnd=${onDragEnd}
+      onClick=${() => onOpenTask && onOpenTask(task, "brief")}
     >
       <button
         class="card-delete"
@@ -387,76 +391,46 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
           onDelete && onDelete(task);
         }}
       >×</button>
-      <div class="card-id-row">
-        <div class="card-id">${task.id}</div>
-        <${CopyInlineBtn}
-          value=${task.id}
-          label="Task id"
-          title=${`Copy task id ${task.id}`}
-        />
+
+      <div class="card__tier-1">
+        <div class="card-id-row">
+          <div class="card-id">${task.id}</div>
+          <${CopyInlineBtn}
+            value=${task.id}
+            label="Task id"
+            title=${`Copy task id ${task.id}`}
+          />
+        </div>
+        <div class="card-title">
+          <span class="card-title-text">${task.title}</span>
+          <${CopyInlineBtn}
+            value=${task.title}
+            label="Task title"
+            title=${`Copy task title: ${task.title}`}
+          />
+        </div>
       </div>
-      <div class="card-title">
-        <span class="card-title-text">${task.title}</span>
-        <${CopyInlineBtn}
-          value=${task.title}
-          label="Task title"
-          title=${`Copy task title: ${task.title}`}
-        />
-      </div>
-      ${task.goal ? html`<div class="card-goal">${task.goal}</div>` : null}
-      ${ctx.notes ? html`<div class="card-goal">${ctx.notes}</div>` : null}
-      ${extraKeys.length > 0
-        ? html`<div class="card-context"><b>${extraKeys[0]}:</b> ${String(ctx[extraKeys[0]])}</div>`
-        : null}
-      <div class="card-intel-actions">
-        ${[
-          ["brief", "[READ]"],
-          ["why", "[WHY]"],
-          ["execute", "[EXEC]"],
-          ["verify", "[VERIFY]"]
-        ].map(([mode, label]) => html`
-          <button
-            key=${mode}
-            class="card-intel-btn"
-            title=${`${label.replaceAll("[", "").replaceAll("]", "")} ${task.id}`}
-            onMouseDown=${(e) => e.stopPropagation()}
-            onClick=${(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              onOpenTask && onOpenTask(task, mode);
-            }}
-          >${label}</button>
+
+      ${summary ? html`<div class="card__tier-2">${summary}</div>` : null}
+
+      <div class="card__tier-3">
+        <span class=${`card__status-pill status-${task.status}`}>
+          ● ${STATUS_PILL_LABEL[task.status] || task.status.toUpperCase()}
+        </span>
+        ${task.assignee
+          ? html`<span class="card__assignee-chip">${task.assignee}</span>`
+          : null}
+        ${cardFacts.map((fact) => html`
+          <span key=${`${fact.label}:${fact.value}`} class=${`card__meta-chip ${fact.tone || ""}`}>
+            ${fact.label}:${fact.value}
+          </span>
         `)}
-      </div>
-      ${cardFacts.length > 0
-        ? html`
-            <div class="card-subfacts">
-              ${cardFacts.map((fact) => html`
-                <span key=${`${fact.label}:${fact.value}`} class=${`card-subfact ${fact.tone || ""}`}>
-                  <b>${fact.label}</b>
-                  <span>${fact.value}</span>
-                </span>
-              `)}
-            </div>
-          `
-        : null}
-      <${CommentBadge}
-        comment=${task.comment}
-        onSave=${(value) => onSaveComment && onSaveComment(task.id, value)}
-      />
-      <div class="card-footer">
-        <${Badge} kind=${`status-${task.status}`}>${task.status.replace("_", " ")}</${Badge}>
         ${outcome
-          ? html`<${Badge} kind="outcome" title=${`Outcome marker: ${outcome}`}>outcome · ${outcome}</${Badge}>`
+          ? html`<span class="card__meta-chip" title=${`Outcome: ${outcome}`}>outcome·${outcome}</span>`
           : null}
-        ${task.effort ? html`<${Badge} kind="tag" title=${`Estimated effort ${task.effort}`}>effort · ${task.effort}</${Badge}>` : null}
-        ${blockedBy && blockedBy.length > 0
-          ? html`<${Badge} kind="blocked" title=${`Blocked by ${blockedBy.join(", ")}`}>blocked · ${blockedBy.length}</${Badge}>`
+        ${task.effort
+          ? html`<span class="card__meta-chip" title=${`Effort: ${task.effort}`}>effort·${task.effort}</span>`
           : null}
-        ${approvals.length > 0
-          ? html`<${Badge} kind="blocked" title=${`Requires approval for ${approvals.join(", ")}`}>approval · ${approvals.length}</${Badge}>`
-          : null}
-        ${task.assignee ? html`<${Badge} kind="assignee">${task.assignee}</${Badge}>` : null}
         ${references[0]
           ? html`<button
               class="card-reference"
@@ -470,13 +444,39 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
             >${references[0]}</button>`
           : null}
         ${references.length > 1
-          ? html`<${Badge} kind="tag" title=${references.join("\n")}>refs · ${references.length}</${Badge}>`
+          ? html`<span class="card__meta-chip" title=${references.join("\n")}>refs·${references.length}</span>`
           : null}
         ${searchMatch && Number.isFinite(searchMatch.score)
-          ? html`<${Badge} kind="tag" title=${`Fuzzy match ${searchMatch.score.toFixed(3)}`}>match · ${searchMatch.score.toFixed(2)}</${Badge}>`
+          ? html`<span class="card__meta-chip" title=${`Fuzzy match ${searchMatch.score.toFixed(3)}`}>match·${searchMatch.score.toFixed(2)}</span>`
           : null}
-        ${tags.map((t) => html`<${Badge} kind="tag">${t}</${Badge}>`)}
+        ${tags.map((t) => html`<span key=${t} class="card__tag-chip">#${t}</span>`)}
       </div>
+
+      <div class="card__action-row" onMouseDown=${(e) => e.stopPropagation()}>
+        ${[
+          ["brief", "READ", true],
+          ["why", "WHY", false],
+          ["execute", "EXEC", false],
+          ["verify", "VERIFY", false]
+        ].map(([mode, label, active]) => html`
+          <${Bracket}
+            key=${mode}
+            label=${label}
+            active=${active}
+            title=${`${label} ${task.id}`}
+            onClick=${(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onOpenTask && onOpenTask(task, mode);
+            }}
+          />
+        `)}
+      </div>
+
+      <${CommentBadge}
+        comment=${task.comment}
+        onSave=${(value) => onSaveComment && onSaveComment(task.id, value)}
+      />
     </div>
   `;
 }
