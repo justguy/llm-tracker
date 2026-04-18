@@ -1,15 +1,6 @@
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
-import {
-  lstatSync,
-  readFileSync,
-  existsSync,
-  writeFileSync,
-  renameSync,
-  readdirSync,
-  realpathSync,
-  statSync
-} from "node:fs";
+import { lstatSync, readFileSync, existsSync, writeFileSync, renameSync, readdirSync, realpathSync } from "node:fs";
 import { join, extname, dirname } from "node:path";
 import { createRequire } from "node:module";
 import express from "express";
@@ -149,15 +140,6 @@ function projectPayload(slug, entry) {
     error: entry.error || null,
     file
   };
-}
-
-function isLinkedTrackerPath(filePath) {
-  if (!filePath) return false;
-  try {
-    return lstatSync(filePath).isSymbolicLink();
-  } catch {
-    return false;
-  }
 }
 
 function snapshot(store) {
@@ -363,14 +345,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     next();
   });
 
-  app.get("/api/projects/:slug", async (req, res) => {
-    let entry = store.get(req.params.slug);
+  app.get("/api/projects/:slug", (req, res) => {
+    const entry = store.get(req.params.slug);
     if (!entry) return res.status(404).json({ error: "not found" });
-    if (isLinkedTrackerPath(entry.path)) {
-      await reloadProject(req.params.slug, { broadcastUpdate: true });
-      entry = store.get(req.params.slug);
-      if (!entry) return res.status(404).json({ error: "not found" });
-    }
     res.json(projectPayload(req.params.slug, entry));
   });
   registerIntelligenceRoutes(app, { workspace, store });
@@ -756,10 +733,19 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   // (Option C registration). Native fsevents does not forward changes from
   // outside the watched tree, so we poll only the individual target file —
   // not its parent directory — to keep CPU cost bounded.
-  // slug → { target, mtimeMs, size } for linked tracker files outside the
-  // workspace. Polling exact files is more reliable here than asking chokidar
-  // to bootstrap a second dynamic polling tree.
+  const linkedTargetsWatcher = chokidar.watch([], {
+    ignoreInitial: true,
+    followSymlinks: false,
+    usePolling: true,
+    interval: 300,
+    binaryInterval: 500,
+    ignored: WATCHER_IGNORED,
+    awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 40 }
+  });
+
+  // slug → absolute target path currently polled via linkedTargetsWatcher
   const linkedTargetsBySlug = new Map();
+  const linkedSlugByTarget = new Map();
 
   const trackLinkedTarget = (slug) => {
     const trackerFile = join(trackersDir, `${slug}.json`);
@@ -772,25 +758,23 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       return;
     }
     if (!real || real === trackerFile) return;
-    let stat;
-    try {
-      stat = statSync(real);
-    } catch {
-      return;
-    }
     const existing = linkedTargetsBySlug.get(slug);
-    if (existing?.target === real && existing.mtimeMs === stat.mtimeMs && existing.size === stat.size) {
-      return;
+    if (existing === real) return;
+    if (existing) {
+      linkedTargetsWatcher.unwatch(existing);
+      linkedSlugByTarget.delete(existing);
     }
-    linkedTargetsBySlug.set(slug, {
-      target: real,
-      mtimeMs: stat.mtimeMs,
-      size: stat.size
-    });
+    linkedTargetsWatcher.add(real);
+    linkedTargetsBySlug.set(slug, real);
+    linkedSlugByTarget.set(real, slug);
   };
 
   const untrackLinkedTarget = (slug) => {
+    const target = linkedTargetsBySlug.get(slug);
+    if (!target) return;
+    linkedTargetsWatcher.unwatch(target);
     linkedTargetsBySlug.delete(slug);
+    linkedSlugByTarget.delete(target);
   };
 
   // Patch-file watcher (bash-less write path): any file dropped into patches/
@@ -960,35 +944,31 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       if (r) broadcast({ type: "REMOVE", slug: r.slug });
     });
 
-  const linkedTargetsPollTimer = setInterval(() => {
-    for (const [slug, tracked] of linkedTargetsBySlug) {
-      let stat;
-      try {
-        stat = statSync(tracked.target);
-      } catch {
-        // Target deleted out from under us — clear tracking; the symlink in
-        // trackers/ is now dangling and the next read will surface that.
-        untrackLinkedTarget(slug);
-        continue;
-      }
-      if (stat.mtimeMs === tracked.mtimeMs && stat.size === tracked.size) continue;
-      tracked.mtimeMs = stat.mtimeMs;
-      tracked.size = stat.size;
-      const trackerFile = join(trackersDir, `${slug}.json`);
-      if (existsSync(trackerFile)) ingestTrackerFile(trackerFile);
-    }
-  }, 300);
-  linkedTargetsPollTimer.unref?.();
+  linkedTargetsWatcher.on("change", (targetPath) => {
+    const slug = linkedSlugByTarget.get(targetPath);
+    if (!slug) return;
+    const trackerFile = join(trackersDir, `${slug}.json`);
+    if (existsSync(trackerFile)) ingestTrackerFile(trackerFile);
+  });
+  linkedTargetsWatcher.on("unlink", (targetPath) => {
+    const slug = linkedSlugByTarget.get(targetPath);
+    if (!slug) return;
+    // Target deleted out from under us — clear tracking; the symlink in
+    // trackers/ is now dangling and the next read will surface that.
+    untrackLinkedTarget(slug);
+  });
 
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
 
     clearInterval(uiSessionSweepTimer);
-    clearInterval(linkedTargetsPollTimer);
 
     try {
       await watcher.close();
+    } catch {}
+    try {
+      await linkedTargetsWatcher.close();
     } catch {}
     try {
       await patchesWatcher.close();
@@ -1031,9 +1011,11 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   await new Promise((resolve, reject) => {
     const onError = async (err) => {
       httpServer.off("listening", onListening);
-      clearInterval(linkedTargetsPollTimer);
       try {
         await watcher.close();
+      } catch {}
+      try {
+        await linkedTargetsWatcher.close();
       } catch {}
       try {
         await patchesWatcher.close();

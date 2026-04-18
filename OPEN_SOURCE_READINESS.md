@@ -6,7 +6,7 @@ audit can be checked off in one read.
 
 Final snapshot:
 
-- Tests: **191 passing** (`npm test`, ~35s)
+- Tests: **179 passing** (`npm test`, ~37s)
 - License: Apache-2.0; `NOTICE` now present and shipped
 - CI: Ubuntu × Node 18/20/22 + macOS/Windows smoke + `npm pack --dry-run`
 - Community files: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
@@ -176,7 +176,7 @@ Apache-2.0 §4(d) is triggered. `NOTICE` added to `package.json:files`.
 - [x] Healthz endpoint (Dockerfile reverted — see §14)
 - [x] UI a11y minimal pass
 - [x] First-run download hint
-- [x] `npm test` passes (191/191)
+- [x] `npm test` passes (179/179)
 - [ ] Run `npm pack && npm install -g ./llm-tracker-*.tgz` on a clean
       environment and walk through the quickstart one more time
 - [ ] Tag a release (release-please drives the version on next merge to `main`)
