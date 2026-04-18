@@ -1,16 +1,3 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-// Creates a temp workspace with the standard hub subdirectories.
-export function makeWorkspace(prefix = "llm-tracker-test-") {
-  const ws = mkdtempSync(join(tmpdir(), prefix));
-  for (const sub of ["trackers", ".snapshots", ".history"]) {
-    mkdirSync(join(ws, sub), { recursive: true });
-  }
-  return ws;
-}
-
 export function validProject(overrides = {}) {
   return {
     meta: {
