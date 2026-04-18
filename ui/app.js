@@ -1,10 +1,11 @@
-import { render } from "preact";
+import { Fragment, render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { html } from "htm/preact";
 import { buildHeroReason, buildHeroSummary } from "./lib/hero-strip.js";
 import { buildCardMetaFacts } from "./lib/intelligence.js";
 import { HistoryModal } from "./modals/history.js";
-import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
+import { ProjectIntelligenceModal } from "./modals/intelligence.js";
+import { TaskInlineDrawer } from "./task-drawer.js";
 import { humanizeTaskOutcome } from "./task-outcomes.js";
 
 const STATUS_ORDER = ["complete", "in_progress", "not_started", "deferred"];
@@ -353,7 +354,20 @@ const STATUS_PILL_LABEL = {
   blocked: "BLOCKED",
 };
 
-function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart, onDragEnd, onDelete, onSaveComment, onOpenTask }) {
+function Card({
+  task,
+  blockedBy,
+  dragging,
+  searchMatch,
+  fuzzyActive,
+  activeMode,
+  expanded,
+  onDragStart,
+  onDragEnd,
+  onDelete,
+  onSaveComment,
+  onOpenTask
+}) {
   const ctx = task.context || {};
   const tags = Array.isArray(ctx.tags) ? ctx.tags : [];
   const cardFacts = buildCardMetaFacts(task, blockedBy || []);
@@ -367,6 +381,7 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
   const classes = [
     "card",
     `status-${task.status}`,
+    expanded ? "card--expanded" : "",
     dragging ? "dragging" : "",
     searchMatch ? "fuzzy-hit" : "",
     fuzzyActive && !searchMatch ? "fuzzy-dim" : ""
@@ -455,15 +470,15 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
 
       <div class="card__action-row" onMouseDown=${(e) => e.stopPropagation()}>
         ${[
-          ["brief", "READ", true],
+          ["brief", "READ"],
           ["why", "WHY", false],
           ["execute", "EXEC", false],
           ["verify", "VERIFY", false]
-        ].map(([mode, label, active]) => html`
+        ].map(([mode, label]) => html`
           <${Bracket}
             key=${mode}
             label=${label}
-            active=${active}
+            active=${expanded ? activeMode === mode : mode === "brief"}
             title=${`${label} ${task.id}`}
             onClick=${(e) => {
               e.stopPropagation();
@@ -482,7 +497,27 @@ function Card({ task, blockedBy, dragging, searchMatch, fuzzyActive, onDragStart
   `;
 }
 
-function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, dragState, setDragState, onDrop, onDeleteTask, onSaveComment, onOpenTask }) {
+function Cell({
+  slug,
+  laneId,
+  priorityId,
+  tasks,
+  blocked,
+  filterQuery,
+  statusFilters,
+  blockFilters,
+  fuzzyQuery,
+  fuzzyMatchMap,
+  dragState,
+  setDragState,
+  activeTask,
+  activeTaskMode,
+  onDrop,
+  onDeleteTask,
+  onSaveComment,
+  onOpenTask,
+  onCloseTask
+}) {
   const ref = useRef(null);
   const [over, setOver] = useState(false);
 
@@ -548,30 +583,59 @@ function Cell({ laneId, priorityId, tasks, blocked, filterQuery, statusFilters, 
         : null}
       ${filtered.map(
         (t) => html`
-          <${Card}
-            key=${t.id}
-            task=${t}
-            blockedBy=${blocked[t.id]}
-            searchMatch=${fuzzyMatchMap?.get(t.id) || null}
-            fuzzyActive=${!!(fuzzyQuery && fuzzyQuery.trim())}
-            dragging=${dragState.taskId === t.id}
-            onDragStart=${(e, task) => {
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", task.id);
-              setDragState({ taskId: task.id });
-            }}
-            onDragEnd=${() => setDragState({ taskId: null })}
-            onDelete=${onDeleteTask}
-            onSaveComment=${onSaveComment}
-            onOpenTask=${onOpenTask}
-          />
+          <${Fragment} key=${t.id}>
+            <${Card}
+              task=${t}
+              blockedBy=${blocked[t.id]}
+              searchMatch=${fuzzyMatchMap?.get(t.id) || null}
+              fuzzyActive=${!!(fuzzyQuery && fuzzyQuery.trim())}
+              activeMode=${activeTask?.id === t.id ? activeTaskMode : "brief"}
+              expanded=${activeTask?.id === t.id}
+              dragging=${dragState.taskId === t.id}
+              onDragStart=${(e, task) => {
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", task.id);
+                setDragState({ taskId: task.id });
+              }}
+              onDragEnd=${() => setDragState({ taskId: null })}
+              onDelete=${onDeleteTask}
+              onSaveComment=${onSaveComment}
+              onOpenTask=${onOpenTask}
+            />
+            ${activeTask?.id === t.id
+              ? html`<${TaskInlineDrawer}
+                  slug=${slug}
+                  task=${activeTask}
+                  initialMode=${activeTaskMode || "brief"}
+                  onOpenTask=${onOpenTask}
+                  onClose=${onCloseTask}
+                />`
+              : null}
+          </${Fragment}>
         `
       )}
     </div>
   `;
 }
 
-function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery, fuzzyMatchMap, onMove, onToggleCollapse, onMoveLane, onDeleteTask, onSaveComment, onOpenTask }) {
+function Matrix({
+  project,
+  slug,
+  filterQuery,
+  statusFilters,
+  blockFilters,
+  fuzzyQuery,
+  fuzzyMatchMap,
+  activeTask,
+  activeTaskMode,
+  onMove,
+  onToggleCollapse,
+  onMoveLane,
+  onDeleteTask,
+  onSaveComment,
+  onOpenTask,
+  onCloseTask
+}) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
   const priorities = project.data.meta.priorities;
@@ -712,6 +776,7 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
         (p) => html`
           <${Cell}
             key=${`${lane.id}::${p.id}`}
+            slug=${slug}
             laneId=${lane.id}
             priorityId=${p.id}
             tasks=${byCell[`${lane.id}::${p.id}`] || []}
@@ -723,10 +788,13 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
             fuzzyMatchMap=${fuzzyMatchMap}
             dragState=${dragState}
             setDragState=${setDragState}
+            activeTask=${activeTask?.placement?.swimlaneId === lane.id && activeTask?.placement?.priorityId === p.id ? activeTask : null}
+            activeTaskMode=${activeTaskMode}
             onDrop=${onMove}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
             onOpenTask=${onOpenTask}
+            onCloseTask=${onCloseTask}
           />
         `
       )}
@@ -842,6 +910,9 @@ function ProjectPane({
   onDeleteTask,
   onSaveComment,
   onOpenTask,
+  openTaskId,
+  openTaskMode,
+  onCloseTask,
   scratchpadExpanded,
   onToggleScratchpad,
   onSaveScratchpad
@@ -849,6 +920,9 @@ function ProjectPane({
   const data = project?.data;
   const derived = project?.derived;
   const meta = data?.meta;
+  const activeTask = openTaskId
+    ? data?.tasks?.find((task) => task.id === openTaskId) || null
+    : null;
 
   return html`
     <section
@@ -892,17 +966,21 @@ function ProjectPane({
       ${data
         ? html`<${Matrix}
             project=${project}
+            slug=${slug}
             filterQuery=${searchMode === "filter" ? filter : ""}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}
             fuzzyQuery=${searchMode === "fuzzy" ? filter : ""}
             fuzzyMatchMap=${fuzzyMatchMap}
+            activeTask=${activeTask}
+            activeTaskMode=${openTaskMode}
             onMove=${(args) => onMove(slug, args)}
             onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
             onMoveLane=${(laneId, direction) => onMoveLane(slug, laneId, direction)}
             onDeleteTask=${(task) => onDeleteTask(slug, task)}
             onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
             onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
+            onCloseTask=${onCloseTask}
           />`
         : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
     </section>
@@ -1409,6 +1487,13 @@ function Header({
     return () => document.removeEventListener("keydown", handler);
   }, [overflowOpen]);
 
+  useEffect(() => {
+    if (!projectOpen) return undefined;
+    const handler = (e) => { if (e.key === "Escape") setProjectOpen(false); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [projectOpen]);
+
   const hasProject = !!project?.slug;
 
   return html`
@@ -1430,8 +1515,38 @@ function Header({
             ${rev != null ? html`<span class="top-bar__rev">REV ${rev}</span>` : null}
           </div>
           ${projectOpen ? html`
-            <div class="top-bar__project-dropdown">
-              <ul class="top-bar__dropdown-list" role="listbox"></ul>
+            <div class="project-menu" role="menu">
+              <div class="project-menu__header">
+                <span>PROJECTS</span>
+                <span class="project-menu__count">${slugs.length} total</span>
+              </div>
+              ${slugs.map((s) => {
+                const p = projects[s];
+                const d = p?.derived;
+                const name = p?.data?.meta?.name || s;
+                const isActive = s === activeSlug;
+                return html`
+                  <div
+                    key=${s}
+                    class=${`project-menu__item${isActive ? " project-menu__item--active" : ""}`}
+                    role="menuitem"
+                    onClick=${() => { setActive(s); setProjectOpen(false); }}
+                  >
+                    <span class="project-menu__dot">${isActive ? "●" : ""}</span>
+                    <span class="project-menu__name">${name}</span>
+                    <span class="project-menu__meta">rev ${p?.rev ?? "—"} · ${d?.pct ?? 0}%</span>
+                  </div>
+                `;
+              })}
+              <div class="project-menu__divider"></div>
+              <div
+                class="project-menu__footer"
+                role="menuitem"
+                onClick=${() => { setProjectOpen(false); onOpenDrawer(); }}
+              >
+                <span>Open overview drawer</span>
+                <span class="project-menu__footer-hint">for pin &amp; manage</span>
+              </div>
             </div>
           ` : null}
         </div>
@@ -1736,7 +1851,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [projectIntel, setProjectIntel] = useState(null);
-  const [taskIntel, setTaskIntel] = useState(null);
+  const [taskDrawer, setTaskDrawer] = useState(null);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
 
@@ -1961,7 +2076,7 @@ function App() {
     if (!drawerPinned) setDrawerOpen(false);
   };
 
-  const onOpenTaskIntel = (slug, taskOrId, initialMode = "brief") => {
+  const onOpenTaskDrawer = (slug, taskOrId, initialMode = "brief") => {
     if (!slug || !taskOrId) return;
     const projectTasks = projects[slug]?.data?.tasks || [];
     const task = typeof taskOrId === "string"
@@ -1969,7 +2084,7 @@ function App() {
       : taskOrId;
     if (!task?.id) return;
     setActiveSlug(slug);
-    setTaskIntel({ slug, task, initialMode });
+    setTaskDrawer({ slug, taskId: task.id, mode: initialMode });
   };
 
   const onOpenProjectIntel = (initialMode = "next") => {
@@ -1993,7 +2108,7 @@ function App() {
       const pickedId = body.task?.id || body.pickedTaskId || taskId;
       if (pickedId) {
         setProjectIntel(null);
-        onOpenTaskIntel(slug, pickedId, "execute");
+        onOpenTaskDrawer(slug, pickedId, "execute");
       }
     } catch (e) {
       alert(`Pick failed: ${e.message}`);
@@ -2060,10 +2175,16 @@ function App() {
   }, [projectIntel, projects]);
 
   useEffect(() => {
-    if (taskIntel && !projects[taskIntel.slug]) {
-      setTaskIntel(null);
+    if (!taskDrawer) return;
+    const project = projects[taskDrawer.slug];
+    if (!project?.data) {
+      setTaskDrawer(null);
+      return;
     }
-  }, [taskIntel, projects]);
+    if (!project.data.tasks.some((task) => task.id === taskDrawer.taskId)) {
+      setTaskDrawer(null);
+    }
+  }, [taskDrawer, projects]);
 
   const onDeleteTask = async (slug, task) => {
     if (!slug) return;
@@ -2154,18 +2275,9 @@ function App() {
         slug=${projectIntel.slug}
         project=${projects[projectIntel.slug]}
         initialMode=${projectIntel.initialMode}
-        onOpenTask=${(taskId, mode) => onOpenTaskIntel(projectIntel.slug, taskId, mode)}
+        onOpenTask=${(taskId, mode) => onOpenTaskDrawer(projectIntel.slug, taskId, mode)}
         onPickTask=${(taskId) => onPickTask(projectIntel.slug, taskId)}
         onClose=${() => setProjectIntel(null)}
-      />`
-    : null;
-  const taskIntelEl = taskIntel
-    ? html`<${TaskIntelligenceModal}
-        slug=${taskIntel.slug}
-        task=${taskIntel.task}
-        initialMode=${taskIntel.initialMode}
-        onOpenTask=${(taskId, mode) => onOpenTaskIntel(taskIntel.slug, taskId, mode)}
-        onClose=${() => setTaskIntel(null)}
       />`
     : null;
 
@@ -2267,7 +2379,6 @@ function App() {
         ${settingsEl}
         ${historyEl}
         ${projectIntelEl}
-        ${taskIntelEl}
       </div>
     `;
   }
@@ -2309,7 +2420,7 @@ function App() {
         project=${active}
         slug=${activeSlug}
         onPickTask=${onPickTask}
-        onOpenTask=${onOpenTaskIntel}
+        onOpenTask=${onOpenTaskDrawer}
       />
       <div class="banner-row">
         <div class="banner-spacer"></div>
@@ -2344,7 +2455,12 @@ function App() {
             onMoveLane=${onMoveLane}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}
-            onOpenTask=${onOpenTaskIntel}
+            onOpenTask=${onOpenTaskDrawer}
+            openTaskId=${taskDrawer?.slug === s ? taskDrawer.taskId : null}
+            openTaskMode=${taskDrawer?.slug === s ? taskDrawer.mode : "brief"}
+            onCloseTask=${() =>
+              setTaskDrawer((current) => (current?.slug === s ? null : current))
+            }
             scratchpadExpanded=${!!scratchpadExpanded[s]}
             onToggleScratchpad=${onToggleScratchpad}
             onSaveScratchpad=${onSaveScratchpad}
@@ -2357,7 +2473,6 @@ function App() {
       ${settingsEl}
       ${historyEl}
       ${projectIntelEl}
-      ${taskIntelEl}
     </div>
   `;
 }
