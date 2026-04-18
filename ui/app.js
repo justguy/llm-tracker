@@ -608,23 +608,27 @@ function Matrix({ project, filterQuery, statusFilters, blockFilters, fuzzyQuery,
           }}
           title="Click to expand swimlane"
         >
-          <span class="lane-chevron">${"\u25B6"}</span>
-          <div class="lane-collapsed-label">
-            <span class="lane-label-text" title=${lane.label}>${lane.label}</span>
-            <${CopyInlineBtn}
-              value=${lane.label}
-              label="Lane name"
-              title=${`Copy lane name: ${lane.label}`}
-            />
+          <div class="lane-collapsed-head">
+            <span class="lane-chevron">${"\u25B6"}</span>
+            <div class="lane-collapsed-label">
+              <span class="lane-label-text" title=${lane.label}>${lane.label}</span>
+              <${CopyInlineBtn}
+                value=${lane.label}
+                label="Lane name"
+                title=${`Copy lane name: ${lane.label}`}
+              />
+            </div>
           </div>
-          ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
-          <div class="lane-collapsed-stats">
-            <span>${per.total} tasks</span>
-            <span class="active">· ${active} active</span>
-            <span>· ${per.counts.complete || 0} done</span>
+          <div class="lane-collapsed-main">
+            ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
+            <div class="lane-collapsed-stats">
+              <span>${per.total} tasks</span>
+              <span class="active">· ${active} active</span>
+              <span>· ${per.counts.complete || 0} done</span>
+            </div>
+            <${SegBar} counts=${per.counts} total=${per.total} thin />
+            <span class="lane-collapsed-pct">${per.pct}%</span>
           </div>
-          <${SegBar} counts=${per.counts} total=${per.total} thin />
-          <span class="lane-collapsed-pct">${per.pct}%</span>
         </div>
       `;
     }

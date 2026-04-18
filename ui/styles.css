@@ -1544,8 +1544,9 @@ body {
 }
 
 .matrix {
+  --lane-col-width: 240px;
   display: grid;
-  grid-template-columns: 240px repeat(var(--col-count, 4), minmax(280px, 1fr));
+  grid-template-columns: var(--lane-col-width) repeat(var(--col-count, 4), minmax(280px, 1fr));
   position: relative;
   min-width: 100%;
 }
@@ -1636,10 +1637,11 @@ body {
 
 .lane-collapsed {
   grid-column: 1 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--lane-col-width) minmax(0, 1fr);
   align-items: center;
-  gap: 18px;
-  padding: 9px 14px;
+  gap: 0;
+  padding: 0;
   background: var(--panel);
   border-bottom: 1px solid var(--lane-divider);
   min-height: 44px;
@@ -1652,12 +1654,49 @@ body {
 .lane-collapsed:hover { background: var(--panel-elev); }
 .lane-collapsed:hover .lane-chevron { color: var(--amber); background: var(--amber-soft); }
 .lane-collapsed:focus-visible { box-shadow: inset 0 0 0 1px var(--amber); }
-.lane-collapsed > .lane-chevron { flex-shrink: 0; }
-.lane-collapsed > .lane-collapsed-label { flex: 0 1 320px; min-width: 0; }
-.lane-collapsed > .lane-desc { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lane-collapsed > .lane-collapsed-stats { flex-shrink: 0; margin-left: auto; }
-.lane-collapsed > .seg-bar { flex: 0 1 260px; min-width: 160px; }
-.lane-collapsed > .lane-collapsed-pct { flex-shrink: 0; }
+
+.lane-collapsed-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-right: 1px solid var(--amber);
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: inherit;
+}
+
+.lane-collapsed-head > .lane-chevron {
+  flex-shrink: 0;
+}
+
+.lane-collapsed-head > .lane-collapsed-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lane-collapsed-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 9px 14px;
+}
+
+.lane-collapsed-main > .lane-desc {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane-collapsed-main > .lane-collapsed-stats { flex-shrink: 0; margin-left: auto; }
+.lane-collapsed-main > .seg-bar { flex: 0 1 260px; min-width: 160px; }
+.lane-collapsed-main > .lane-collapsed-pct { flex-shrink: 0; }
 
 .lane-collapsed-label {
   display: inline-flex;
