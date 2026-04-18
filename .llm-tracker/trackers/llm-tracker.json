@@ -45,9 +45,9 @@
         "label": "P3 / Later"
       }
     ],
-    "scratchpad": "Redesign lane tracks the 15-task front-end-only Variant A2 rebuild from design/. t21 lands LIGHT and DARK tokens together so every surface is dual-theme from day one; t31 Bracket primitive is the action DNA reused across t22/t25/t26/t28; t29 is a polish pass (Variant C stream pattern), not a late retune; t30 sweeps a11y + keyboard + theme parity. No backend/MCP/CLI contract changes.",
-    "rev": 19,
-    "updatedAt": "2026-04-18T15:16:23.336Z"
+    "scratchpad": "t21 complete. The existing theme switch now drives A2 light tokens and the calmer Variant-C dark tokens, with Inter + JetBrains Mono loaded at the UI entrypoint. node --test passed out of sandbox.",
+    "rev": 22,
+    "updatedAt": "2026-04-18T15:30:30.191Z"
   },
   "tasks": [
     {
@@ -493,7 +493,7 @@
       "id": "t21",
       "title": "Adopt A2 design tokens and typography",
       "goal": "Drop the warm-paper LIGHT palette AND its DARK counterpart (both calibrated per design/LLM Tracker Impl Guide.html section 02 and the Variant C dark reference), plus the Inter + JetBrains Mono scale, as theme primitives exposed through a single `theme` switch every downstream surface reads from.",
-      "status": "in_progress",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p0"
@@ -509,11 +509,17 @@
           "redesign",
           "tokens",
           "typography"
-        ]
+        ],
+        "files_touched": [
+          "ui/styles.css",
+          "ui/index.html"
+        ],
+        "notes": "A2 token vocabulary (bg/paper/ink/ink-2/ink-3/rule/rule-soft/pill/accent/accent-soft/ok/ok-soft/warn/block) plus spacing and type-scale tokens added to :root and html.theme-light. Dark (:root) stays default; light matches Impl Guide spec hexes exactly. Old tokens (--amber/--white/--red/--yellow/--cyan) aliased to new ones for backward compatibility. Inter + JetBrains Mono imported in ui/index.html; body picks up --font-sans while mono-anchored classes keep --font-mono."
       },
       "effort": "s",
-      "assignee": null,
-      "blocker_reason": null
+      "assignee": "claude-opus-4-7",
+      "blocker_reason": null,
+      "outcome": "complete"
     },
     {
       "dependencies": [
