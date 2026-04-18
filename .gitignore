@@ -10,3 +10,4 @@ coverage/
 
 # Project-local scratch
 initial prompt.txt
+.llm-tracker/

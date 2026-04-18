@@ -161,6 +161,28 @@ test("applyPatch: updates only the fields the patch mentions", async () => {
   }
 });
 
+test("applyPatch: normalizes legacy partial status to in_progress", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      tasks: { t1: { status: "partial" } }
+    });
+    assert.equal(res.ok, true);
+    assert.ok(res.notes.warnings.some((warning) => warning.includes('"partial" -> "in_progress"')));
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    const t1 = after.tasks.find((task) => task.id === "t1");
+    assert.equal(t1.status, "in_progress");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyPatch: 404 when project doesn't exist", async () => {
   const ws = setupWorkspace();
   try {
@@ -168,6 +190,124 @@ test("applyPatch: 404 when project doesn't exist", async () => {
     const res = await store.applyPatch("nonexistent", { tasks: { t1: { status: "complete" } } });
     assert.equal(res.ok, false);
     assert.equal(res.status, 404);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: rejects brand-new patch tasks that start complete or deferred", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      tasks: {
+        t4: {
+          title: "Historical packaging row",
+          status: "complete",
+          placement: { swimlaneId: "ops", priorityId: "p1" }
+        }
+      }
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.equal(res.type, "schema");
+    assert.match(res.message, /new tasks added through patch mode/);
+    assert.match(res.hint, /not_started/);
+    assert.match(res.hint, /in_progress/);
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.tasks.some((task) => task.id === "t4"), false);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("pickTask auto-selects the top ready task and updates status atomically", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { assignee: "codex" });
+    assert.equal(res.ok, true);
+    assert.equal(res.payload.pickedTaskId, "t1");
+    assert.equal(res.payload.autoSelected, true);
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    const t1 = after.tasks.find((task) => task.id === "t1");
+    assert.equal(t1.status, "in_progress");
+    assert.equal(t1.assignee, "codex");
+    assert.equal(t1.blocker_reason ?? null, null);
+    assert.ok(after.meta.rev >= 2);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("pickTask rejects blocked tasks without force", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { taskId: "t2", assignee: "claude" });
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 409);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("pickTask refuses to steal an in-progress task without force", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    project.tasks[1].dependencies = [];
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(project));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { taskId: "t2", assignee: "codex" });
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 409);
+
+    const forced = await store.pickTask("test-project", {
+      taskId: "t2",
+      assignee: "codex",
+      force: true
+    });
+    assert.equal(forced.ok, true);
+    assert.equal(forced.payload.task.assignee, "codex");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("pickTask is a no-op when the same assignee re-claims the same task", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    project.tasks[1].dependencies = [];
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(project));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.pickTask("test-project", { taskId: "t2", assignee: "claude" });
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, true);
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.meta.rev, 1);
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
@@ -189,6 +329,29 @@ test("ingest: direct-file-edit that reorders is corrected back to existing order
 
     const onDisk = JSON.parse(readFileSync(file, "utf-8"));
     assert.deepEqual(onDisk.tasks.map((t) => t.id), ["t1", "t2", "t3"]);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("ingest: normalizes legacy partial status from tracker file", () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    const project = validProject();
+    project.tasks[0].status = "partial";
+    writeFileSync(file, JSON.stringify(project));
+
+    const res = store.ingest(file, readFileSync(file, "utf-8"));
+    assert.equal(res.ok, true);
+
+    const entry = store.get("test-project");
+    assert.equal(entry.data.tasks[0].status, "in_progress");
+    assert.ok(entry.notes.warnings.some((warning) => warning.includes('"partial" -> "in_progress"')));
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.tasks[0].status, "in_progress");
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
@@ -286,6 +449,23 @@ test("createOrReplace validates slug parity + schema", async () => {
     const ok = await store.createOrReplace("test-project", validProject());
     assert.equal(ok.ok, true);
     assert.equal(existsSync(trackerPath(ws, "test-project")), true);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("createOrReplace accepts legacy partial status and writes canonical status", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    project.tasks[0].status = "partial";
+
+    const res = await store.createOrReplace("test-project", project);
+    assert.equal(res.ok, true);
+
+    const after = JSON.parse(readFileSync(trackerPath(ws, "test-project"), "utf-8"));
+    assert.equal(after.tasks[0].status, "in_progress");
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }

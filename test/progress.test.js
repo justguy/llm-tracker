@@ -29,6 +29,15 @@ test("pctFor returns 0 for empty or all-deferred", () => {
   assert.equal(pctFor([{ status: "deferred" }, { status: "deferred" }]), 0);
 });
 
+test("pctFor ignores outcome markers and still keys off status only", () => {
+  const tasks = [
+    { status: "complete", outcome: "partial_slice_landed" },
+    { status: "in_progress", outcome: "partial_slice_landed" }
+  ];
+
+  assert.equal(pctFor(tasks), 75);
+});
+
 test("deriveBlocked finds open deps", () => {
   const p = validProject();
   const blocked = deriveBlocked(p.tasks);
