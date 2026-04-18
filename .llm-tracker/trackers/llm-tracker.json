@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t21 complete. The existing theme switch now drives A2 light tokens and the calmer Variant-C dark tokens, with Inter + JetBrains Mono loaded at the UI entrypoint. node --test passed out of sandbox.",
-    "rev": 22,
-    "updatedAt": "2026-04-18T15:30:30.191Z"
+    "rev": 23,
+    "updatedAt": "2026-04-18T15:32:30.419Z"
   },
   "tasks": [
     {
@@ -518,8 +518,7 @@
       },
       "effort": "s",
       "assignee": "claude-opus-4-7",
-      "blocker_reason": null,
-      "outcome": "complete"
+      "blocker_reason": null
     },
     {
       "dependencies": [
@@ -554,7 +553,7 @@
       "id": "t23",
       "title": "Build hero strip: 94% headline, status grid, Recommended Next callout",
       "goal": "Implement the 3-column hero (grid 1.1fr / 1.2fr / 340px): project name + big 94% + segmented progress, 2x3 status tile grid, and the green Recommended Next callout with [PICK] and [READ] buttons.",
-      "status": "not_started",
+      "status": "in_progress",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p0"
@@ -570,7 +569,8 @@
           "next"
         ]
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "claude-sonnet-4-6"
     },
     {
       "dependencies": [
@@ -770,7 +770,7 @@
       "id": "t31",
       "title": "Implement Bracket button primitive",
       "goal": "Single reusable component with variants default | active | soft | tone=ok|warn|block that renders correctly in light and dark; consumed by top bar (t22), task card (t25), scratchpad (t26), lane rows (t28), and the hero callout (t23).",
-      "status": "not_started",
+      "status": "in_progress",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p0"
@@ -786,7 +786,8 @@
           "bracket"
         ]
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "claude-sonnet-4-6"
     },
     {
       "dependencies": [
