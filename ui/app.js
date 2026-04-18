@@ -178,6 +178,24 @@ function IconBtn({ label, onClick, active, title }) {
   `;
 }
 
+function Bracket({ label, active, soft, tone, onClick, title, ariaLabel, disabled }) {
+  const classes = [
+    "bracket",
+    active ? "bracket--active" : "",
+    soft ? "bracket--soft" : "",
+    tone ? `bracket--tone-${tone}` : "",
+  ].filter(Boolean).join(" ");
+  return html`
+    <button
+      class=${classes}
+      onClick=${onClick}
+      title=${title || ""}
+      aria-label=${ariaLabel || title || ""}
+      disabled=${disabled || false}
+    >[${label}]</button>
+  `;
+}
+
 async function copyText(text) {
   if (!text) return false;
   if (navigator.clipboard?.writeText) {

@@ -2393,3 +2393,58 @@ html.theme-light .drawer-overlay { background: rgba(0, 0, 0, 0.12); }
 html.theme-light .drawer { box-shadow: none; }
 html.theme-light .connection-pip .dot { box-shadow: 0 0 4px var(--green); }
 html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
+
+/* ─── Bracket primitive (t31) ─── */
+.bracket {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--type-bracket-size);
+  letter-spacing: var(--type-bracket-tracking);
+  font-weight: 400;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-0);
+  padding: 4px 6px;
+  min-width: 24px;
+  min-height: 24px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1;
+  transition: border-color 80ms;
+  user-select: none;
+}
+
+.bracket:hover:not(:disabled):not(.bracket--active):not(.bracket--soft) {
+  border-color: var(--ink-3);
+}
+
+.bracket:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bracket:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.bracket--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.bracket--soft {
+  border-color: transparent;
+}
+
+.bracket--tone-ok  { color: var(--ok); }
+.bracket--tone-warn  { color: var(--warn); }
+.bracket--tone-block { color: var(--block); }
+
+.bracket--active.bracket--tone-ok    { color: var(--ok); }
+.bracket--active.bracket--tone-warn  { color: var(--warn); }
+.bracket--active.bracket--tone-block { color: var(--block); }
