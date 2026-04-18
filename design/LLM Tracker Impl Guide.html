@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>LLM Tracker — Implementation Guide</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #faf7f1;
+    --paper: #ffffff;
+    --ink: #23201b;
+    --ink2: #5a5348;
+    --ink3: #8a8374;
+    --rule: #e8e2d4;
+    --rule-soft: #f0ebde;
+    --pill: #f4efe2;
+    --accent: #b84a1a;
+    --accent-soft: #f6e3d6;
+    --ok: #2b8a4a;
+    --ok-soft: #e4f1e6;
+    --warn: #a8741a;
+    --block: #a83838;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    --sans: Inter, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
+  body { display: flex; justify-content: center; padding: 64px 32px 120px; }
+  main { max-width: 840px; width: 100%; }
+
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; color: var(--ink3); text-transform: uppercase; }
+  h1 { font-size: 44px; font-weight: 600; letter-spacing: -1px; line-height: 1.1; margin: 12px 0 16px; }
+  .lede { font-size: 16px; line-height: 1.65; color: var(--ink2); max-width: 680px; }
+
+  h2 { font-size: 24px; font-weight: 600; letter-spacing: -0.3px; margin: 56px 0 4px; padding-top: 28px; border-top: 1px solid var(--rule); }
+  h2 .num { font-family: var(--mono); color: var(--accent); font-size: 13px; letter-spacing: 1.5px; margin-right: 10px; }
+  h2 + .sub { font-size: 13px; color: var(--ink3); margin-bottom: 22px; font-family: var(--mono); letter-spacing: 0.5px; }
+
+  h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+  p { font-size: 14.5px; line-height: 1.65; color: var(--ink); margin: 0 0 12px; }
+  ul, ol { font-size: 14.5px; line-height: 1.7; color: var(--ink); padding-left: 22px; margin: 8px 0 16px; }
+  li { margin-bottom: 4px; }
+  li code, p code, td code { background: var(--pill); padding: 1px 6px; border-radius: 3px; font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+  a { color: var(--accent); }
+
+  pre {
+    background: var(--paper); border: 1px solid var(--rule); padding: 16px 18px;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    color: var(--ink); overflow-x: auto; margin: 10px 0 18px;
+  }
+  pre .c { color: var(--ink3); } /* comment */
+  pre .k { color: var(--accent); } /* keyword */
+  pre .s { color: var(--ok); } /* string */
+
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 22px; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; color: var(--ink3); text-transform: uppercase; font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+
+  .swatch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 22px; }
+  .swatch { border: 1px solid var(--rule); background: var(--paper); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .swatch .dot { width: 100%; height: 32px; border: 1px solid rgba(0,0,0,0.04); }
+  .swatch .name { font-size: 12px; font-weight: 600; }
+  .swatch .hex { font-family: var(--mono); font-size: 11px; color: var(--ink3); }
+  .swatch .use { font-size: 11px; color: var(--ink2); line-height: 1.4; }
+
+  .type-row { display: grid; grid-template-columns: 130px 1fr 160px; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--rule-soft); align-items: baseline; }
+  .type-row:last-child { border-bottom: none; }
+  .type-row .label { font-family: var(--mono); font-size: 11px; color: var(--ink3); letter-spacing: 0.5px; }
+  .type-row .meta { font-family: var(--mono); font-size: 11px; color: var(--ink3); text-align: right; }
+
+  .callout { background: var(--paper); border-left: 3px solid var(--accent); padding: 14px 18px; margin: 16px 0; font-size: 13.5px; line-height: 1.55; color: var(--ink2); }
+  .callout strong { color: var(--ink); }
+  .callout.ok { border-left-color: var(--ok); }
+
+  .bracket { font-family: var(--mono); font-size: 11px; color: var(--ink2); padding: 2px 6px; border: 1px solid var(--rule); letter-spacing: 0.4px; }
+  .bracket.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .bracket.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+
+  hr { border: none; border-top: 1px dashed var(--rule); margin: 18px 0; }
+
+  .anatomy { background: var(--paper); border: 1px solid var(--rule); padding: 18px; font-size: 13px; margin: 12px 0 22px; }
+  .anatomy .label { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 1px; margin-bottom: 10px; }
+  .anatomy .row { display: flex; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--rule-soft); align-items: flex-start; }
+  .anatomy .row:last-child { border-bottom: none; }
+  .anatomy .row .k { width: 130px; font-family: var(--mono); font-size: 11px; color: var(--ink3); flex-shrink: 0; }
+  .anatomy .row .v { flex: 1; color: var(--ink2); line-height: 1.55; }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">LLM Tracker · Implementation Guide</div>
+  <h1>Calmed terminal UI —<br/>developer handoff.</h1>
+  <p class="lede">
+    This is the spec for rebuilding the current Bloomberg‑terminal UI as the refined
+    Variant A2 layout. Scope: the existing Preact UI served by the hub at
+    <code>http://localhost:4400</code>. Nothing in the patch protocol, MCP, or CLI surface
+    changes — this is purely front‑end.
+  </p>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">01</span>Principles</h2>
+  <div class="sub">what "simpler" means here</div>
+
+  <ol>
+    <li><strong>Hierarchy by size + weight, not just color.</strong> The old UI leaned on amber for emphasis; we lean on type scale. Color encodes <em>meaning</em> (status, agent identity), not importance.</li>
+    <li><strong>Humans read the board; agents read the API.</strong> The UI optimizes for human glance‑and‑act. Power features that agents already have via MCP/CLI move into <code>⌘K</code>.</li>
+    <li><strong>Keep the bracket DNA.</strong> <span class="bracket">[READ]</span> <span class="bracket">[WHY]</span> <span class="bracket">[EXEC]</span> <span class="bracket">[VERIFY]</span> stays — they're a visual signature and map cleanly to CLI verbs.</li>
+    <li><strong>One recommendation, loud.</strong> "Recommended Next" is the most visible CTA on the page. That's the answer to <em>"what do I look at?"</em></li>
+    <li><strong>No modals for task detail.</strong> Expand inline; keep the board as context.</li>
+  </ol>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">02</span>Design tokens</h2>
+  <div class="sub">drop into a tokens.css or theme.ts</div>
+
+  <h3>Color — light theme</h3>
+  <div class="swatch-grid">
+    <div class="swatch"><div class="dot" style="background:#faf7f1"></div><div class="name">bg</div><div class="hex">#faf7f1</div><div class="use">App canvas</div></div>
+    <div class="swatch"><div class="dot" style="background:#ffffff"></div><div class="name">paper</div><div class="hex">#ffffff</div><div class="use">Cards, panels, rows</div></div>
+    <div class="swatch"><div class="dot" style="background:#f4efe2"></div><div class="name">pill</div><div class="hex">#f4efe2</div><div class="use">Status row fills, soft pills</div></div>
+    <div class="swatch"><div class="dot" style="background:#23201b"></div><div class="name">ink</div><div class="hex">#23201b</div><div class="use">Primary text, numbers</div></div>
+    <div class="swatch"><div class="dot" style="background:#5a5348"></div><div class="name">ink‑2</div><div class="hex">#5a5348</div><div class="use">Body text</div></div>
+    <div class="swatch"><div class="dot" style="background:#8a8374"></div><div class="name">ink‑3</div><div class="hex">#8a8374</div><div class="use">Labels, hints, meta</div></div>
+    <div class="swatch"><div class="dot" style="background:#e8e2d4"></div><div class="name">rule</div><div class="hex">#e8e2d4</div><div class="use">Dividers, card borders</div></div>
+    <div class="swatch"><div class="dot" style="background:#b84a1a"></div><div class="name">accent</div><div class="hex">#b84a1a</div><div class="use">Active bracket, P0, primary CTA link</div></div>
+    <div class="swatch"><div class="dot" style="background:#f6e3d6"></div><div class="name">accent‑soft</div><div class="hex">#f6e3d6</div><div class="use">Active bracket fill</div></div>
+    <div class="swatch"><div class="dot" style="background:#2b8a4a"></div><div class="name">ok</div><div class="hex">#2b8a4a</div><div class="use">Complete status, NEXT callout, progress</div></div>
+    <div class="swatch"><div class="dot" style="background:#e4f1e6"></div><div class="name">ok‑soft</div><div class="hex">#e4f1e6</div><div class="use">NEXT panel bg, status pill bg</div></div>
+    <div class="swatch"><div class="dot" style="background:#a8741a"></div><div class="name">warn</div><div class="hex">#a8741a</div><div class="use">In progress</div></div>
+    <div class="swatch"><div class="dot" style="background:#a83838"></div><div class="name">block</div><div class="hex">#a83838</div><div class="use">Blocked status only</div></div>
+  </div>
+
+  <div class="callout">
+    <strong>Dark theme.</strong> Keep the existing amber‑on‑black values but retune the role of color so "dark" means <em>calmer</em>, not "same UI, inverted". The stream pattern from Variant C's dark mode is the reference.
+  </div>
+
+  <h3>Type</h3>
+  <p>Two families, two jobs. Inter for UI chrome and titles; JetBrains Mono for IDs, paths, numbers, bracket verbs, and any machine‑produced data.</p>
+
+  <div style="background:var(--paper);border:1px solid var(--rule);padding:18px 22px;">
+    <div class="type-row"><span class="label">display</span><span style="font-size:34px;font-weight:600;letter-spacing:-1px;line-height:1;">94%</span><span class="meta">Inter 600 · 34 / −1</span></div>
+    <div class="type-row"><span class="label">title</span><span style="font-size:22px;font-weight:600;letter-spacing:-0.4px;">Hoplon</span><span class="meta">Inter 600 · 22 / −0.4</span></div>
+    <div class="type-row"><span class="label">h3</span><span style="font-size:15px;font-weight:600;">HA / multi‑region snapshot replication</span><span class="meta">Inter 600 · 14–15</span></div>
+    <div class="type-row"><span class="label">body</span><span style="font-size:13px;color:var(--ink2);">18 slices across 8 waves: contracts, 7 mandatory adapters…</span><span class="meta">Inter 400 · 13</span></div>
+    <div class="type-row"><span class="label">label</span><span class="eyebrow">PROJECT · STATUS</span><span class="meta">Mono 500 · 10 / 1.0</span></div>
+    <div class="type-row"><span class="label">data / id</span><span style="font-family:var(--mono);font-size:11px;color:var(--ink3);">T‑012 · rev 151 · ~/llm-tracker</span><span class="meta">Mono 400 · 11</span></div>
+    <div class="type-row"><span class="label">bracket</span><span class="bracket active">[PICK]</span><span class="meta">Mono 500 · 11 / 0.4</span></div>
+  </div>
+
+  <h3>Spacing &amp; geometry</h3>
+  <table>
+    <tr><th>Token</th><th>Value</th><th>Use</th></tr>
+    <tr><td><code>space‑2</code></td><td>4px</td><td>Bracket button gap; tight chips</td></tr>
+    <tr><td><code>space‑3</code></td><td>8px</td><td>Inline meta gap</td></tr>
+    <tr><td><code>space‑4</code></td><td>12px</td><td>Card internal gap</td></tr>
+    <tr><td><code>space‑5</code></td><td>14–16px</td><td>Card padding</td></tr>
+    <tr><td><code>space‑6</code></td><td>24px</td><td>Page horizontal padding</td></tr>
+    <tr><td><code>radius</code></td><td><strong>0</strong> (square) except bracket corners 0, NEXT panel 0</td><td>Keep the terminal feel — no rounded corners on the board.</td></tr>
+    <tr><td><code>rule</code></td><td>1px solid var(--rule)</td><td>All dividers. No shadows.</td></tr>
+    <tr><td><code>progress</code></td><td>5–6px bar, no radius</td><td>Segmented by status</td></tr>
+  </table>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">03</span>Page layout</h2>
+  <div class="sub">the refined A2 frame, top to bottom</div>
+
+  <div class="anatomy">
+    <div class="label">VERTICAL STACK — 1440w reference</div>
+    <div class="row"><span class="k">1. Top bar</span><span class="v">~52px. Project name + rev badge (left) · agent cluster + history cluster + ⌘K input + overflow (right). Border-bottom 1px.</span></div>
+    <div class="row"><span class="k">2. Hero strip</span><span class="v">~140px. 3-column grid: <code>1.1fr · 1.2fr · 340px</code>. Project+94% / Status grid / green Recommended Next callout. Border-bottom 1px.</span></div>
+    <div class="row"><span class="k">3. Scratchpad</span><span class="v">~36px. Single-line truncated note row with <code>NOTE</code> label, text, edited timestamp, <span class="bracket">[EXPAND]</span> <span class="bracket">[EDIT]</span>. Expands in place on click.</span></div>
+    <div class="row"><span class="k">4. Board header</span><span class="v">~42px. 5-col grid: <code>240px · 1fr · 1fr · 1fr · 1fr</code> — SWIMLANE + P0 · Now / P1 · Next / P2 · Soon / P3 · Later.</span></div>
+    <div class="row"><span class="k">5. Expanded lane</span><span class="v">Lane label cell (240px) + 4 priority cells. One task card per cell; empty cells read <em>— no tasks —</em>.</span></div>
+    <div class="row"><span class="k">6. Collapsed lanes</span><span class="v">Single 44px row each: lane name + live dot + counts + inline progress bar + %.</span></div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">04</span>Components</h2>
+  <div class="sub">the core set; everything else is composition</div>
+
+  <h3>Bracket button</h3>
+  <p>The action primitive. Inline, no pill background in default state.</p>
+  <pre><span class="c">// variants: default | active | soft | tone=ok|warn|block</span>
+&lt;<span class="k">Bracket</span> active&gt;READ&lt;/Bracket&gt;   <span class="c">// accent border + accent-soft fill</span>
+&lt;<span class="k">Bracket</span>&gt;WHY&lt;/Bracket&gt;          <span class="c">// 1px rule border, ink-2 text</span>
+&lt;<span class="k">Bracket</span> soft&gt;↑&lt;/Bracket&gt;        <span class="c">// no border (lane up/down)</span>
+&lt;<span class="k">Bracket</span> tone=<span class="s">"ok"</span>&gt;PICK&lt;/Bracket&gt; <span class="c">// green CTA</span></pre>
+
+  <h3>Task card</h3>
+  <div class="anatomy">
+    <div class="label">3 TIERS · SCANNABLE IN 0.5S</div>
+    <div class="row"><span class="k">Tier 1</span><span class="v"><strong>Mono id (T‑012)</strong> · 1 line · ink-3 · 10px; then <strong>title</strong> · Inter 600 · 14px.</span></div>
+    <div class="row"><span class="k">Tier 2</span><span class="v">Summary. Inter 400 · 12px · ink-2 · line-height 1.5. Clamp at 4 lines.</span></div>
+    <div class="row"><span class="k">Tier 3</span><span class="v">Meta row: <span class="bracket ok">● COMPLETE</span> <span class="bracket">claude‑opus‑4‑6</span> <code>#phase1</code> <code>#milestone</code></span></div>
+    <div class="row"><span class="k">Actions</span><span class="v">Dashed top divider + bracket row: <span class="bracket active">[READ]</span> <span class="bracket">[WHY]</span> <span class="bracket">[EXEC]</span> <span class="bracket">[VERIFY]</span>. Always visible on active card; reveal on hover for non-focus cards (optional optimization).</span></div>
+    <div class="row"><span class="k">Status</span><span class="v">3px border-left in status color (ok / warn / ink-3 / block). The ONLY decorative color on the card.</span></div>
+  </div>
+
+  <h3>Recommended Next callout</h3>
+  <p>Green panel, top-right of hero strip. Contents:</p>
+  <ul>
+    <li>Eyebrow: <code>★ RECOMMENDED NEXT</code> · mono · ok · 10px · letter-spacing 1.2</li>
+    <li>Task id (top-right of eyebrow row)</li>
+    <li>Title: Inter 600 · 14px</li>
+    <li>One-sentence reason (priority · readiness · dependencies · approvals)</li>
+    <li>Two buttons: <code>[PICK]</code> (solid green) + <code>[READ]</code> (outlined)</li>
+  </ul>
+  <p>Source: <code>GET /api/projects/&lt;slug&gt;/next?limit=1</code>. Reason string is composed client-side from the ranked-shortlist fields already returned.</p>
+
+  <h3>Status grid</h3>
+  <p>Middle hero cell. 2×3 tiles. Each tile: dot + label + big mono number. Complete &amp; Open get the pill background; others hollow with 1px ruleSoft border. Zero-value numbers dim to ink-3.</p>
+
+  <h3>Hero progress</h3>
+  <p>5px segmented bar. Segments in order: <code>complete (ok)</code> · <code>in_progress (warn)</code> · <code>not_started / deferred (rule-soft)</code>. Blocked contributes a 35% opacity overlay in <code>block</code> if present.</p>
+
+  <h3>Command palette (⌘K)</h3>
+  <p>Replaces <code>[FILTER]</code>, <code>[FUZZY]</code>, <code>[COLLAPSE]</code>, <code>[NEXT]</code>, <code>[OVERVIEW]</code>, <code>[SETTINGS]</code>, and most of the other 14 header actions. Single global shortcut. Command sources:</p>
+  <ul>
+    <li><strong>Projects</strong> — list from <code>/api/projects</code></li>
+    <li><strong>Tasks</strong> — exact filter + <code>/fuzzy-search</code> (deterministic) + <code>/search</code> (semantic)</li>
+    <li><strong>Actions</strong> — next, blockers, changed, decisions, undo, redo, settings, toggle theme, help (/help)</li>
+    <li><strong>Swimlanes</strong> — jump + expand/collapse all</li>
+  </ul>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">05</span>Information architecture</h2>
+  <div class="sub">where old header actions go</div>
+
+  <table>
+    <tr><th>Old</th><th>New home</th></tr>
+    <tr><td><code>[COLLAPSE]</code></td><td>⌘K command "Collapse all lanes"</td></tr>
+    <tr><td><code>[NEXT]</code></td><td>Hero "Recommended Next" callout (+ ⌘K)</td></tr>
+    <tr><td><code>[BLOCKERS]</code></td><td>Agent cluster in top bar</td></tr>
+    <tr><td><code>[CHANGED]</code></td><td>Agent cluster in top bar</td></tr>
+    <tr><td><code>[DECISIONS]</code></td><td>Agent cluster in top bar</td></tr>
+    <tr><td><code>[UNDO]</code> <code>[REDO]</code></td><td>History cluster in top bar</td></tr>
+    <tr><td><code>[HISTORY]</code></td><td>Inline under project title; ⌘K command for full log</td></tr>
+    <tr><td><code>[OVERVIEW]</code></td><td>Project-name dropdown (&#9662;)</td></tr>
+    <tr><td><code>[DELETE]</code> <code>[SETTINGS]</code> <code>[?]</code></td><td>Overflow <code>⋯</code> menu + ⌘K</td></tr>
+    <tr><td><code>[FILTER]</code> <code>[FUZZY]</code></td><td>⌘K (single input, mode inferred or switched with a modifier)</td></tr>
+    <tr><td><code>[C]</code> (toggle comments)</td><td>Overflow menu; task-card comments always visible</td></tr>
+    <tr><td><code>[PIN]</code></td><td>Task drawer overflow</td></tr>
+  </table>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">06</span>Interaction states</h2>
+  <div class="sub">what every surface does on hover/focus/active</div>
+
+  <h3>Task card</h3>
+  <ul>
+    <li><strong>hover</strong> — border shifts from rule to ink-3; status border-left unchanged.</li>
+    <li><strong>click title</strong> — expands the card inline into the task drawer (goal, deps, refs, snippets, history). Replaces the old modal.</li>
+    <li><strong>drag</strong> — existing <code>POST /move</code> flow. Visual: card lifts by 1px shadow, dashed target highlight in destination cell.</li>
+    <li><strong>bracket actions</strong> — each posts to the existing endpoint; show a 1s inline toast at the card bottom.</li>
+  </ul>
+
+  <h3>Lane row (collapsed)</h3>
+  <ul>
+    <li><strong>hover</strong> — row gets a 1px ink-3 left accent; up/down brackets fade in on the right.</li>
+    <li><strong>click</strong> — expands to full priority-column view in place.</li>
+  </ul>
+
+  <h3>Scratchpad</h3>
+  <ul>
+    <li><strong>default</strong> — one line, truncated with ellipsis.</li>
+    <li><strong>[EXPAND]</strong> — grows to full-width box; border-bottom gets stronger.</li>
+    <li><strong>[EDIT]</strong> — inline textarea, <code>cmd+enter</code> to save (<code>PATCH meta.scratchpad</code>).</li>
+  </ul>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">07</span>Data contract</h2>
+  <div class="sub">no backend changes — what each surface pulls from</div>
+
+  <table>
+    <tr><th>Surface</th><th>Source</th></tr>
+    <tr><td>Top bar project name + rev</td><td><code>GET /api/projects/:slug</code> → <code>meta.name</code>, <code>meta.rev</code></td></tr>
+    <tr><td>Hero 94% + progress</td><td>Derive from <code>tasks[*].status</code> counts. No new endpoint.</td></tr>
+    <tr><td>Status grid</td><td>Same — client-side aggregation.</td></tr>
+    <tr><td>Recommended Next</td><td><code>GET /api/projects/:slug/next?limit=1</code></td></tr>
+    <tr><td>Scratchpad</td><td><code>meta.scratchpad</code> · <code>meta.updatedAt</code></td></tr>
+    <tr><td>Board</td><td><code>meta.swimlanes</code> + <code>meta.priorities</code> + <code>tasks</code> (existing shape)</td></tr>
+    <tr><td>Task drawer (inline expand)</td><td><code>GET /api/projects/:slug/tasks/:taskId/brief</code> — use the capped pack as-is.</td></tr>
+    <tr><td>⌘K fuzzy</td><td><code>GET /api/projects/:slug/fuzzy-search?q=</code></td></tr>
+    <tr><td>⌘K semantic</td><td><code>GET /api/projects/:slug/search?q=</code></td></tr>
+    <tr><td>Live updates</td><td>Existing <code>/ws</code> WebSocket; on <code>rev</code> bump, call <code>since/&lt;lastRev&gt;</code> and merge.</td></tr>
+  </table>
+
+  <!-- ─────────────────────────────────────────────────────────── -->
+  <h2><span class="num">08</span>Build order</h2>
+  <div class="sub">ship incrementally; each step is independently deployable</div>
+
+  <ol>
+    <li><strong>Tokens &amp; typography.</strong> Drop the color + type scale into the existing Preact app. Nothing visible changes yet — but all downstream commits become diffs against a real system.</li>
+    <li><strong>Top bar + hero strip.</strong> Replaces the current first two rows. Old header brackets stay in an overflow temporarily.</li>
+    <li><strong>⌘K command palette.</strong> Launch empty (projects + tasks only); retire <code>[FILTER]</code> and <code>[FUZZY]</code>. Add actions in subsequent PRs.</li>
+    <li><strong>Task card rework.</strong> Three-tier layout + bracket action row.</li>
+    <li><strong>Scratchpad collapse.</strong> Single-line default + expand.</li>
+    <li><strong>Inline task drawer.</strong> Replace the modal overlay for <code>[READ]</code> / <code>[WHY]</code> / <code>[EXEC]</code> / <code>[VERIFY]</code>.</li>
+    <li><strong>Dark theme retune.</strong> Apply the refined palette to the existing dark mode; do not add new values.</li>
+  </ol>
+
+  <div class="callout ok">
+    <strong>Accessibility sweep at the end.</strong> Re-verify AA contrast for ink-2 on bg (14.5px text), and make sure the bracket buttons have hit targets ≥ 24×24 even though they look smaller. Keyboard shortcuts from the README (<code>j</code> / <code>k</code>, <code>g g</code>, <code>n</code>, <code>p</code>) should all work with the new layout.
+  </div>
+
+  <h2><span class="num">09</span>Out of scope for this pass</h2>
+  <div class="sub">things to flag for a follow-up</div>
+
+  <ul>
+    <li>Empty-state for a freshly-initialized project (<code>npx llm-tracker init</code> → 0 tasks).</li>
+    <li>Agent identity system — avatar glyph, color, tenure. (Referenced in Variant C; not in A2.)</li>
+    <li>Multi-project overview drawer. Current behavior preserved behind the project-name dropdown.</li>
+    <li>Live agent activity rail (Variant C). Consider adding as an optional right drawer in a later release.</li>
+  </ul>
+
+  <p style="margin-top:48px;font-size:12px;font-family:var(--mono);color:var(--ink3);">
+    — end of handoff. ping before implementation if the token values don't compose cleanly with the existing Preact theme plumbing.
+  </p>
+</main>
+</body>
+</html>

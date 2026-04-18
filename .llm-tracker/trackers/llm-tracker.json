@@ -1,0 +1,891 @@
+{
+  "meta": {
+    "name": "llm-tracker",
+    "slug": "llm-tracker",
+    "swimlanes": [
+      {
+        "id": "product",
+        "label": "Workflow + UX",
+        "description": "CLI, docs, UI surfaces, and maintainability work.",
+        "collapsed": true
+      },
+      {
+        "id": "core",
+        "label": "Core Runtime",
+        "description": "Deterministic retrieval, execution contracts, and hub behavior."
+      },
+      {
+        "id": "improvements",
+        "label": "Improvements",
+        "description": "Follow-up API and board-maintenance improvements to document as GitHub issues.",
+        "collapsed": true
+      },
+      {
+        "id": "redesign",
+        "label": "UI Redesign (A2)",
+        "description": "Front-end-only rebuild of the Preact UI at http://localhost:4400 as refined Variant A2 per design/LLM Tracker Impl Guide.html. No backend, MCP, or CLI contract changes.",
+        "collapsed": true
+      }
+    ],
+    "priorities": [
+      {
+        "id": "p0",
+        "label": "P0 / Now"
+      },
+      {
+        "id": "p1",
+        "label": "P1 / Next"
+      },
+      {
+        "id": "p2",
+        "label": "P2 / Soon"
+      },
+      {
+        "id": "p3",
+        "label": "P3 / Later"
+      }
+    ],
+    "scratchpad": "Redesign lane tracks the 15-task front-end-only Variant A2 rebuild from design/. t21 lands LIGHT and DARK tokens together so every surface is dual-theme from day one; t31 Bracket primitive is the action DNA reused across t22/t25/t26/t28; t29 is a polish pass (Variant C stream pattern), not a late retune; t30 sweeps a11y + keyboard + theme parity. No backend/MCP/CLI contract changes.",
+    "rev": 19,
+    "updatedAt": "2026-04-18T15:16:23.336Z"
+  },
+  "tasks": [
+    {
+      "id": "t0",
+      "title": "Ship deterministic next/blockers/changed/pick core",
+      "goal": "Land the initial task-intelligence substrate before moving on to richer retrieval packs.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "core",
+        "priorityId": "p0"
+      },
+      "dependencies": [],
+      "reference": "ARCHITECTURE.md:149-173",
+      "comment": "Completed locally before adding this repo-local workspace."
+    },
+    {
+      "id": "t1",
+      "title": "Build snippet-cache groundwork for brief packs",
+      "goal": "Cache deterministic code and doc snippets under runtime storage so brief packs can stay small and stable.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "core",
+        "priorityId": "p0"
+      },
+      "dependencies": [],
+      "reference": "README.md:149-160",
+      "comment": "Use the older task schema here on purpose to test backward compatibility.",
+      "assignee": "codex-live",
+      "blocker_reason": null
+    },
+    {
+      "id": "t2",
+      "title": "Expose brief packs through API and CLI",
+      "goal": "Give agents one-call context packs once snippet caching exists.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "core",
+        "priorityId": "p0"
+      },
+      "dependencies": [
+        "t1"
+      ],
+      "reference": "ARCHITECTURE.md:183-211",
+      "comment": "Keep budgets deterministic and compact."
+    },
+    {
+      "id": "t3",
+      "title": "Add MCP wrappers over deterministic tracker operations",
+      "goal": "Expose deterministic tracker read and write helpers through MCP so agents can update tasks without temp-file curl glue.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "product",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "t2"
+      ],
+      "reference": "ARCHITECTURE.md:1-26",
+      "comment": "Thin wrappers only. HTTP remains the source of truth, but MCP should cover common read and patch flows.",
+      "references": [
+        "ARCHITECTURE.md:392-414",
+        "workspace-template/README.md:73-77"
+      ]
+    },
+    {
+      "id": "t4",
+      "title": "Break down oversized modules without behavior regressions",
+      "goal": "Continue splitting large files into smaller modules while preserving compatibility and coverage.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "product",
+        "priorityId": "p1"
+      },
+      "dependencies": [],
+      "reference": "ARCHITECTURE.md:9-26",
+      "comment": "Maintainability is part of the current plan, not deferred cleanup."
+    },
+    {
+      "id": "t5",
+      "title": "Add execute and verify contract flows",
+      "goal": "Build execution packs and verification once brief packs exist.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "core",
+        "priorityId": "p2"
+      },
+      "dependencies": [
+        "t2"
+      ],
+      "reference": "ARCHITECTURE.md:66-101",
+      "comment": "Deferred until retrieval packs are in place."
+    },
+    {
+      "dependencies": [],
+      "id": "t6",
+      "title": "Split durable tracker spec from workspace-owned runtime overlay",
+      "goal": "Keep repo-visible tracker files focused on durable task definitions while moving rev, updatedAt, scratchpad, assignee, status churn, and similar runtime state into a hub-owned overlay.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "core",
+        "priorityId": "p1"
+      },
+      "reference": "ARCHITECTURE.md:478-480",
+      "comment": "Linked shared-workspace projects currently show day-to-day operator churn in Git; separate durable spec from runtime state without losing merge/history guarantees.",
+      "effort": "l"
+    },
+    {
+      "dependencies": [],
+      "id": "t7",
+      "title": "Add first-class partial-slice outcome tracking",
+      "goal": "Let tasks record that a bounded slice landed without forcing awkward comment-only progress notes or overloaded deferred status.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "product",
+        "priorityId": "p2"
+      },
+      "reference": "workspace-template/README.md:170-192",
+      "comment": "Keep the four status values intact or replace them deliberately, but add an explicit way to record partial bounded progress in the contract and UI.",
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t8",
+      "title": "Add first-class structural ops instead of full PUT fallbacks",
+      "goal": "Support routine structural edits through narrow patch operations: swimlane add/update/move/remove plus task move, archive, split, and merge, so board maintenance never requires full PUT.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p0"
+      },
+      "comment": "Structural edits should be first-class patch operations, not raw array replacement semantics or full-file writes.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "patch-contract",
+          "structure",
+          "swimlanes",
+          "tasks"
+        ],
+        "github_issue_number": 21,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/21",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "l"
+    },
+    {
+      "dependencies": [
+        "t8"
+      ],
+      "id": "t9",
+      "title": "Add stronger validation for structural edits",
+      "goal": "If a structural edit would strand tasks or create invalid board state, fail loudly and return a repair shape such as `moveTasksTo: <laneId>` instead of silently preserving or forcing full replacement.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p1"
+      },
+      "comment": "Removing a swimlane should offer a concrete retarget path rather than noop or implicit keep-existing behavior.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "validation",
+          "swimlanes",
+          "structure"
+        ],
+        "github_issue_number": 22,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/22",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [
+        "t8"
+      ],
+      "id": "t10",
+      "title": "Make structural ops first-class rev/history mutations",
+      "goal": "Every effective structural op should bump `rev`, stamp `updatedAt`, append history, and broadcast immediately instead of behaving like a merge edge case.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p1"
+      },
+      "comment": "Structural maintenance should be as authoritative as task patches and claims.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "history",
+          "structure"
+        ],
+        "github_issue_number": 23,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/23",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t11",
+      "title": "Make no-ops explain themselves",
+      "goal": "When a patch is ignored or becomes a noop, return exactly why, what operation was rejected, and the correct retry shape so LLMs never have to infer the fix from silence.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p0"
+      },
+      "comment": "`cannot remove swimlane through patch semantics; use swimlaneOps.remove` is the standard to aim for, not bare `noop: true`.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "error-contract",
+          "noops",
+          "retry"
+        ],
+        "github_issue_number": 24,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/24",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t8",
+        "t11"
+      ],
+      "id": "t12",
+      "title": "Document structural patch ops in README, /help, and MCP guidance",
+      "goal": "Update the public contract so agents know the exact structural op shapes, hub-owned fields, conflict modes, and retry strategy for patch-driven board maintenance.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p2"
+      },
+      "comment": "Keep README.md, workspace-template/README.md, MCP prompts, and agent guidance aligned with the structural patch contract.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "docs",
+          "patch-contract",
+          "mcp"
+        ],
+        "github_issue_number": 25,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/25",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t8"
+      ],
+      "id": "t13",
+      "title": "Close tooling gaps around hub-owned structure vs agent-owned content",
+      "goal": "Audit and fill the routine maintenance operations that still fall through the current ownership split, so the contract is actionable instead of partially manual.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p2"
+      },
+      "comment": "The ownership line is sensible, but the tooling around it is still incomplete for everyday board maintenance.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "contract",
+          "tooling"
+        ],
+        "github_issue_number": 26,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/26",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t14",
+      "title": "Make roadmap linkage explicit to reduce doc/tracker drift",
+      "goal": "Give every task a clear roadmap home and expose roadmap section, execution report, and architecture truth doc linkage when relevant so tracker truth stays aligned with planning docs.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p2"
+      },
+      "comment": "Live tracker truth and roadmap/docs truth still drift too easily; linkage should be first-class rather than implicit.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "roadmap",
+          "docs",
+          "traceability"
+        ],
+        "github_issue_number": 27,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/27",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t15",
+      "title": "Expose the effective target on every read and write",
+      "goal": "Every authoritative read and write response should include daemon port, workspace path, actual tracker file path, and whether the topology is shared-workspace or repo-linked.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p1"
+      },
+      "comment": "Topology is still too easy to get wrong; effective target data should be unavoidable in the contract.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "topology",
+          "reads",
+          "writes"
+        ],
+        "github_issue_number": 28,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/28",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t16",
+      "title": "Add optimistic concurrency to tracker writes",
+      "goal": "Allow patch-style writes to include `expectedRev` so callers can tell whether they are writing against stale state instead of being silently merged over.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p0"
+      },
+      "comment": "Write responses should distinguish stale-write conflicts from accepted merges.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "concurrency",
+          "writes",
+          "rev"
+        ],
+        "github_issue_number": 29,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/29",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t17",
+      "title": "Add a real tracker_start task flow",
+      "goal": "Provide a first-class start-task operation that atomically sets `status: in_progress`, assignee, and an optional scratchpad update without manual multi-step patching.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p1"
+      },
+      "comment": "Claim, start, and handoff should feel like one workflow instead of several loosely-coupled writes.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "workflow",
+          "start",
+          "mcp"
+        ],
+        "github_issue_number": 30,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/30",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t18",
+      "title": "Add lane hygiene and maintenance helpers",
+      "goal": "Provide helpers for recurring board cleanup: list empty swimlanes, remove empty swimlanes, find orphaned priorities, find stale in_progress tasks, and find blocked-but-unexplained tasks.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p2"
+      },
+      "comment": "These recurring maintenance tasks should be first-class instead of ad hoc board inspection.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "hygiene",
+          "maintenance",
+          "board"
+        ],
+        "github_issue_number": 31,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/31",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t19",
+      "title": "Add built-in handoff and prompt generation",
+      "goal": "Provide a `tracker_handoff(taskId)` or equivalent prompt-generation flow built from brief, roadmap context, and current tracker truth so agents do not have to synthesize handoff prompts manually.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p2"
+      },
+      "comment": "Handoff generation should be a built-in contract surface, not a manual composition of brief plus current truth.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "handoff",
+          "prompting",
+          "workflow"
+        ],
+        "github_issue_number": 32,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/32",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t20",
+      "title": "Improve cross-repo task modeling",
+      "goal": "Make cross-repo work first-class by modeling primary repo, secondary repo, per-repo allowed paths, and approval requirements for cross-repo edits.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p2"
+      },
+      "comment": "Cross-repo work is representable today, but not first-class enough for reliable execution and approval flows.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "cross-repo",
+          "modeling",
+          "approvals"
+        ],
+        "github_issue_number": 33,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/33",
+        "github_issue_repo": "justguy/llm-tracker"
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [],
+      "id": "t21",
+      "title": "Adopt A2 design tokens and typography",
+      "goal": "Drop the warm-paper LIGHT palette AND its DARK counterpart (both calibrated per design/LLM Tracker Impl Guide.html section 02 and the Variant C dark reference), plus the Inter + JetBrains Mono scale, as theme primitives exposed through a single `theme` switch every downstream surface reads from.",
+      "status": "in_progress",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p0"
+      },
+      "references": [
+        "design/design-canvas.jsx:1-20",
+        "design/variants/variant-a2.jsx:7-24",
+        "design/variants/variant-c.jsx:1-50"
+      ],
+      "comment": "Claiming for implementation of A2 design tokens and typography.",
+      "context": {
+        "tags": [
+          "redesign",
+          "tokens",
+          "typography"
+        ]
+      },
+      "effort": "s",
+      "assignee": null,
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "t21",
+        "t31"
+      ],
+      "id": "t22",
+      "title": "Rebuild top bar: project + agent/history clusters + slash-K slot + overflow",
+      "goal": "Replace the 14 amber header buttons with a 52px top bar: project name + REV badge on the left, and agent cluster ([NEXT][BLOCKERS][CHANGED][DECISIONS]) + history cluster ([UNDO][REDO]) + the slash-K input + overflow dot menu on the right.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p0"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:59-101"
+      ],
+      "comment": "Old header brackets that do not yet have a new home live in the overflow menu temporarily until slash-K absorbs them in t24. Keep border-bottom 1px rule; no shadow.",
+      "context": {
+        "tags": [
+          "redesign",
+          "top-bar",
+          "ia"
+        ]
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [
+        "t21"
+      ],
+      "id": "t23",
+      "title": "Build hero strip: 94% headline, status grid, Recommended Next callout",
+      "goal": "Implement the 3-column hero (grid 1.1fr / 1.2fr / 340px): project name + big 94% + segmented progress, 2x3 status tile grid, and the green Recommended Next callout with [PICK] and [READ] buttons.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p0"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:103-198"
+      ],
+      "comment": "Status counts aggregate client-side from tasks[*].status; the callout consumes GET /api/projects/<slug>/next?limit=1 and composes the reason string from the ranked-shortlist fields.",
+      "context": {
+        "tags": [
+          "redesign",
+          "hero",
+          "next"
+        ]
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [
+        "t22"
+      ],
+      "id": "t24",
+      "title": "Ship slash-K command palette: projects, tasks, actions",
+      "goal": "Single global palette that lists projects (/api/projects), fuzzy filters tasks (/fuzzy-search) with a semantic mode (/search), and runs retired header actions (collapse all, next, blockers, changed, decisions, undo, redo, settings, toggle theme, help).",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p1"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:92-101"
+      ],
+      "comment": "Retire [FILTER] and [FUZZY] in the same PR; remaining actions land in follow-up PRs. Mode inferred by prefix or switched with a modifier key.",
+      "context": {
+        "tags": [
+          "redesign",
+          "palette",
+          "ia"
+        ]
+      },
+      "effort": "l"
+    },
+    {
+      "dependencies": [
+        "t21",
+        "t31"
+      ],
+      "id": "t25",
+      "title": "Rework task card into 3-tier layout with bracket action row",
+      "goal": "Render cards as id + title / summary (4-line clamp) / status pill + assignee + tags, with a 3px status border-left as the only decorative color, and a bracket action row ([READ][WHY][EXEC][VERIFY]) under a dashed divider.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p1"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:331-377"
+      ],
+      "comment": "Drop the amber-on-amber chrome. Hover = ink-3 border. Bracket actions post to existing endpoints with a 1s inline toast at the card bottom.",
+      "context": {
+        "tags": [
+          "redesign",
+          "card"
+        ]
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [
+        "t21",
+        "t31"
+      ],
+      "id": "t26",
+      "title": "Collapse scratchpad to one-line NOTE row with expand/edit",
+      "goal": "Render the scratchpad as a 36px truncated row (NOTE label + ellipsis text + edited timestamp + [EXPAND] [EDIT] soft brackets); [EXPAND] grows to a full-width box, [EDIT] swaps in an inline textarea that saves via PATCH meta.scratchpad on cmd+enter.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p1"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:200-218"
+      ],
+      "comment": "Reclaims ~60px for the board below it.",
+      "context": {
+        "tags": [
+          "redesign",
+          "scratchpad"
+        ]
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t25"
+      ],
+      "id": "t27",
+      "title": "Replace task modal with inline task drawer",
+      "goal": "Expand the task card in place to render the brief pack (goal, dependencies, references, snippets, recent history) instead of opening the current overlay modal; keep the board visible as context. [WHY]/[EXEC]/[VERIFY] content shapes land in t35.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p1"
+      },
+      "references": [
+        "README.md:289-292"
+      ],
+      "comment": "Consumes GET /api/projects/<slug>/tasks/<taskId>/brief as-is. Renders identically in light and dark via t21 tokens.",
+      "context": {
+        "tags": [
+          "redesign",
+          "drawer",
+          "brief"
+        ]
+      },
+      "effort": "l"
+    },
+    {
+      "dependencies": [
+        "t21",
+        "t31"
+      ],
+      "id": "t28",
+      "title": "Refresh collapsed swimlane rows to 44px status strip",
+      "goal": "Render each collapsed lane as a single 44px row (lane name + optional LIVE dot + tasks/active/done counts + inline progress bar + percentage), with a 1px ink-3 hover accent and up/down brackets that fade in on hover.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p2"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:263-292"
+      ],
+      "comment": "Uses existing lane metadata; no new endpoint. Click the row to expand back into the 4-priority-column view.",
+      "context": {
+        "tags": [
+          "redesign",
+          "swimlanes"
+        ]
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t22",
+        "t23",
+        "t25",
+        "t26",
+        "t27",
+        "t28"
+      ],
+      "id": "t29",
+      "title": "Polish surfaces against Variant C dark reference",
+      "goal": "With light and dark tokens already established in t21, do a surface-by-surface polish pass: apply Variant C's subtle stream pattern where called out (focus card bg, agent cluster), confirm amber encodes meaning (status, agent identity) rather than emphasis, and close any parity gaps flagged during t22-t28.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p2"
+      },
+      "references": [
+        "design/variants/variant-c.jsx:1-50"
+      ],
+      "comment": "Not a re-theme. A targeted polish sweep. Capture new issues as follow-ups rather than re-architecting tokens.",
+      "context": {
+        "tags": [
+          "redesign",
+          "dark-theme"
+        ]
+      },
+      "effort": "m"
+    },
+    {
+      "dependencies": [
+        "t22",
+        "t23",
+        "t24",
+        "t25",
+        "t26",
+        "t27",
+        "t28",
+        "t29",
+        "t31",
+        "t32",
+        "t33",
+        "t34",
+        "t35"
+      ],
+      "id": "t30",
+      "title": "Accessibility, keyboard, and theme-parity sweep",
+      "goal": "Re-verify AA contrast on light AND dark (ink-2 on bg at 14.5px), ensure bracket buttons have >=24x24 hit targets, confirm j/k/gg/n/p/slash-K shortcuts still work, and walk every surface in both themes to catch parity regressions.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p3"
+      },
+      "references": [
+        "README.md:20-25"
+      ],
+      "comment": "Final pass before merging the redesign branch. Capture any contrast or hit-target regressions as their own tasks rather than patching inline.",
+      "context": {
+        "tags": [
+          "redesign",
+          "a11y",
+          "keyboard"
+        ]
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t21"
+      ],
+      "id": "t31",
+      "title": "Implement Bracket button primitive",
+      "goal": "Single reusable component with variants default | active | soft | tone=ok|warn|block that renders correctly in light and dark; consumed by top bar (t22), task card (t25), scratchpad (t26), lane rows (t28), and the hero callout (t23).",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p0"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:26-43"
+      ],
+      "comment": "Action DNA of the whole UI. Extracting this primitive up front prevents divergence across consumers and gives one place to validate the light/dark contrast.",
+      "context": {
+        "tags": [
+          "redesign",
+          "primitive",
+          "bracket"
+        ]
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t22"
+      ],
+      "id": "t32",
+      "title": "Add project-name dropdown: overview + quick-switch",
+      "goal": "Attach a down-caret dropdown to the top-bar project name that lists all workspace projects (GET /api/projects), supports quick-switch, and absorbs the retired [OVERVIEW] button; pin-to-open behavior preserved from the current overview drawer.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p1"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:67-74",
+        "README.md:76-79"
+      ],
+      "comment": "Panel uses paper/ink-2 in light and the dark-paper/ink-rev equivalents in dark, both from t21 tokens.",
+      "context": {
+        "tags": [
+          "redesign",
+          "top-bar",
+          "overview"
+        ]
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t22"
+      ],
+      "id": "t33",
+      "title": "Wire overflow menu for retired header actions",
+      "goal": "Render the overflow dot menu in the top bar as the home for DELETE, SETTINGS, HELP, comments toggle, and PIN per the IA table in section 05; each entry invokes an existing endpoint or keyboard shortcut.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p2"
+      },
+      "references": [
+        "design/variants/variant-a2.jsx:100-100"
+      ],
+      "comment": "Same dark/light panel treatment as t32. No new endpoints. Temporary home for anything slash-K has not absorbed yet.",
+      "context": {
+        "tags": [
+          "redesign",
+          "top-bar",
+          "overflow"
+        ]
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t25"
+      ],
+      "id": "t34",
+      "title": "Polish drag-and-drop visuals for task cards",
+      "goal": "Keep existing POST /move semantics; add the 1px lift shadow on the dragged card and a dashed target-cell highlight in the destination in both themes; verify keyboard-move and drag route through the same action.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p2"
+      },
+      "references": [
+        "README.md:82-84",
+        "design/variants/variant-a2.jsx:331-377"
+      ],
+      "comment": "No contract change. Visual polish only. Dashed highlight uses rule-soft in light and its dark equivalent.",
+      "context": {
+        "tags": [
+          "redesign",
+          "dnd",
+          "card"
+        ]
+      },
+      "effort": "s"
+    },
+    {
+      "dependencies": [
+        "t27"
+      ],
+      "id": "t35",
+      "title": "Render WHY / EXEC / VERIFY content shapes in the task drawer",
+      "goal": "Each bracket action unfolds its own section inside the inline drawer: WHY = intent + decision history (/why), EXEC = execution pack (/execute), VERIFY = verification pack (/verify). All three render in light and dark.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "redesign",
+        "priorityId": "p1"
+      },
+      "references": [
+        "README.md:289-293"
+      ],
+      "comment": "t27 ships the skeleton plus brief shape; this task adds the other three shapes as sibling sections the drawer can switch between.",
+      "context": {
+        "tags": [
+          "redesign",
+          "drawer",
+          "brief",
+          "why",
+          "exec",
+          "verify"
+        ]
+      },
+      "effort": "m"
+    }
+  ]
+}
