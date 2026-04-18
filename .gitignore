@@ -11,4 +11,9 @@ coverage/
 # Project-local scratch
 initial prompt.txt
 
+# Repo-local tracker: track the durable file + layout README, ignore runtime churn
+.llm-tracker/.runtime/
+.llm-tracker/.snapshots/
+.llm-tracker/.history/
+.llm-tracker/patches/
 .llm-tracker/**/.DS_Store

@@ -1,0 +1,6 @@
+# Repo-local tracker file only. Shared daemon/runtime state lives elsewhere.
+.runtime/
+.snapshots/
+.history/
+patches/
+trackers/*.errors.json
