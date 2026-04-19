@@ -1537,6 +1537,7 @@ function Header({
   const hasProject = !!project?.slug;
 
   if (headerCollapsed) {
+    const summary = hasProject ? buildHeroSummary(project, project.slug) : null;
     return html`
       <div class="app-header app-header--collapsed">
         <div class="top-bar top-bar--collapsed">
@@ -1546,7 +1547,30 @@ function Header({
               ${rev != null ? html`<span class="top-bar__rev">REV ${rev}</span>` : null}
             </div>
           </div>
+          ${summary ? html`
+            <div class="top-bar__summary" aria-label="Project summary">
+              <span class="top-bar__summary-pct">${summary.pct}<span class="top-bar__summary-unit">%</span></span>
+              <div class="top-bar__summary-bar" aria-hidden="true">
+                <div class="top-bar__summary-seg top-bar__summary-seg--ok" style=${`width:${summary.completeW}%`}></div>
+                <div class="top-bar__summary-seg top-bar__summary-seg--warn" style=${`width:${summary.warnW}%`}></div>
+              </div>
+              <span class="top-bar__summary-text">${summary.complete}/${summary.total} complete</span>
+              ${summary.inProgress > 0 ? html`<span class="top-bar__summary-chip top-bar__summary-chip--warn">${summary.inProgress} in progress</span>` : null}
+              ${summary.blockedCount > 0 ? html`<span class="top-bar__summary-chip top-bar__summary-chip--block">${summary.blockedCount} blocked</span>` : null}
+            </div>
+          ` : null}
           <div class="top-bar__spacer"></div>
+          <${Bracket}
+            label="NEXT"
+            onClick=${() => onOpenIntel("next")}
+            disabled=${!hasProject}
+            title="Recommended next task"
+          />
+          <${Bracket}
+            label="⌘K"
+            onClick=${() => onOpenPalette && onOpenPalette()}
+            title="Open command palette"
+          />
           <${Bracket}
             label="▾"
             soft=${true}
@@ -2633,12 +2657,14 @@ function App() {
         onExpandAll=${onExpandAll}
         onOpenPalette=${() => setPaletteOpen(true)}
       />
-      <${HeroStrip}
-        project=${active}
-        slug=${activeSlug}
-        onPickTask=${onPickTask}
-        onOpenTask=${onOpenTaskDrawer}
-      />
+      ${!headerCollapsed ? html`
+        <${HeroStrip}
+          project=${active}
+          slug=${activeSlug}
+          onPickTask=${onPickTask}
+          onOpenTask=${onOpenTaskDrawer}
+        />
+      ` : null}
       <div class="banner-row">
         <div class="banner-spacer"></div>
         <${FilterToggles}

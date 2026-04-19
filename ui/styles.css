@@ -2681,6 +2681,75 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   max-width: 480px;
 }
 
+.top-bar__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.top-bar__summary-pct {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.2px;
+  line-height: 1;
+}
+
+.top-bar__summary-unit {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-left: 1px;
+}
+
+.top-bar__summary-bar {
+  width: 120px;
+  height: 4px;
+  background: var(--rule-soft);
+  display: flex;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.top-bar__summary-seg {
+  height: 100%;
+}
+
+.top-bar__summary-seg--ok {
+  background: var(--ok);
+}
+
+.top-bar__summary-seg--warn {
+  background: var(--warn);
+}
+
+.top-bar__summary-text {
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.top-bar__summary-chip {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  padding: 2px 6px;
+  border: 1px solid var(--rule);
+  white-space: nowrap;
+}
+
+.top-bar__summary-chip--warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.top-bar__summary-chip--block {
+  color: var(--block);
+  border-color: var(--block);
+}
+
 .top-bar__identity {
   display: flex;
   flex-direction: column;
