@@ -2388,11 +2388,15 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
   flex-shrink: 0;
+  height: 136px;
+  box-sizing: border-box;
 }
 
 .hero-col {
-  padding: 14px 24px 16px;
+  padding: 10px 24px 12px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .hero-title-row {
@@ -2412,7 +2416,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink-3);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .hero-title {
@@ -2435,14 +2439,14 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-3);
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 .hero-display {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .hero-display__pct {
@@ -2469,7 +2473,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   position: relative;
   height: 5px;
   background: var(--rule-soft);
-  margin-top: 10px;
+  margin-top: 8px;
   overflow: hidden;
 }
 
@@ -2499,7 +2503,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 .hero-status__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
   margin-top: 2px;
 }
 
@@ -2507,7 +2511,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 4px 10px;
   border: 1px solid var(--rule-soft);
   background: transparent;
 }
@@ -2541,17 +2545,17 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 .hero-col--next {
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: 8px;
   justify-content: stretch;
 }
 
 .hero-next {
   background: var(--ok-soft);
   border: 1px solid var(--ok-border);
-  padding: 12px 14px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-height: 100%;
   height: 100%;
   box-sizing: border-box;
