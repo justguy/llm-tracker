@@ -48,12 +48,16 @@ hub/verify.js            Deterministic verification pack builder
 hub/validator.js         Ajv schema + cross-reference checks
 hub/progress.js          Counts, pct, blocked-by derivation
 hub/status.js            Terminal dashboard (used by `llm-tracker status`)
-ui/index.html            Import map + mount
-ui/app.js                Preact + htm components: Matrix, Cell, Card, Drawer, HelpModal, SettingsModal, FilterToggles, Dropdown
+ui/index.html            Import map + mount; Inter + JetBrains Mono font preconnect
+ui/app.js                Preact + htm components: App, Header (top bar), HeroStrip, ScratchpadRow, Matrix, Cell, Card, Bracket primitive, overflow + project dropdowns, HelpModal, SettingsModal, overview Drawer
+ui/task-drawer.js        Inline task drawer (replaces the old task-detail modal): fetchPack helper, BriefContent / WhyContent / ExecContent / VerifyContent shapes, per-(taskId,mode) cache
+ui/palette.js            Global ⌘K command palette: projects + tasks + retired actions; modes COMMAND / FUZZY (~) / SEMANTIC (?)
 ui/modals/history.js     Revision-history modal wired to /history and rollback
-ui/modals/intelligence.js Project + task intelligence modals for next/blockers/changed/decisions and brief/why/execute/verify
+ui/modals/intelligence.js Project-level intelligence modal (next/blockers/changed/decisions) and legacy task modal (still reachable via the card bracket row)
+ui/modals/intelligence-shared.js Shared views + helpers for the intelligence modals and the inline drawer
 ui/lib/intelligence.js   Shared UI helpers for project/task intelligence state and labels
-ui/styles.css            Bloomberg-terminal palette, dark (default) + light theme
+ui/lib/hero-strip.js     Reason-string composition for the hero Recommended Next callout
+ui/styles.css            A2 token vocabulary (--accent/--ok/--warn/--block/--ink/--rule/--pill/--paper), Inter + JetBrains Mono scale, dark (default `:root`) + light (`html.theme-light`) — both from the same tokens
 workspace-template/      Copied on `init` into the workspace folder. README.md is the LLM-facing contract.
 ```
 
@@ -88,7 +92,7 @@ Every tracker JSON has two top-level keys: `meta` and `tasks`. The minimal "Day 
 | `slug`       | `^[a-z0-9][a-z0-9-]*$`            |    ✓     | Must match the filename stem (`<slug>.json`).                      |
 | `swimlanes`  | array of swimlane objects         |    ✓     | ≥ 1. Row axis. See below.                                          |
 | `priorities` | array of `{id, label}`            |    ✓     | ≥ 1. Column axis. Conventional: `p0`–`p3`.                         |
-| `scratchpad` | string (≤ 5000 chars)             |          | LLM's status banner to the human. Rendered above the matrix, collapsed by default, editable inline. |
+| `scratchpad` | string (≤ 5000 chars)             |          | LLM's status banner to the human. Rendered as a one-line `NOTE` row above the board with `[EXPAND]` (show full) and `[EDIT]` (inline textarea, `cmd+enter` saves). |
 | `updatedAt`  | ISO string \| null                |          | **Hub-owned.**                                                     |
 | `rev`        | integer \| null                   |          | **Hub-owned.** Monotonic, bumps on every accepted change.          |
 | `deleted_tasks` | array of task ids \| null      |          | **Hub-owned.** Tombstones for human-deleted task ids. Incoming writes that try to re-add a listed id are dropped in merge. Rolling back to a rev that predates the deletion clears the tombstone. |

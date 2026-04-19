@@ -8,11 +8,11 @@
 
 Stop forcing your LLMs to re-read and rewrite massive architecture files just to update a status. `llm-tracker` is a **100 % local** mission-control center that bridges the gap between complex agentic workflows and human oversight.
 
-It's a file-system-as-database tracker. Your LLMs update project states with tiny HTTP or file-based patches, and the local hub renders a live, **Bloomberg-terminal-style** priority matrix so you can see exactly what your agents are doing at a glance.
+It's a file-system-as-database tracker. Your LLMs update project states with tiny HTTP or file-based patches, and the local hub renders a live, **calm terminal-style** priority matrix so you can see exactly what your agents are doing at a glance.
 
 When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker. The ranking prefers bounded actionable work over aggregate roadmap/container rows, and prefers continuing active bounded work over starting a fresh bounded task.
 
-When a human or agent asks "what about the feature with the..." instead of naming a task id, the hub now exposes both `GET /api/projects/<slug>/search?q=...` for local embedding-backed semantic search and `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic fuzzy lexical matching. The UI keeps the existing exact board filter and adds a separate `[FUZZY]` mode that highlights deterministic fuzzy matches in context.
+When a human or agent asks "what about the feature with the..." instead of naming a task id, the hub now exposes both `GET /api/projects/<slug>/search?q=...` for local embedding-backed semantic search and `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic fuzzy lexical matching. Both modes are reachable from the UI through the global `⌘K` command palette (prefix `~` for fuzzy, `?` for semantic).
 
 When an agent already knows the task id and needs focused context, it can now make one call to `npx llm-tracker brief <slug> <task-id>` or `GET /api/projects/<slug>/tasks/<taskId>/brief` and get a capped pack instead of rereading the tracker, docs, and code by hand.
 
@@ -22,7 +22,14 @@ When an agent is ready to act or validate work, it can now call `npx llm-tracker
 
 When an agent needs the current contract for a running hub, it should call `GET /help` first instead of guessing write modes or endpoints.
 
-The UI now exposes the same deterministic loop for humans: header actions for `[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, and `[DECISIONS]`, hover task actions for `[READ]`, `[WHY]`, `[EXEC]`, and `[VERIFY]`, project-shortlist `[PICK]` actions that jump straight into execution context, a live `/help` contract panel, an exact board filter plus deterministic `[FUZZY]` highlight mode, plus real `[UNDO]`, `[REDO]`, and revision history.
+The UI exposes the same deterministic loop for humans through the refined Variant A2 layout:
+
+- **Top bar** — project name with `▾` quick-switch, rev badge, `agent` cluster (`[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, `[DECISIONS]`), `history` cluster (`[UNDO]`, `[REDO]`), the `⌘K` palette input, and a `⋯` overflow menu for retired actions (collapse/expand all lanes, open overview, settings, help, theme toggle, delete project).
+- **Hero strip** — big progress headline, 2×3 status grid, and a green *Recommended Next* callout with `[PICK]` and `[READ]` buttons sourced from `/next?limit=1`.
+- **One-line scratchpad** — a `NOTE` row with `[EXPAND]` to read the full note and `[EDIT]` for an inline textarea (`cmd+enter` saves).
+- **Task cards** — three tiers (id + title, summary, status/assignee/tags) with a `[READ]/[WHY]/[EXEC]/[VERIFY]` bracket row. Clicking a card expands an **inline drawer** in place (brief by default; `[WHY]`/`[EXEC]`/`[VERIFY]` tabs render their own packs without leaving the board).
+- **`⌘K` command palette** — projects + tasks + retired header actions (filter, fuzzy via `~`, semantic via `?`, jump-to-next, collapse/expand all, undo/redo, theme toggle, settings, help).
+- **Themes** — calm warm-paper light and calibrated dark, both from the same token set; toggle from the `⋯` menu.
 
 ## Architecture at a glance
 
@@ -69,21 +76,21 @@ The hub binds to `127.0.0.1` by default, rejects cross-origin mutating requests,
 
 ## Screenshots
 
-**Main view** — swimlane × priority matrix, scratchpad banner, status + block filters, segmented progress bar.
+**Main view** — top bar, hero strip (progress + status grid + Recommended Next), one-line `NOTE` scratchpad, and the swimlane × priority board.
 
 ![Main view](./img/main-screen.png)
 
 **Task comments** — each task has an optional `comment` field (≤ 500 chars). Set it via JSON, patch API, or the inline `[+C]` editor on the card; hover the `[C]` badge to read it. The popover clamps to the viewport so cards near the edges don't clip.
 
-**Overview drawer** — all projects at a glance; click to switch, pin to keep it open.
+**Overview drawer** — all projects at a glance; click to switch, pin to keep it open. Also reachable from the project-name `▾` dropdown and the `⋯` overflow menu.
 
 ![Overview drawer](./img/overview-drawer.png)
 
-**Drag and drop** — re-prioritize or move tasks across swimlanes; hub writes atomically, UI updates live.
+**Drag and drop** — re-prioritize or move tasks across swimlanes; hub writes atomically, UI updates live. The dragged card lifts with a soft shadow and valid drop cells show a dashed highlight.
 
 ![Drag and drop](./img/drag-and-drop.png)
 
-**Dark mode (default)** — high-contrast Bloomberg amber on black. Light theme via the `[☼]` toggle.
+**Dark (default) and light themes** — both calibrated from the same A2 token set; toggle from the `⋯` overflow menu. Body text meets WCAG AA at 14.5px in both themes.
 
 ![Dark mode](./img/dark-mode.png)
 
