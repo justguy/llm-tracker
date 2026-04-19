@@ -479,13 +479,11 @@ function Card({
       <div class="card__action-row" onMouseDown=${(e) => e.stopPropagation()}>
         <${Bracket}
           label="READ"
-          active=${expanded}
-          ariaExpanded=${expanded}
-          title=${`Brief for ${task.id} — expand inline`}
+          title=${`Brief for ${task.id}`}
           onClick=${(e) => {
             e.stopPropagation();
             e.preventDefault();
-            onToggleExpand && onToggleExpand(task);
+            onOpenTaskModal && onOpenTaskModal(task, "brief");
           }}
         />
         ${[
