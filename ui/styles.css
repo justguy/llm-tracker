@@ -2666,6 +2666,21 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   min-width: 0;
 }
 
+.app-header--collapsed {
+  padding: 6px 24px;
+  min-height: 0;
+}
+
+.top-bar--collapsed {
+  gap: 12px;
+}
+
+.top-bar--collapsed .top-bar__project-name {
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 480px;
+}
+
 .top-bar__identity {
   display: flex;
   flex-direction: column;

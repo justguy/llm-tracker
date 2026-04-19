@@ -1536,6 +1536,29 @@ function Header({
 
   const hasProject = !!project?.slug;
 
+  if (headerCollapsed) {
+    return html`
+      <div class="app-header app-header--collapsed">
+        <div class="top-bar top-bar--collapsed">
+          <div class="top-bar__identity">
+            <div class="top-bar__project-row">
+              <span class="top-bar__project-name" title=${projectName}>${projectName}</span>
+              ${rev != null ? html`<span class="top-bar__rev">REV ${rev}</span>` : null}
+            </div>
+          </div>
+          <div class="top-bar__spacer"></div>
+          <${Bracket}
+            label="▾"
+            soft=${true}
+            onClick=${onToggleHeaderCollapse}
+            title="Expand header"
+            ariaLabel="Expand header"
+          />
+        </div>
+      </div>
+    `;
+  }
+
   return html`
     <div class="app-header">
       <div class="top-bar">
@@ -1755,6 +1778,14 @@ function Header({
             </ul>
           ` : null}
         </div>
+
+        <${Bracket}
+          label="▴"
+          soft=${true}
+          onClick=${onToggleHeaderCollapse}
+          title="Collapse header"
+          ariaLabel="Collapse header"
+        />
 
       </div>
     </div>
