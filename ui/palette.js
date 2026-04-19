@@ -205,6 +205,11 @@ export function CommandPalette({ open, onClose, projects, activeSlug, actions, o
           ref=${inputRef}
           class="palette-input"
           type="text"
+          role="combobox"
+          aria-label="Command palette search"
+          aria-autocomplete="list"
+          aria-expanded=${rows.length > 0 ? "true" : "false"}
+          aria-controls="palette-results"
           placeholder="Filter · search · run command"
           value=${query}
           onInput=${(e) => setQuery(e.currentTarget.value)}
@@ -213,16 +218,19 @@ export function CommandPalette({ open, onClose, projects, activeSlug, actions, o
           spellcheck="false"
         />
         <div class="palette-divider"></div>
-        <div class="palette-results" ref=${listRef}>
+        <div class="palette-results" id="palette-results" role="listbox" ref=${listRef}>
           ${rows.map((row, i) => {
             const isActive = i === clampedCursor && row.kind !== "info";
             if (row.kind === "info") {
-              return html`<div key=${row.key} class="palette-row palette-row--info">${row.label}</div>`;
+              return html`<div key=${row.key} class="palette-row palette-row--info" role="option" aria-disabled="true">${row.label}</div>`;
             }
             return html`
               <div
                 key=${row.key}
+                id=${`palette-row-${i}`}
                 class=${`palette-row ${isActive ? "palette-row--active" : ""}`}
+                role="option"
+                aria-selected=${isActive ? "true" : "false"}
                 onMouseEnter=${() => setCursor(i)}
                 onMouseDown=${(e) => { e.preventDefault(); runRow(row); }}
               >

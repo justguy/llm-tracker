@@ -181,7 +181,7 @@ function IconBtn({ label, onClick, active, title }) {
   `;
 }
 
-function Bracket({ label, active, soft, tone, onClick, title, ariaLabel, disabled }) {
+function Bracket({ label, active, soft, tone, onClick, title, ariaLabel, ariaExpanded, ariaHaspopup, disabled }) {
   const classes = [
     "bracket",
     active ? "bracket--active" : "",
@@ -194,6 +194,8 @@ function Bracket({ label, active, soft, tone, onClick, title, ariaLabel, disable
       onClick=${onClick}
       title=${title || ""}
       aria-label=${ariaLabel || title || ""}
+      aria-expanded=${ariaExpanded != null ? String(ariaExpanded) : undefined}
+      aria-haspopup=${ariaHaspopup || undefined}
       disabled=${disabled || false}
     >[${label}]</button>
   `;
@@ -394,9 +396,13 @@ function Card({
       class=${classes}
       draggable="true"
       data-task-id=${task.id}
+      role="button"
+      tabIndex="0"
+      aria-label=${`Task ${task.id}: ${task.title}`}
       onDragStart=${(e) => onDragStart(e, task)}
       onDragEnd=${onDragEnd}
       onClick=${() => onToggleExpand && onToggleExpand(task)}
+      onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleExpand && onToggleExpand(task); } }}
     >
       <button
         class="card-delete"
@@ -474,6 +480,7 @@ function Card({
         <${Bracket}
           label="READ"
           active=${expanded}
+          ariaExpanded=${expanded}
           title=${`Brief for ${task.id} — expand inline`}
           onClick=${(e) => {
             e.stopPropagation();
@@ -1356,13 +1363,14 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
   const slugs = Object.keys(projects).sort();
 
   const drawerEl = html`
-    <aside class=${`drawer ${pinned ? "pinned" : ""}`} onClick=${(e) => e.stopPropagation()}>
+    <aside class=${`drawer ${pinned ? "pinned" : ""}`} role="dialog" aria-label="Project overview" aria-modal=${!pinned ? "true" : "false"} onClick=${(e) => e.stopPropagation()}>
         <div class="drawer-header">
           <span class="brand">[OVERVIEW] · ALL PROJECTS</span>
           <div class="drawer-header-actions">
             <button
               class=${`icon-btn ${pinned ? "active" : ""}`}
               onClick=${onTogglePin}
+              aria-label=${pinned ? "Unpin drawer" : "Pin drawer open"}
               title=${pinned ? "Unpin" : "Pin drawer (persists)"}
             >${pinned ? "[PINNED]" : "[PIN]"}</button>
             <button class="icon-btn" aria-label="Close drawer" onClick=${onClose} title="Close (Esc)">×</button>
@@ -1383,6 +1391,7 @@ function Drawer({ open, pinned, onTogglePin, onClose, projects, activeSlug, onSe
                     role="button"
                     tabIndex="0"
                     onClick=${() => onSelect(s)}
+                    onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s); } }}
                   >
                     <div class="drawer-project-row">
                       <span class="drawer-project-name">${p.data?.meta?.name || s}</span>
@@ -1538,6 +1547,8 @@ function Header({
               class="top-bar__project-btn"
               onClick=${() => setProjectOpen((v) => !v)}
               aria-label="Switch project"
+              aria-expanded=${projectOpen ? "true" : "false"}
+              aria-haspopup="menu"
               title="Switch project"
             >
               <span class="top-bar__project-name">${projectName}</span>
@@ -1561,7 +1572,9 @@ function Header({
                     key=${s}
                     class=${`project-menu__item${isActive ? " project-menu__item--active" : ""}`}
                     role="menuitem"
+                    tabIndex="0"
                     onClick=${() => { setActive(s); setProjectOpen(false); }}
+                    onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActive(s); setProjectOpen(false); } }}
                   >
                     <span class="project-menu__dot">${isActive ? "●" : ""}</span>
                     <span class="project-menu__name">${name}</span>
@@ -1573,7 +1586,9 @@ function Header({
               <div
                 class="project-menu__footer"
                 role="menuitem"
+                tabIndex="0"
                 onClick=${() => { setProjectOpen(false); onOpenDrawer(); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProjectOpen(false); onOpenDrawer(); } }}
               >
                 <span>Open overview drawer</span>
                 <span class="project-menu__footer-hint">for pin &amp; manage</span>
@@ -1633,32 +1648,37 @@ function Header({
 
         <div class="top-bar__divider"></div>
 
-        <div
+        <button
           class="top-bar__palette"
           onClick=${() => onOpenPalette && onOpenPalette()}
           title="Search and run commands (⌘K)"
+          aria-label="Open command palette"
         >
           <span class="top-bar__palette-hint">⌘K</span>
           <span class="top-bar__palette-text">filter · search · run command</span>
-        </div>
+        </button>
 
         <div ref=${overflowRef} style="position:relative;flex-shrink:0;">
           <${Bracket}
             label="⋯"
             onClick=${() => setOverflowOpen((v) => !v)}
             title="More actions"
+            ariaExpanded=${overflowOpen}
+            ariaHaspopup="menu"
           />
           ${overflowOpen ? html`
             <ul class="overflow-menu" role="menu">
 
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => { onCollapseAll && onCollapseAll(); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onCollapseAll && onCollapseAll(); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">⊟</span>
                 <span class="overflow-menu__label">Collapse all lanes</span>
               </li>
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => { onExpandAll && onExpandAll(); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onExpandAll && onExpandAll(); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">⊠</span>
                 <span class="overflow-menu__label">Expand all lanes</span>
@@ -1666,14 +1686,16 @@ function Header({
 
               <li class="overflow-menu__divider" role="separator"></li>
 
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => { onOpenHistory(); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenHistory(); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">⎌</span>
                 <span class="overflow-menu__label">Open history</span>
               </li>
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => { onOpenDrawer(); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDrawer(); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">◧</span>
                 <span class="overflow-menu__label">Overview</span>
@@ -1681,22 +1703,25 @@ function Header({
 
               <li class="overflow-menu__divider" role="separator"></li>
 
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => setOverflowOpen(false)}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOverflowOpen(false); } }}
                 title="No pin-overview handler found (t33 stub)"
               >
                 <span class="overflow-menu__icon">⚲</span>
                 <span class="overflow-menu__label">Pin overview</span>
               </li>
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => setOverflowOpen(false)}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOverflowOpen(false); } }}
                 title="No comments toggle found (t33 stub)"
               >
                 <span class="overflow-menu__icon">✎</span>
                 <span class="overflow-menu__label">Toggle comments on cards</span>
               </li>
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => { onToggleTheme(); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleTheme(); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">☼</span>
                 <span class="overflow-menu__label">Toggle theme</span>
@@ -1705,20 +1730,23 @@ function Header({
 
               <li class="overflow-menu__divider" role="separator"></li>
 
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => { onOpenSettings(); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenSettings(); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">⚙</span>
                 <span class="overflow-menu__label">Settings</span>
               </li>
-              <li class="overflow-menu__item" role="menuitem"
+              <li class="overflow-menu__item" role="menuitem" tabIndex="0"
                 onClick=${() => { onOpenHelp(); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenHelp(); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">?</span>
                 <span class="overflow-menu__label">Help</span>
               </li>
-              <li class="overflow-menu__item overflow-menu__item--destructive" role="menuitem"
+              <li class="overflow-menu__item overflow-menu__item--destructive" role="menuitem" tabIndex="0"
                 onClick=${() => { onDeleteProject(project?.slug); setOverflowOpen(false); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onDeleteProject(project?.slug); setOverflowOpen(false); } }}
               >
                 <span class="overflow-menu__icon">⌫</span>
                 <span class="overflow-menu__label">Delete project</span>
@@ -1949,6 +1977,20 @@ function App() {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, []);
+
+  // Global shortcut keys: / n p
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "/" ) { e.preventDefault(); setPaletteOpen(true); }
+      if (e.key === "n") { e.preventDefault(); onOpenProjectIntel("next"); }
+      if (e.key === "p") { e.preventDefault(); activeSlug && onPickTask(activeSlug); }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [activeSlug]);
 
   useEffect(() => {
     fetch("/api/workspace").then((r) => r.json()).then(setWorkspace).catch(() => {});
