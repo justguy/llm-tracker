@@ -965,17 +965,19 @@ function ProjectPane({
       class=${`project-pane ${isActive ? "active" : ""} ${solo ? "solo" : ""}`}
       onMouseDown=${() => onFocus && onFocus(slug)}
     >
-      <div class="project-pane-header">
-        <span class="project-pane-name">${meta?.name || slug}</span>
-        <span class="project-pane-slug">${slug}</span>
-        ${onTogglePin
-          ? html`<button
-              class=${`icon-btn small ${pinned ? "active" : ""}`}
-              onClick=${(e) => { e.stopPropagation(); onTogglePin(slug); }}
-              title=${pinned ? "Unpin this project" : "Pin this project"}
-            >${pinned ? "[UNPIN]" : "[PIN]"}</button>`
-          : null}
-      </div>
+      ${!solo
+        ? html`<div class="project-pane-header">
+            <span class="project-pane-name">${meta?.name || slug}</span>
+            <span class="project-pane-slug">${slug}</span>
+            ${onTogglePin
+              ? html`<button
+                  class=${`icon-btn small ${pinned ? "active" : ""}`}
+                  onClick=${(e) => { e.stopPropagation(); onTogglePin(slug); }}
+                  title=${pinned ? "Unpin this project" : "Pin this project"}
+                >${pinned ? "[UNPIN]" : "[PIN]"}</button>`
+              : null}
+          </div>`
+        : null}
       ${data
         ? html`<${ScratchpadRow}
             slug=${slug}
@@ -988,16 +990,6 @@ function ProjectPane({
         : null}
       ${project?.error
         ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
-        : null}
-      ${derived
-        ? html`<div class="progress-strip">
-            <span class="progress-label">project</span>
-            <${SegBar} counts=${derived.counts} total=${derived.total} />
-            <span class="progress-count">
-              ${derived.counts.complete || 0} / ${derived.total}
-              <span class="pct">${derived.pct}%</span>
-            </span>
-          </div>`
         : null}
       ${data
         ? html`<${Matrix}
@@ -1506,11 +1498,14 @@ function Header({
   onDeleteProject,
   onCollapseAll,
   onExpandAll,
-  onOpenPalette
+  onOpenPalette,
+  pinnedSlugs,
+  onTogglePinProject
 }) {
   const meta = project?.data?.meta;
   const projectName = meta?.name || activeSlug || "AWAITING PROJECT";
   const rev = project?.rev ?? null;
+  const isPinned = Array.isArray(pinnedSlugs) && activeSlug ? pinnedSlugs.includes(activeSlug) : false;
 
   const [projectOpen, setProjectOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -1602,6 +1597,15 @@ function Header({
               <span class="top-bar__caret">▾</span>
             </button>
             ${rev != null ? html`<span class="top-bar__rev">REV ${rev}</span>` : null}
+            ${onTogglePinProject && hasProject ? html`
+              <${Bracket}
+                label=${isPinned ? "PINNED" : "PIN"}
+                active=${isPinned}
+                onClick=${() => onTogglePinProject(activeSlug)}
+                title=${isPinned ? "Unpin this project" : "Pin this project to the workspace"}
+                ariaLabel=${isPinned ? "Unpin project" : "Pin project"}
+              />
+            ` : null}
           </div>
           ${projectOpen ? html`
             <div class="project-menu" role="menu">
@@ -2563,6 +2567,8 @@ function App() {
           onCollapseAll=${onCollapseAll}
           onExpandAll=${onExpandAll}
           onOpenPalette=${() => setPaletteOpen(true)}
+          pinnedSlugs=${pinnedSlugs}
+          onTogglePinProject=${onTogglePinProject}
         />
         <${EmptyState} workspace=${workspace} onOpenHelp=${() => setHelpOpen(true)} />
         <${ConnectionPip} up=${wsUp} />
@@ -2608,6 +2614,8 @@ function App() {
           onCollapseAll=${onCollapseAll}
           onExpandAll=${onExpandAll}
           onOpenPalette=${() => setPaletteOpen(true)}
+          pinnedSlugs=${pinnedSlugs}
+          onTogglePinProject=${onTogglePinProject}
         />
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
         <div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>
@@ -2656,6 +2664,8 @@ function App() {
         onCollapseAll=${onCollapseAll}
         onExpandAll=${onExpandAll}
         onOpenPalette=${() => setPaletteOpen(true)}
+          pinnedSlugs=${pinnedSlugs}
+          onTogglePinProject=${onTogglePinProject}
       />
       ${!headerCollapsed ? html`
         <${HeroStrip}
