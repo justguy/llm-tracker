@@ -2658,6 +2658,101 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 }
 
 
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  width: 100%;
+  min-width: 0;
+}
+
+.top-bar__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.top-bar__eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+
+.top-bar__project-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.top-bar__project-name {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--ink);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.top-bar__caret {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+
+.top-bar__project-btn:hover .top-bar__project-name,
+.top-bar__project-btn:hover .top-bar__caret {
+  color: var(--accent);
+}
+
+.top-bar__rev {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--ink-3);
+  border: 1px solid var(--rule);
+  padding: 2px 6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.top-bar__spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.top-bar__cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.top-bar__cluster-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.top-bar__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--rule);
+  flex-shrink: 0;
+}
+
 .top-bar__palette,
 .top-bar__project-btn {
   background: transparent;
@@ -2669,6 +2764,35 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   text-align: left;
   display: inline-flex;
   align-items: center;
+}
+
+.top-bar__palette {
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  min-width: 240px;
+  flex-shrink: 1;
+}
+
+.top-bar__palette:hover {
+  border-color: var(--ink-3);
+}
+
+.top-bar__palette-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.top-bar__palette-text {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .top-bar__palette:focus-visible,
