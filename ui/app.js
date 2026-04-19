@@ -965,16 +965,6 @@ function ProjectPane({
       class=${`project-pane ${isActive ? "active" : ""} ${solo ? "solo" : ""}`}
       onMouseDown=${() => onFocus && onFocus(slug)}
     >
-      ${data
-        ? html`<${ScratchpadRow}
-            slug=${slug}
-            text=${meta?.scratchpad || ""}
-            updatedAt=${meta?.updatedAt || null}
-            expanded=${!!scratchpadExpanded}
-            onToggleExpand=${onToggleScratchpad}
-            onSave=${onSaveScratchpad}
-          />`
-        : null}
       ${project?.error
         ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
         : null}
@@ -2656,6 +2646,16 @@ function App() {
           onOpenTask=${onOpenTaskDrawer}
         />
       ` : null}
+      ${active?.data
+        ? html`<${ScratchpadRow}
+            slug=${activeSlug}
+            text=${active?.data?.meta?.scratchpad || ""}
+            updatedAt=${active?.data?.meta?.updatedAt || null}
+            expanded=${!!scratchpadExpanded[activeSlug]}
+            onToggleExpand=${onToggleScratchpad}
+            onSave=${onSaveScratchpad}
+          />`
+        : null}
       <div class="banner-row">
         <div class="banner-spacer"></div>
         <${FilterToggles}
