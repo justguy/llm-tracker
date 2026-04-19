@@ -628,7 +628,6 @@ function Cell({
                   slug=${slug}
                   task=${activeTask}
                   onOpenTask=${(taskId, mode) => onOpenTask && onOpenTask({ id: taskId }, mode)}
-                  onOpenTaskModal=${onOpenTaskModal}
                   onClose=${onCloseTask}
                 />`
               : null}
@@ -1735,44 +1734,24 @@ function Header({
 }
 
 // ─────── Hero strip (t23) ───────
-function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
-  const [nextData, setNextData] = useState(null);
-  const [nextLoading, setNextLoading] = useState(false);
-  const [nextError, setNextError] = useState("");
+export async function loadNextRecommendation(slug, fetchImpl = fetch) {
+  const res = await fetchImpl(`/api/projects/${slug}/next?limit=1`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || res.statusText || "request failed");
+  }
+  return body;
+}
 
-  useEffect(() => {
-    if (!slug) return;
-    let cancelled = false;
-    setNextLoading(true);
-    setNextError("");
-    fetch(`/api/projects/${slug}/next?limit=1`)
-      .then(async (r) => {
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          throw new Error(body.error || r.statusText || "request failed");
-        }
-        return body;
-      })
-      .then((body) => {
-        if (cancelled) return;
-        setNextData(body);
-        setNextLoading(false);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setNextData(null);
-        setNextError(error?.message || "request failed");
-        setNextLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [slug, project?.rev]);
-
-  if (!project?.data) return null;
-
-  const summary = buildHeroSummary(project, slug);
-  const nextTask = nextData?.next?.[0] ?? null;
+export function HeroStripView({
+  summary,
+  slug,
+  nextTask,
+  nextLoading = false,
+  nextError = "",
+  onPickTask,
+  onOpenTask
+}) {
   const reasonStr = Array.isArray(nextTask?.reason) && nextTask.reason.length > 0
     ? nextTask.reason.join(" · ")
     : buildHeroReason(nextTask);
@@ -1848,6 +1827,50 @@ function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
         </div>
       </div>
     </div>
+  `;
+}
+
+export function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
+  const [nextData, setNextData] = useState(null);
+  const [nextLoading, setNextLoading] = useState(false);
+  const [nextError, setNextError] = useState("");
+
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    setNextLoading(true);
+    setNextError("");
+    loadNextRecommendation(slug)
+      .then((body) => {
+        if (cancelled) return;
+        setNextData(body);
+        setNextLoading(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setNextData(null);
+        setNextError(error?.message || "request failed");
+        setNextLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, project?.rev]);
+
+  if (!project?.data) return null;
+
+  const summary = buildHeroSummary(project, slug);
+  const nextTask = nextData?.next?.[0] ?? null;
+  return html`
+    <${HeroStripView}
+      summary=${summary}
+      slug=${slug}
+      nextTask=${nextTask}
+      nextLoading=${nextLoading}
+      nextError=${nextError}
+      onPickTask=${onPickTask}
+      onOpenTask=${onOpenTask}
+    />
   `;
 }
 
@@ -2601,4 +2624,6 @@ function App() {
   `;
 }
 
-render(html`<${App} />`, document.getElementById("app"));
+if (typeof document !== "undefined") {
+  render(html`<${App} />`, document.getElementById("app"));
+}
