@@ -117,7 +117,7 @@ If any is "no" or "unsure," ask the human before proceeding.
 - `blocker_reason` — one sentence when stuck
 - `context.*` — `tags`, `files_touched`, `notes`, anything diagnostic (shallow-merged per key)
 - `placement.priorityId` and `placement.swimlaneId` — you *can* change these; last-write-wins against human drags
-- `meta.scratchpad` — status banner to the human (rendered above the matrix)
+- `meta.scratchpad` — status note to the human (rendered as a one-line `NOTE` row above the board, with `[EXPAND]` to show the full text and `[EDIT]` for an inline textarea)
 - **New tasks** — include them in your patch; hub appends to the end of `tasks[]`, but brand-new patch tasks must start as `not_started` or `in_progress`
 
 **What the hub enforces (you can't break these even if you try):**
@@ -150,7 +150,7 @@ Two top-level keys: `meta` and `tasks`.
 | `slug`       | `^[a-z0-9][a-z0-9-]*$`            |    ✓    | Must match the filename stem: `<slug>.json`.                               |
 | `swimlanes`  | array of swimlane objects         |    ✓    | ≥1. Row axis. Schema in §4.2.                                              |
 | `priorities` | array of `{id, label}`            |    ✓    | ≥1. Column axis. Conventional IDs: `p0`–`p3`.                              |
-| `scratchpad` | string                            |          | Status banner to the human.                                                |
+| `scratchpad` | string                            |          | Status note to the human. Rendered as a collapsible one-line `NOTE` row above the board.                                                |
 | `updatedAt`  | ISO string \| null                |          | **Hub-owned.**                                                             |
 | `rev`        | integer \| null                   |          | **Hub-owned.** Monotonic.                                                  |
 | `deleted_tasks` | array of task ids \| null       |          | **Hub-owned.** Tombstones for human-deleted tasks — incoming writes that re-add any id listed here are refused. |
@@ -801,13 +801,13 @@ curl -X DELETE http://localhost:<PORT>/api/projects/<slug>/tasks/<taskId>
 curl -X DELETE http://localhost:<PORT>/api/projects/<slug>
 ```
 
-**LLMs must not call `DELETE`.** These are human operations, exposed in the UI as the `[×]` button on cards and the `[DELETE]` button in the header + drawer. To archive a task, set `status: "deferred"`.
+**LLMs must not call `DELETE`.** These are human operations, exposed in the UI as the `[×]` button on task cards and the `Delete project` entry in the top-bar `⋯` overflow menu (also reachable from the overview drawer). To archive a task, set `status: "deferred"`.
 
 ---
 
 ## 11. Talking to the human
 
-`meta.scratchpad` (string) is your **status banner** — rendered as a sticky line above the matrix. Overwrite freely; not an append-only log.
+`meta.scratchpad` (string) is your **status note** — rendered as a one-line `NOTE` row above the board. The human can click `[EXPAND]` to see the full text and `[EDIT]` to rewrite it inline. Overwrite freely; not an append-only log.
 
 Good uses:
 
