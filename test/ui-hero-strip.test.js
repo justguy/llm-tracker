@@ -176,11 +176,11 @@ test("HeroStripView renders the recommended task and wires PICK and READ actions
       reason: ["highest-ranked ready task", "p0", "dependencies satisfied"]
     },
     onPickTask: (...args) => calls.push(["pick", ...args]),
-    onOpenTask: (...args) => calls.push(["read", ...args])
+    onOpenTaskModal: (...args) => calls.push(["read", ...args])
   });
 
   const text = collectVNodeText(vnode).replace(/\s+/g, " ").trim();
-  assert.match(text, /llm-tracker/);
+  assert.match(text, /llm-project-tracker/);
   assert.match(text, /94/);
   assert.match(text, /49 of 56 tasks complete/);
   assert.match(text, /Build hero strip/);

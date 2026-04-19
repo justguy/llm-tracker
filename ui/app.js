@@ -1811,7 +1811,7 @@ export function HeroStripView({
   nextLoading = false,
   nextError = "",
   onPickTask,
-  onOpenTask
+  onOpenTaskModal
 }) {
   const reasonStr = Array.isArray(nextTask?.reason) && nextTask.reason.length > 0
     ? nextTask.reason.join(" · ")
@@ -1877,7 +1877,7 @@ export function HeroStripView({
               tone="ok"
               disabled=${!nextTask}
               title=${nextTask ? "Open the task brief" : "No ready task to read"}
-              onClick=${() => nextTask && onOpenTask && onOpenTask(slug, nextTask.id, "brief")}
+              onClick=${() => nextTask && onOpenTaskModal && onOpenTaskModal(slug, nextTask.id, "brief")}
             />
           </div>
         </div>
@@ -1886,7 +1886,7 @@ export function HeroStripView({
   `;
 }
 
-export function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
+export function HeroStrip({ project, slug, onPickTask, onOpenTaskModal }) {
   const [nextData, setNextData] = useState(null);
   const [nextLoading, setNextLoading] = useState(false);
   const [nextError, setNextError] = useState("");
@@ -1925,7 +1925,7 @@ export function HeroStrip({ project, slug, onPickTask, onOpenTask }) {
       nextLoading=${nextLoading}
       nextError=${nextError}
       onPickTask=${onPickTask}
-      onOpenTask=${onOpenTask}
+      onOpenTaskModal=${onOpenTaskModal}
     />
   `;
 }
@@ -2641,7 +2641,7 @@ function App() {
           project=${active}
           slug=${activeSlug}
           onPickTask=${onPickTask}
-          onOpenTask=${onOpenTaskDrawer}
+          onOpenTaskModal=${onOpenTaskModalHandler}
         />
       ` : null}
       ${active?.data
