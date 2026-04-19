@@ -157,6 +157,8 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - for linked trackers, runtime churn such as task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer needs to dirty the repo-visible JSON
 - durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
 
+**Landing gate.** For linked repo-local trackers, patch the tracker **before** you commit or push the matching code, and include the tracker JSON diff in the same commit. Patching after a commit/push leaves the working tree dirty; patching after a squash-merge dirties `main`. Pure runtime fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON — those are safe to touch anytime. See the agent contract at `/help` for the full rule.
+
 ## Agent Help
 
 > **For agents.** The authoritative contract LLMs should follow is

@@ -54,6 +54,16 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - linked trackers store runtime churn in `<shared-workspace>/.runtime/overlays/<slug>.json`
 - for linked trackers, task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer need to dirty the repo-visible JSON
 
+### Landing gate — order tracker writes before the commit
+
+When the tracker file lives inside a repo, durable tracker writes (anything other than pure runtime churn — see above) update the repo-visible JSON in place. Writing to the tracker **after** you have already committed or pushed leaves an unexpected uncommitted diff on the branch, which the human then has to reconcile. Avoid that:
+
+- **Update the tracker first.** Land status transitions, new tasks, `goal` / `context.*` / reference edits, and any structural changes via `tracker_patch` (or `POST /api/projects/<slug>/patch`) **before** you stage or commit the corresponding code changes.
+- **Include the tracker diff in the same commit.** For linked repo-local tracker files, `git status` will show the tracker JSON alongside your code after the patch lands. Stage and commit them together; do not push and then patch.
+- **Never patch post-merge.** Writing "merged PR #N" metadata into the tracker after a squash-merge to `main` will dirty `main`. If you need that history, put it in the PR body, a commit message, or `.history/<slug>.jsonl` (hub-owned, append-only), not in durable tracker fields.
+- **Verify with `tracker_brief` (or `/brief`) before committing.** The brief pack reflects the final post-patch state the hub will persist — if it looks wrong, fix it before you stage anything.
+- **Safe no-op writes.** Runtime-only fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON; feel free to patch them at any time.
+
 ---
 
 ## 1. TL;DR
