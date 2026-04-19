@@ -2388,8 +2388,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
   flex-shrink: 0;
-  height: 136px;
-  box-sizing: border-box;
+  margin: 1px 0;
 }
 
 .hero-col {
