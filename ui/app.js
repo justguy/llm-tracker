@@ -1859,12 +1859,7 @@ export function HeroStripView({
   return html`
     <div class="hero-strip">
       <div class="hero-col hero-col--left">
-        <div class="hero-eyebrow">PROJECT</div>
-        <div class="hero-title-row">
-          <div class="hero-title">${summary.projectName}</div>
-          ${summary.trackerPath ? html`<div class="hero-path">${summary.trackerPath}</div>` : null}
-        </div>
-        <div class="hero-meta">${summary.swimlaneCount} swimlane${summary.swimlaneCount !== 1 ? "s" : ""} · ${summary.total} tasks · updated ${summary.updatedAt}</div>
+        <div class="hero-meta">${summary.swimlaneCount} swimlane${summary.swimlaneCount !== 1 ? "s" : ""} · ${summary.total} tasks · updated ${summary.updatedAt}${summary.trackerPath ? ` · ${summary.trackerPath}` : ""}</div>
         <div class="hero-display">
           <span class="hero-display__pct">${summary.pct}<span class="hero-display__unit">%</span></span>
           <span class="hero-display__text">${summary.complete} of ${summary.total} tasks complete</span>
