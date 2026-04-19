@@ -2766,14 +2766,6 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   min-width: 0;
 }
 
-.top-bar__eyebrow {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--ink-3);
-  text-transform: uppercase;
-}
-
 .top-bar__project-row {
   display: flex;
   align-items: baseline;

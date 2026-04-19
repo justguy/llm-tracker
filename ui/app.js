@@ -1570,7 +1570,6 @@ function Header({
       <div class="top-bar">
 
         <div class="top-bar__identity" ref=${projectRef}>
-          <div class="top-bar__eyebrow">LLM·TRACKER</div>
           <div class="top-bar__project-row">
             <button
               class="top-bar__project-btn"
