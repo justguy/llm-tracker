@@ -965,19 +965,6 @@ function ProjectPane({
       class=${`project-pane ${isActive ? "active" : ""} ${solo ? "solo" : ""}`}
       onMouseDown=${() => onFocus && onFocus(slug)}
     >
-      ${!solo
-        ? html`<div class="project-pane-header">
-            <span class="project-pane-name">${meta?.name || slug}</span>
-            <span class="project-pane-slug">${slug}</span>
-            ${onTogglePin
-              ? html`<button
-                  class=${`icon-btn small ${pinned ? "active" : ""}`}
-                  onClick=${(e) => { e.stopPropagation(); onTogglePin(slug); }}
-                  title=${pinned ? "Unpin this project" : "Pin this project"}
-                >${pinned ? "[UNPIN]" : "[PIN]"}</button>`
-              : null}
-          </div>`
-        : null}
       ${data
         ? html`<${ScratchpadRow}
             slug=${slug}
