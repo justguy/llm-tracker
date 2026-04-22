@@ -49,10 +49,12 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - `patches/` means `<shared-workspace>/patches/`, not `<repo>/.llm-tracker/patches/`
 - `.runtime/` means the shared workspace runtime metadata
 - HTTP calls should still target the shared daemon
+- the repo-local tracker JSON is a linked durable target of the shared hub, not branch-local scratch state or a merge artifact
 - durable tracker writes still update the linked repo-local tracker file in place; that is sync, not relocation
 - if that repo-local tracker JSON is versioned in the project, expect successful patch writes that change durable fields to update that repo-visible JSON file in place
 - linked trackers store runtime churn in `<shared-workspace>/.runtime/overlays/<slug>.json`
 - for linked trackers, task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer need to dirty the repo-visible JSON
+- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 ### Landing gate — order tracker writes before the commit
 

@@ -151,11 +151,13 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - the shared daemon automatically watches the linked tracker file for direct edits
 - the shared daemon automatically watches the shared workspace `patches/` directory
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
+- the repo-local tracker JSON is a linked durable target of the shared hub, not branch-local scratch state or a merge artifact
 - durable tracker writes still land on the linked repo-local tracker file itself; that is sync, not relocation
 - if that linked tracker JSON is versioned inside the repo, expect successful patch writes that change durable fields to update the repo-visible JSON file in place
 - linked trackers now split high-churn runtime state into the shared workspace overlay at `.runtime/overlays/<slug>.json`
 - for linked trackers, runtime churn such as task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer needs to dirty the repo-visible JSON
 - durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
+- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 **Landing gate.** For linked repo-local trackers, patch the tracker **before** you commit or push the matching code, and include the tracker JSON diff in the same commit. Patching after a commit/push leaves the working tree dirty; patching after a squash-merge dirties `main`. Pure runtime fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON — those are safe to touch anytime. See the agent contract at `/help` for the full rule.
 
