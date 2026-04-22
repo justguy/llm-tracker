@@ -116,6 +116,25 @@ export function mergeProject(existing, incoming) {
   return { merged, notes };
 }
 
+// Shallow-merge with null-as-delete for freeform per-key maps like `context`.
+// Callers that need structural cleanup of existing keys can now pass
+// `{ key: null }` in the patch to drop that key rather than having to reach for
+// a full-replace path.
+function mergeContextWithDeletes(existing, patch, notes, taskId) {
+  const out = { ...(existing || {}) };
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === null) {
+      if (k in out) {
+        delete out[k];
+        notes.warnings.push(`tasks[${taskId}].context.${k} deleted by patch`);
+      }
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 function mergeTask(existing, patch, notes) {
   const out = { ...existing };
   for (const [k, v] of Object.entries(patch)) {
@@ -125,7 +144,7 @@ function mergeTask(existing, patch, notes) {
       continue;
     }
     if (k === "context") {
-      out.context = { ...(existing.context || {}), ...(patch.context || {}) };
+      out.context = mergeContextWithDeletes(existing.context, patch.context, notes, existing.id);
     } else if (k === "placement") {
       out.placement = { ...(existing.placement || {}), ...(patch.placement || {}) };
     } else {

@@ -891,6 +891,26 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       });
       trackLinkedTarget(result.slug);
     }
+    if (result?.silentRewrite) {
+      const { fields, reingestNote } = result.silentRewrite;
+      if (fields?.length) {
+        const previews = fields.slice(0, 5).map((f) => {
+          const bits = [];
+          if (f.reAddedByMerge?.length) bits.push(`re-added ${f.reAddedByMerge.join(",")}`);
+          if (f.droppedByMerge?.length) bits.push(`dropped ${f.droppedByMerge.join(",")}`);
+          return `${f.path} (${bits.join("; ")})`;
+        });
+        const suffix = fields.length > previews.length ? `; +${fields.length - previews.length} more` : "";
+        console.warn(
+          `[hub] ${result.slug}: silent rewrite — merge re-applied keys not in ${filePath}. ${previews.join(" | ")}${suffix}`
+        );
+        console.warn(
+          `[hub] ${result.slug}: direct file edits go through merge; use PUT /api/projects/${result.slug} or a patch with explicit null values to remove keys.`
+        );
+      } else if (reingestNote) {
+        console.warn(`[hub] ${result.slug}: silent rewrite — ${reingestNote}`);
+      }
+    }
     if (broadcastUpdate && result?.slug && result?.event && result?.noop !== true) {
       broadcast({
         type: result.event,

@@ -334,6 +334,41 @@ test("ingest: direct-file-edit that reorders is corrected back to existing order
   }
 });
 
+test("ingest: silent-rewrite return surfaces re-added context keys from a direct file edit", () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    const data = validProject();
+    // Seed with junk context keys on t1.
+    data.tasks[0].context = { tags: ["alpha"], "0": "h", "1": "i" };
+    writeFileSync(file, JSON.stringify(data));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    // Agent edits the file directly to remove the "0"/"1" keys.
+    const cleaned = JSON.parse(JSON.stringify(data));
+    cleaned.tasks[0].context = { tags: ["alpha"] };
+    writeFileSync(file, JSON.stringify(cleaned));
+    const res = store.ingest(file, readFileSync(file, "utf-8"));
+
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, true);
+    assert.ok(res.silentRewrite, "silentRewrite summary is returned");
+    const field = res.silentRewrite.fields.find((f) => f.path === "tasks[t1].context");
+    assert.ok(field, "t1 context divergence captured");
+    assert.deepEqual(field.reAddedByMerge.sort(), ["0", "1"]);
+
+    // The hub rewrote the file to match its merged view — the junk keys are
+    // back on disk, which is exactly the confusion this summary surfaces.
+    const onDisk = JSON.parse(readFileSync(file, "utf-8"));
+    const t1 = onDisk.tasks.find((t) => t.id === "t1");
+    assert.ok("0" in t1.context);
+    assert.ok("1" in t1.context);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("ingest: normalizes legacy partial status from tracker file", () => {
   const ws = setupWorkspace();
   try {

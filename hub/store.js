@@ -93,6 +93,41 @@ function normalizeForCompare(obj) {
   return copy;
 }
 
+// Summarize what changed between the incoming file shape and the merged shape
+// the hub decided to persist. Used when the hub rewrites a file without a rev
+// bump so operators can see which keys the merge layer kept or dropped.
+function summarizeSilentRewrite(incoming, merged) {
+  const summary = { fields: [], reingestNote: null };
+  const incomingTasks = new Map();
+  const incTasks = Array.isArray(incoming?.tasks)
+    ? incoming.tasks
+    : incoming?.tasks
+      ? Object.entries(incoming.tasks).map(([id, t]) => ({ id, ...(t || {}) }))
+      : [];
+  for (const t of incTasks) if (t?.id) incomingTasks.set(t.id, t);
+
+  for (const mTask of merged?.tasks || []) {
+    const iTask = incomingTasks.get(mTask.id);
+    if (!iTask) continue;
+    const mCtx = mTask.context || {};
+    const iCtx = iTask.context || {};
+    const reAdded = Object.keys(mCtx).filter((k) => !(k in iCtx));
+    const dropped = Object.keys(iCtx).filter((k) => !(k in mCtx));
+    if (reAdded.length || dropped.length) {
+      summary.fields.push({
+        path: `tasks[${mTask.id}].context`,
+        reAddedByMerge: reAdded,
+        droppedByMerge: dropped
+      });
+    }
+  }
+  if (summary.fields.length === 0) {
+    summary.reingestNote =
+      "file on disk diverged from merged in-memory shape (non-context fields); hub rewrote the file to match.";
+  }
+  return summary;
+}
+
 function collectPatchTaskArray(patch) {
   if (!patch || typeof patch !== "object" || !patch.tasks) return [];
   if (Array.isArray(patch.tasks)) return patch.tasks.filter((task) => task && typeof task === "object");
@@ -336,9 +371,11 @@ export class Store {
       const delta = computeDelta(prevData, merged);
       if (!hasChanges(delta) && prev?.data) {
         // In-memory state is unchanged. If the file on disk differs from what we
-        // want (e.g., LLM tried to reorder or flip collapsed), correct it without
-        // bumping rev.
+        // want (e.g., LLM tried to reorder or flip collapsed, or tried to delete
+        // a hub-owned field), correct it without bumping rev.
+        let silentRewrite = null;
         if (!stableEq(normalizeForCompare(merged), normalizeForCompare(incoming))) {
+          silentRewrite = summarizeSilentRewrite(incoming, merged);
           merged.meta.rev = prev.rev;
           merged.meta.updatedAt = prev.data.meta.updatedAt;
           try {
@@ -351,7 +388,15 @@ export class Store {
             );
           } catch {}
         }
-        return { ok: true, slug, event: "UPDATE", project: prev, noop: true };
+        return {
+          ok: true,
+          slug,
+          event: "UPDATE",
+          project: prev,
+          noop: true,
+          silentRewrite,
+          notes
+        };
       }
 
       const baseRev = prev?.rev ?? incoming?.meta?.rev ?? 0;

@@ -124,6 +124,52 @@ test("mergeProject ignores attempted updatedAt / rev writes", () => {
   assert.ok(notes.ignored.some((s) => s.includes("updatedAt") || s.includes("rev")));
 });
 
+test("mergeProject deletes context keys when patch sets them to null", () => {
+  const existing = validProject();
+  // Seed junk keys we want to remove — simulates a past "spread-a-string"
+  // accident that left integer-string character keys in context.
+  existing.tasks[0].context = { tags: ["alpha"], "0": "h", "1": "i", notes: "keep" };
+  const patch = {
+    tasks: {
+      t1: { context: { "0": null, "1": null } }
+    }
+  };
+  const { merged, notes } = mergeProject(existing, patch);
+  const t1 = merged.tasks.find((t) => t.id === "t1");
+  assert.ok(!("0" in t1.context));
+  assert.ok(!("1" in t1.context));
+  // Non-null keys untouched.
+  assert.deepEqual(t1.context.tags, ["alpha"]);
+  assert.equal(t1.context.notes, "keep");
+  assert.ok(notes.warnings.some((w) => w.includes("context.0 deleted")));
+  assert.ok(notes.warnings.some((w) => w.includes("context.1 deleted")));
+});
+
+test("mergeProject null-on-context is a no-op when the key does not exist", () => {
+  const existing = validProject();
+  existing.tasks[0].context = { tags: ["alpha"] };
+  const patch = { tasks: { t1: { context: { missing_key: null } } } };
+  const { merged, notes } = mergeProject(existing, patch);
+  const t1 = merged.tasks.find((t) => t.id === "t1");
+  assert.deepEqual(t1.context, { tags: ["alpha"] });
+  assert.ok(!notes.warnings.some((w) => w.includes("missing_key")));
+});
+
+test("mergeProject can delete and add context keys in the same patch", () => {
+  const existing = validProject();
+  existing.tasks[0].context = { tags: ["alpha"], stale: "bye" };
+  const patch = {
+    tasks: {
+      t1: { context: { stale: null, fresh: "hello" } }
+    }
+  };
+  const { merged } = mergeProject(existing, patch);
+  const t1 = merged.tasks.find((t) => t.id === "t1");
+  assert.ok(!("stale" in t1.context));
+  assert.equal(t1.context.fresh, "hello");
+  assert.deepEqual(t1.context.tags, ["alpha"]);
+});
+
 test("stableEq reports structural equality", () => {
   const a = { x: 1, y: [1, 2] };
   const b = { x: 1, y: [1, 2] };

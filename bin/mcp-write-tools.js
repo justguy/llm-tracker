@@ -25,14 +25,16 @@ function createHubWriteTool(workspace, portFlag, definition) {
 function createPatchToolDefinition() {
   return {
     name: "tracker_patch",
-    description: "Submit a normal partial tracker patch through the running hub.",
+    description:
+      "Submit a normal partial tracker patch through the running hub. The hub shallow-merges `task.context` per key: patches add or overwrite keys, they do not delete existing ones. To drop a key, send `context: { key: null }`. Direct file edits flow through the same merge, so removing a key by editing the JSON on disk will be undone on re-ingest — use this tool (with null values) or `PUT /api/projects/<slug>` for a true replace.",
     inputSchema: {
       type: "object",
       properties: {
         slug: { type: "string", description: "Project slug" },
         patch: {
           type: "object",
-          description: "Partial tracker patch body to merge through the hub",
+          description:
+            "Partial tracker patch body to merge through the hub. `task.context` is shallow-merged; set a key to `null` to delete it.",
           additionalProperties: true
         }
       },

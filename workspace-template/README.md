@@ -199,7 +199,7 @@ Tasks are ordered by array index. Hub owns the order.
 | `expected_changes` | array of strings \| null                     |          | Optional modules, files, or artifacts expected to change. |
 | `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
 | `approval_required_for` | array of strings \| null                |          | Optional approval categories that make the task less ready than peers. |
-| `context`        | object (freeform)                              |          | Shallow-merged per key on patch.                      |
+| `context`        | object (freeform)                              |          | Shallow-merged per key on patch. Set a key to `null` in the patch to delete it. Direct file edits do **not** bypass the merge — see §4.3b. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
 
@@ -212,6 +212,24 @@ Reference path rules:
 - Prefer portable repo-relative references for repo files. Do **not** rewrite them into machine-specific absolute paths just to make snippets appear.
 - Bare URLs are invalid in `reference` and `references[]`. Use a real file location with `:line` or `:line-line`.
 - If a valid repo-relative reference is not producing a snippet, treat that as a reload/resolver issue to verify and report; do not "fix" it by baking local absolute paths into the tracker.
+
+### 4.3b Removing keys and full replaces
+
+Patch mode (`tracker_patch` / `POST /api/projects/<slug>/patch`) is **additive** for `task.context`. Writing the same key again overwrites it, but an absent key does not get dropped. To remove a key, send it explicitly as `null`:
+
+```json
+{"tasks": {"t1": {"context": {"bogus_key": null}}}}
+```
+
+Writing `null` on `context.<key>` deletes that key and emits a warning in the merge notes so the removal is traceable.
+
+Direct edits to `trackers/<slug>.json` do **not** bypass the merge. The file watcher re-ingests the file through the same shallow merge, with the hub's in-memory state as the baseline, and will re-write the file if you removed keys the merge considered preserved. If you see the hub log `silent rewrite — merge re-applied keys not in <file>`, that is this path firing.
+
+For a real structural replace (e.g., to wipe a malformed `context` wholesale), use one of:
+
+- `tracker_patch` with explicit `null` values for each key to remove
+- `PUT /api/projects/<slug>` — full-replace path via `store.createOrReplace`, skips `mergeProject`
+- `DELETE /api/projects/<slug>` then `PUT /api/projects/<slug>`
 
 ### 4.3a Migrating older trackers
 
