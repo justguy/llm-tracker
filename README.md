@@ -27,7 +27,8 @@ The UI exposes the same deterministic loop for humans through the refined Varian
 - **Top bar** — project name with `▾` quick-switch, rev badge, `agent` cluster (`[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, `[DECISIONS]`), `history` cluster (`[UNDO]`, `[REDO]`), the `⌘K` palette input, and a `⋯` overflow menu for retired actions (collapse/expand all lanes, open overview, settings, help, theme toggle, delete project).
 - **Hero strip** — big progress headline, 2×3 status grid, and a green *Recommended Next* callout with `[PICK]` and `[READ]` buttons sourced from `/next?limit=1`.
 - **One-line scratchpad** — a `NOTE` row with `[EXPAND]` to read the full note and `[EDIT]` for an inline textarea (`cmd+enter` saves).
-- **Swimlane/tree view toggle** — the filter row includes `[SWIMLANE]` and `[TREE]`; tree view uses explicit `kind: "group"` / `parent_id` hierarchy when present and falls back to swimlanes as top-level groups.
+- **Swimlane/tree/graph view toggle** — the filter row includes `[SWIMLANE]`, `[TREE]`, and `[GRAPH]`; tree view uses explicit `kind: "group"` / `parent_id` hierarchy when present and falls back to swimlanes as top-level groups.
+- **Dependency graph view** — a derived UI projection over existing `dependencies[]` blocker edges. It does not add schema or data fields, and its optional `[CONTAINMENT]` overlay draws `parent_id` tree/group edges as a visual aid only.
 - **Task cards** — three tiers (id + title, summary, status/assignee/tags) with a `[READ]/[WHY]/[EXEC]/[VERIFY]` bracket row. Clicking a card expands an **inline drawer** in place (brief by default; `[WHY]`/`[EXEC]`/`[VERIFY]` tabs render their own packs without leaving the board).
 - **`⌘K` command palette** — projects + tasks + retired header actions (filter, fuzzy via `~`, semantic via `?`, jump-to-next, collapse/expand all, undo/redo, theme toggle, settings, help).
 - **Themes** — calm warm-paper light and calibrated dark, both from the same token set; toggle from the `⋯` menu.
@@ -141,6 +142,8 @@ Every tracker is one JSON file with two top-level keys: `meta` and `tasks`. The 
 Drop this at `<workspace>/trackers/<slug>.json` (with `meta.slug` matching the filename) and the hub renders it immediately. Field-by-field contract → [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 Tasks may also opt into tree grouping with `kind: "group"` and `parent_id`. `parent_id` is containment only; execution blockers still belong in `dependencies`. Groups can nest by pointing one group at another group through `parent_id`. If a tracker has no explicit groups or parents, tree view treats swimlanes as the root groups. Tree display order is swimlane, then priority, then the hub-owned task array order.
+
+The dependency graph view, when shown, is derived from those same `dependencies[]` blocker edges. It is display-only: it does not introduce new task fields, graph fields, or alternate containment semantics. The graph's optional `[CONTAINMENT]` overlay can draw `parent_id` tree/group edges as dashed visual context; those overlay edges do not affect block state or execution order.
 
 ## Supported Topologies
 

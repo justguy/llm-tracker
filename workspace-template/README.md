@@ -127,7 +127,7 @@ If any is "no" or "unsure," ask the human before proceeding.
 - `assignee` — your model ID when you claim a task
 - `kind` — optional `task` or `group`; `group` marks a container row in tree view
 - `parent_id` — optional task ID for tree grouping; this is containment, not a blocker
-- `dependencies` — task IDs this one blocks on; drives the derived **block state** (§5)
+- `dependencies` — task IDs this one blocks on; drives the derived **block state** (§5) and any dependency graph view
 - `blocker_reason` — one sentence when stuck
 - `context.*` — `tags`, `files_touched`, `notes`, anything diagnostic (shallow-merged per key)
 - `placement.priorityId` and `placement.swimlaneId` — you *can* change these; last-write-wins against human drags
@@ -219,6 +219,7 @@ Task tree rules:
 - Group `status` is still authored like any other task status. The tree view shows descendant progress counts, but the hub does not auto-complete a group when its children complete.
 - If no task has `kind: "group"` or `parent_id`, the UI tree view treats swimlanes as the top-level groups.
 - Tree view display order is swimlane, then declared priority order, then hub-owned task array order.
+- The dependency graph view is derived UI only: it reads `dependencies[]` as blocker edges, adds no schema or data fields, and may show an optional `parent_id` containment overlay as visual context only.
 - `parent_id` must reference an existing task, cannot point to the task itself, and parent chains must not contain cycles.
 - Agents should normally claim executable leaf tasks, not broad group rows, unless the human explicitly asks for planning or decomposition work.
 - Do not use `dependencies` to express containment. Do not use `parent_id` to express blocking.
@@ -449,6 +450,8 @@ Computed by the hub on every write. You influence it via `dependencies` and `sta
 UI shows a red `BLOCKED BY <id>` badge and exposes a `[BLOCKED] / [OPEN]` filter.
 
 `blocker_reason` is a separate, narrative field ("I'm stuck because…") — independent of graph-derived block state.
+
+The dependency graph view uses these same `dependencies[]` blocker edges. It is display-only; do not add alternate graph fields or encode containment in dependencies. If the UI shows a containment overlay, those dashed edges come from `parent_id` and do not affect block state.
 
 ---
 

@@ -44,3 +44,4 @@ For this repo specifically:
 - if a valid repo-relative reference is not producing snippets, verify the shared workspace link and use `reload`; treat persistent misses as a resolver/runtime issue to report, not as a reason to bake absolute paths into tracker data
 - use `kind: "group"` plus `parent_id` for task tree containment; nested groups are valid, but dependencies remain the only blocker graph
 - do not use `dependencies` to express grouping, and do not use `parent_id` to express blocking; if no explicit groups exist, the UI tree view treats swimlanes as the root groups
+- treat the dependency graph view as derived UI only: it reads existing `dependencies[]` blocker edges, adds no schema or data fields, and keeps its optional `parent_id` containment overlay visual-only

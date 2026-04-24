@@ -41,6 +41,7 @@
     "dashboard"
   ],
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@huggingface/transformers": "^4.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.17.1",

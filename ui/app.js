@@ -1,6 +1,7 @@
 import { Fragment, render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { html } from "htm/preact";
+import * as dagre from "@dagrejs/dagre";
 import { buildHeroReason, buildHeroSummary } from "./lib/hero-strip.js";
 import { buildCardMetaFacts } from "./lib/intelligence.js";
 import { HistoryModal } from "./modals/history.js";
@@ -334,6 +335,13 @@ function FilterToggles({
         >
           tree
         </button>
+        <button
+          class=${`view-toggle ${boardView === "graph" ? "active" : ""}`}
+          onClick=${() => setBoardView("graph")}
+          title="Show dependency graph"
+        >
+          graph
+        </button>
       </div>
       <div class="filter-group">
         <span class="filter-label">STATUS</span>
@@ -529,6 +537,117 @@ export function collectTreeCollapseIds(model) {
 
   for (const root of model.roots) visit(root);
   return ids;
+}
+
+const GRAPH_NODE_WIDTH = 220;
+const GRAPH_NODE_HEIGHT = 82;
+
+export function buildDependencyGraphModel(project, {
+  filterQuery = "",
+  statusFilters = new Set(),
+  blockFilters = new Set(),
+  includeContainment = false
+} = {}) {
+  const tasks = project?.data?.tasks || [];
+  const blocked = project?.derived?.blocked || {};
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const visibleTasks = tasks.filter((task) =>
+    taskMatchesBoardFilters(task, { filterQuery, statusFilters, blockFilters, blocked })
+  );
+  const visibleIds = new Set(visibleTasks.map((task) => task.id));
+  const nodes = visibleTasks.map((task, index) => ({
+    id: task.id,
+    task,
+    index,
+    blocked: taskIsBlocked(task, blocked),
+    group: isGroupTask(task) || tasks.some((candidate) => taskParentId(candidate) === task.id),
+    width: GRAPH_NODE_WIDTH,
+    height: GRAPH_NODE_HEIGHT
+  }));
+  const edges = [];
+
+  for (const task of visibleTasks) {
+    for (const dependencyId of task.dependencies || []) {
+      if (!byId.has(dependencyId) || !visibleIds.has(dependencyId)) continue;
+      edges.push({
+        id: `dep:${dependencyId}->${task.id}`,
+        from: dependencyId,
+        to: task.id,
+        kind: "dependency"
+      });
+    }
+
+    const parentId = taskParentId(task);
+    if (includeContainment && parentId && byId.has(parentId) && visibleIds.has(parentId)) {
+      edges.push({
+        id: `containment:${parentId}->${task.id}`,
+        from: parentId,
+        to: task.id,
+        kind: "containment"
+      });
+    }
+  }
+
+  return { nodes, edges };
+}
+
+export function layoutDependencyGraph(model, dagreModule = dagre) {
+  const graph = new dagreModule.Graph({ multigraph: true });
+  graph.setGraph({
+    rankdir: "LR",
+    nodesep: 42,
+    ranksep: 110,
+    edgesep: 16,
+    marginx: 28,
+    marginy: 28
+  });
+  graph.setDefaultEdgeLabel(() => ({}));
+
+  for (const node of model.nodes) {
+    graph.setNode(node.id, {
+      width: node.width || GRAPH_NODE_WIDTH,
+      height: node.height || GRAPH_NODE_HEIGHT
+    });
+  }
+  model.edges.forEach((edge, index) => {
+    graph.setEdge(edge.from, edge.to, { kind: edge.kind }, `${edge.kind}:${index}`);
+  });
+
+  dagreModule.layout(graph);
+
+  const nodes = model.nodes.map((node) => {
+    const positioned = graph.node(node.id) || {};
+    return {
+      ...node,
+      x: Number.isFinite(positioned.x) ? positioned.x : 0,
+      y: Number.isFinite(positioned.y) ? positioned.y : 0
+    };
+  });
+  const edges = model.edges.map((edge, index) => {
+    const positioned = graph.edge({ v: edge.from, w: edge.to, name: `${edge.kind}:${index}` }) || {};
+    return {
+      ...edge,
+      points: positioned.points || []
+    };
+  });
+  const graphLabel = graph.graph() || {};
+  const width = Math.max(360, Math.ceil(graphLabel.width || GRAPH_NODE_WIDTH + 56));
+  const height = Math.max(260, Math.ceil(graphLabel.height || GRAPH_NODE_HEIGHT + 56));
+
+  return { nodes, edges, width, height };
+}
+
+function graphEdgePath(points = []) {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  return points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+}
+
+function graphText(value, max = 34) {
+  const text = String(value || "");
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function Card({
@@ -1096,6 +1215,168 @@ function TreeView({
   `;
 }
 
+function DependencyGraphView({
+  project,
+  slug,
+  filterQuery,
+  statusFilters,
+  blockFilters,
+  fuzzyQuery,
+  fuzzyMatchMap,
+  activeTask,
+  activeTaskMode,
+  onDeleteTask,
+  onSaveComment,
+  onOpenTask,
+  onCloseTask,
+  onOpenTaskModal
+}) {
+  const [showContainment, setShowContainment] = useState(false);
+  const graphModel = useMemo(
+    () => buildDependencyGraphModel(project, {
+      filterQuery,
+      statusFilters,
+      blockFilters,
+      includeContainment: showContainment
+    }),
+    [project, filterQuery, statusFilters, blockFilters, showContainment]
+  );
+  const layout = useMemo(() => layoutDependencyGraph(graphModel), [graphModel]);
+  const markerBase = `graph-${String(slug || "project").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const depMarkerId = `${markerBase}-dep-arrow`;
+  const containmentMarkerId = `${markerBase}-containment-arrow`;
+  const activeVisibleTask = activeTask && graphModel.nodes.some((node) => node.id === activeTask.id) ? activeTask : null;
+  const activeTaskId = activeVisibleTask?.id || null;
+
+  return html`
+    <div class="graph-wrap">
+      <div class="dependency-graph">
+        <div class="dependency-graph__header">
+          <div class="dependency-graph__title">
+            <span>dependency graph</span>
+            <span>${layout.nodes.length} nodes</span>
+            <span>${graphModel.edges.filter((edge) => edge.kind === "dependency").length} deps</span>
+          </div>
+          <div class="dependency-graph__actions">
+            <${Bracket} label="DEPS" active title="Dependency edges from dependencies[]" />
+            <${Bracket}
+              label="CONTAINMENT"
+              active=${showContainment}
+              soft=${!showContainment}
+              title="Toggle parent_id containment overlay"
+              onClick=${() => setShowContainment((value) => !value)}
+            />
+          </div>
+        </div>
+        ${layout.nodes.length === 0
+          ? html`<div class="graph-empty">no matching tasks</div>`
+          : html`
+              <div class="dependency-graph__canvas">
+                <svg
+                  class="dependency-graph__svg"
+                  viewBox=${`0 0 ${layout.width} ${layout.height}`}
+                  role="img"
+                  aria-label="Task dependency graph"
+                >
+                  <defs>
+                    <marker
+                      id=${depMarkerId}
+                      markerWidth="8"
+                      markerHeight="8"
+                      refX="7"
+                      refY="4"
+                      orient="auto"
+                      markerUnits="strokeWidth"
+                    >
+                      <path d="M 0 0 L 8 4 L 0 8 z" class="dependency-graph__marker dependency-graph__marker--dependency" />
+                    </marker>
+                    <marker
+                      id=${containmentMarkerId}
+                      markerWidth="8"
+                      markerHeight="8"
+                      refX="7"
+                      refY="4"
+                      orient="auto"
+                      markerUnits="strokeWidth"
+                    >
+                      <path d="M 0 0 L 8 4 L 0 8 z" class="dependency-graph__marker dependency-graph__marker--containment" />
+                    </marker>
+                  </defs>
+                  <g class="dependency-graph__edges">
+                    ${layout.edges.map((edge) => html`
+                      <path
+                        key=${edge.id}
+                        class=${`dependency-edge dependency-edge--${edge.kind}`}
+                        d=${graphEdgePath(edge.points)}
+                        marker-end=${`url(#${edge.kind === "containment" ? containmentMarkerId : depMarkerId})`}
+                      >
+                        <title>${edge.kind === "containment" ? "contains" : "blocks"}: ${edge.from} → ${edge.to}</title>
+                      </path>
+                    `)}
+                  </g>
+                  <g class="dependency-graph__nodes">
+                    ${layout.nodes.map((node) => {
+                      const task = node.task;
+                      const searchMatch = fuzzyMatchMap?.get(task.id) || null;
+                      const fuzzyDim = !!(fuzzyQuery && fuzzyQuery.trim()) && !searchMatch;
+                      const x = node.x - node.width / 2;
+                      const y = node.y - node.height / 2;
+                      return html`
+                        <g
+                          key=${node.id}
+                          class=${[
+                            "dependency-node",
+                            `status-${task.status}`,
+                            node.blocked ? "dependency-node--blocked" : "dependency-node--open",
+                            node.group ? "dependency-node--group" : "",
+                            activeTaskId === task.id ? "dependency-node--active" : "",
+                            searchMatch ? "fuzzy-hit" : "",
+                            fuzzyDim ? "fuzzy-dim" : ""
+                          ].filter(Boolean).join(" ")}
+                          transform=${`translate(${x}, ${y})`}
+                          role="button"
+                          tabIndex="0"
+                          aria-label=${`Task ${task.id}: ${task.title}`}
+                          onClick=${() => onOpenTask && onOpenTask(task, "brief")}
+                          onKeyDown=${(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onOpenTask && onOpenTask(task, "brief");
+                            }
+                          }}
+                        >
+                          <title>${task.id}: ${task.title}</title>
+                          <rect class="dependency-node__box" width=${node.width} height=${node.height} rx="0" />
+                          <text class="dependency-node__id" x="12" y="19">${graphText(task.id, 28)}</text>
+                          <text class="dependency-node__title" x="12" y="39">${graphText(task.title, 30)}</text>
+                          <text class="dependency-node__meta" x="12" y="61">
+                            ${task.placement?.priorityId || "p?"} · ${task.placement?.swimlaneId || "lane?"} · ${node.blocked ? "blocked" : "open"}
+                          </text>
+                          ${node.group
+                            ? html`<text class="dependency-node__kind" x=${node.width - 56} y="19">GROUP</text>`
+                            : null}
+                        </g>
+                      `;
+                    })}
+                  </g>
+                </svg>
+              </div>
+            `}
+        ${activeVisibleTask
+          ? html`<div class="dependency-graph__drawer">
+              <${TaskInlineDrawer}
+                slug=${slug}
+                task=${activeVisibleTask}
+                onOpenTask=${(taskId, mode) => onOpenTask && onOpenTask({ id: taskId }, mode)}
+                onClose=${onCloseTask}
+              />
+            </div>`
+          : null}
+      </div>
+    </div>
+  `;
+}
+
 function Matrix({
   project,
   slug,
@@ -1421,8 +1702,8 @@ function ProjectPane({
         ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
         : null}
       ${data
-        ? boardView === "tree"
-          ? html`<${TreeView}
+        ? boardView === "graph"
+          ? html`<${DependencyGraphView}
               project=${project}
               slug=${slug}
               filterQuery=${searchMode === "filter" ? filter : ""}
@@ -1438,7 +1719,24 @@ function ProjectPane({
               onCloseTask=${onCloseTask}
               onOpenTaskModal=${onOpenTaskModal}
             />`
-          : html`<${Matrix}
+          : boardView === "tree"
+            ? html`<${TreeView}
+              project=${project}
+              slug=${slug}
+              filterQuery=${searchMode === "filter" ? filter : ""}
+              statusFilters=${statusFilters}
+              blockFilters=${blockFilters}
+              fuzzyQuery=${searchMode === "fuzzy" ? filter : ""}
+              fuzzyMatchMap=${fuzzyMatchMap}
+              activeTask=${activeTask}
+              activeTaskMode=${openTaskMode}
+              onDeleteTask=${(task) => onDeleteTask(slug, task)}
+              onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
+              onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
+              onCloseTask=${onCloseTask}
+              onOpenTaskModal=${onOpenTaskModal}
+            />`
+            : html`<${Matrix}
               project=${project}
               slug=${slug}
               filterQuery=${searchMode === "filter" ? filter : ""}
@@ -2411,7 +2709,7 @@ function App() {
   const [activeSlug, setActiveSlug] = useState(initialSettings.activeSlug || null);
   const [filter, setFilter] = useState("");
   const [searchMode, setSearchMode] = useState("filter");
-  const [boardView, setBoardView] = useState(initialSettings.boardView === "tree" ? "tree" : "swimlane");
+  const [boardView, setBoardView] = useState(["tree", "graph"].includes(initialSettings.boardView) ? initialSettings.boardView : "swimlane");
   const [fuzzyState, setFuzzyState] = useState({
     slug: null,
     query: "",

@@ -634,6 +634,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     VENDOR["/vendor/preact-hooks.mjs"] = join(dirname(req.resolve("preact")), "..", "hooks", "dist", "hooks.mjs");
     VENDOR["/vendor/htm.mjs"] = req.resolve("htm").replace(/\.js$/, ".mjs");
     VENDOR["/vendor/htm-preact.mjs"] = join(dirname(req.resolve("htm")), "..", "preact", "index.mjs");
+    VENDOR["/vendor/dagre.mjs"] = req.resolve("@dagrejs/dagre").replace(/dagre\.cjs\.js$/, "dagre.esm.js");
   } catch (e) {
     console.warn(`[hub] could not resolve UI vendor deps: ${e.message}`);
   }

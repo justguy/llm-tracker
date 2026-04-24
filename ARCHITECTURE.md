@@ -149,6 +149,7 @@ New writers should prefer `references[]`. Legacy `reference` remains valid for b
 - A task with children renders as a group even if `kind` is omitted, but writers should set `kind: "group"` for new container rows.
 - If no task declares `kind: "group"` or `parent_id`, tree view treats swimlanes as root groups.
 - Tree view display order is swimlane, then declared priority order, then hub-owned task array order.
+- The dependency graph view is a derived UI projection over `dependencies[]` blocker edges only. It adds no schema or persisted data fields. Its optional containment overlay may draw `parent_id` tree/group edges, but those overlay edges are visual context only and do not affect block state.
 
 ### Cross-reference rules
 
@@ -191,6 +192,8 @@ Computed on every accepted write. LLMs don't set it; they influence it via `depe
 | `open`    | `dependencies` empty **or** every referenced task is `complete`.          |
 
 `blocker_reason` (narrative) is distinct from block state (structural / graph-derived).
+
+Any dependency graph view uses the same `dependencies[]` relationships. It is display-only and does not create a second graph model. A graph may expose a containment overlay from `parent_id`, but containment remains distinct from blockers.
 
 ---
 
