@@ -1,4 +1,4 @@
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { html } from "htm/preact";
 import { Bracket } from "./primitives.js";
 import { TaskInlineDrawer } from "./task-drawer.js";
@@ -23,6 +23,20 @@ export function DependencyGraphView({
   onCloseTask,
 }) {
   const [showContainment, setShowContainment] = useState(false);
+  const [dagreModule, setDagreModule] = useState(null);
+  useEffect(() => {
+    let active = true;
+    import("@dagrejs/dagre")
+      .then((module) => {
+        if (active) setDagreModule(module);
+      })
+      .catch(() => {
+        if (active) setDagreModule(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const graphModel = useMemo(
     () => buildDependencyGraphModel(project, {
       filterQuery,
@@ -32,7 +46,7 @@ export function DependencyGraphView({
     }),
     [project, filterQuery, statusFilters, blockFilters, showContainment]
   );
-  const layout = useMemo(() => layoutDependencyGraph(graphModel), [graphModel]);
+  const layout = useMemo(() => layoutDependencyGraph(graphModel, dagreModule), [graphModel, dagreModule]);
   const markerBase = `graph-${String(slug || "project").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const depMarkerId = `${markerBase}-dep-arrow`;
   const containmentMarkerId = `${markerBase}-containment-arrow`;

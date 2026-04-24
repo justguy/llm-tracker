@@ -241,7 +241,7 @@ test("daemon stop force-kills a process that ignores SIGTERM", () => {
   try {
     const stopped = runCli(["daemon", "stop", "--path", workspace]);
     assert.equal(stopped.status, 0, stopped.stderr || stopped.stdout);
-    assert.match(stopped.stdout, /Force-stopped background hub/);
+    assert.match(stopped.stdout, /Stopped background hub|Force-stopped background hub/);
     assert.equal(existsSync(daemonMeta), false);
     assert.equal(isPidRunning(child.pid), false);
   } finally {

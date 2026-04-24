@@ -1,5 +1,3 @@
-import * as dagre from "@dagrejs/dagre";
-
 export const STATUS_PILL_LABEL = {
   complete: "COMPLETE",
   in_progress: "IN PROGRESS",
@@ -207,8 +205,86 @@ export function buildDependencyGraphModel(project, {
   return { nodes, edges };
 }
 
-export function layoutDependencyGraph(model, dagreModule = dagre) {
-  const graph = new dagreModule.Graph({ multigraph: true });
+function fallbackDependencyGraphLayout(model) {
+  const rankSep = 110;
+  const nodeSep = 42;
+  const marginX = 28;
+  const marginY = 28;
+  const byId = new Map(model.nodes.map((node) => [node.id, node]));
+  const outgoing = new Map(model.nodes.map((node) => [node.id, []]));
+  const indegree = new Map(model.nodes.map((node) => [node.id, 0]));
+  for (const edge of model.edges) {
+    if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
+    outgoing.get(edge.from)?.push(edge.to);
+    indegree.set(edge.to, (indegree.get(edge.to) || 0) + 1);
+  }
+
+  const rankById = new Map(model.nodes.map((node) => [node.id, 0]));
+  const queue = model.nodes
+    .filter((node) => (indegree.get(node.id) || 0) === 0)
+    .map((node) => node.id);
+  const seen = new Set(queue);
+  while (queue.length) {
+    const id = queue.shift();
+    for (const next of outgoing.get(id) || []) {
+      rankById.set(next, Math.max(rankById.get(next) || 0, (rankById.get(id) || 0) + 1));
+      indegree.set(next, (indegree.get(next) || 0) - 1);
+      if ((indegree.get(next) || 0) === 0 && !seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+
+  const ranks = new Map();
+  for (const node of model.nodes) {
+    const rank = rankById.get(node.id) || 0;
+    if (!ranks.has(rank)) ranks.set(rank, []);
+    ranks.get(rank).push(node);
+  }
+
+  const positioned = new Map();
+  for (const [rank, nodes] of ranks.entries()) {
+    nodes.sort((a, b) => (a.index || 0) - (b.index || 0));
+    nodes.forEach((node, row) => {
+      const width = node.width || GRAPH_NODE_WIDTH;
+      const height = node.height || GRAPH_NODE_HEIGHT;
+      positioned.set(node.id, {
+        x: marginX + width / 2 + rank * (GRAPH_NODE_WIDTH + rankSep),
+        y: marginY + height / 2 + row * (GRAPH_NODE_HEIGHT + nodeSep),
+      });
+    });
+  }
+
+  const nodes = model.nodes.map((node) => ({
+    ...node,
+    ...(positioned.get(node.id) || { x: marginX + GRAPH_NODE_WIDTH / 2, y: marginY + GRAPH_NODE_HEIGHT / 2 }),
+  }));
+  const edges = model.edges.map((edge) => {
+    const from = positioned.get(edge.from);
+    const to = positioned.get(edge.to);
+    const fromNode = byId.get(edge.from);
+    const toNode = byId.get(edge.to);
+    if (!from || !to || !fromNode || !toNode) return { ...edge, points: [] };
+    const start = { x: from.x + (fromNode.width || GRAPH_NODE_WIDTH) / 2, y: from.y };
+    const end = { x: to.x - (toNode.width || GRAPH_NODE_WIDTH) / 2, y: to.y };
+    const midX = start.x + Math.max(24, (end.x - start.x) / 2);
+    return {
+      ...edge,
+      points: [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end],
+    };
+  });
+  const width = Math.max(360, ...nodes.map((node) => node.x + (node.width || GRAPH_NODE_WIDTH) / 2 + marginX));
+  const height = Math.max(260, ...nodes.map((node) => node.y + (node.height || GRAPH_NODE_HEIGHT) / 2 + marginY));
+  return { nodes, edges, width: Math.ceil(width), height: Math.ceil(height) };
+}
+
+export function layoutDependencyGraph(model, dagreModule = null) {
+  const Graph = dagreModule?.Graph || dagreModule?.default?.Graph;
+  const layout = dagreModule?.layout || dagreModule?.default?.layout;
+  if (!Graph || !layout) return fallbackDependencyGraphLayout(model);
+
+  const graph = new Graph({ multigraph: true });
   graph.setGraph({
     rankdir: "LR",
     nodesep: 42,
@@ -229,7 +305,7 @@ export function layoutDependencyGraph(model, dagreModule = dagre) {
     graph.setEdge(edge.from, edge.to, { kind: edge.kind }, `${edge.kind}:${index}`);
   });
 
-  dagreModule.layout(graph);
+  layout(graph);
 
   const nodes = model.nodes.map((node) => {
     const positioned = graph.node(node.id) || {};

@@ -471,7 +471,7 @@ test("tracker_patch goes through the running hub from MCP", async () => {
       const payload = JSON.parse(patched.result.content[0].text);
       assert.equal(payload.ok, true);
       assert.equal(payload.noop, false);
-      assert.match(payload.file, /trackers\/test-project\.json$/);
+      assert.match(payload.file, /trackers[\\/]test-project\.json$/);
       assert.equal(typeof payload.rev, "number");
 
       const project = await client.request("tools/call", {
