@@ -1,17 +1,17 @@
-# Migrating Existing Projects To 0.2.0
+# Migrating Existing Projects To 1.0.0
 
-This guide covers migration from **`v0.1.1` or any pre-`0.2.0` workspace/tracker setup** to the **`0.2.0` contract and feature set**.
+This guide covers migration from **`v0.1.0` or any pre-`1.0.0` workspace/tracker setup** to the **`1.0.0` contract and feature set**. The internal `0.2.0` line is superseded by `1.0.0`.
 
 Version boundary in this repo:
 
-- previous release tag: `v0.1.1`
-- current release tag: `v0.2.0`
+- previous public npm release: `v0.1.0`
+- current public npm release: `v1.0.0`
 
 ## What Actually Requires Migration
 
 ### Code/runtime migration
 
-If you want these capabilities, you need to run `0.2.0` code:
+If you want these capabilities, you need to run `1.0.0` code:
 
 - deterministic `next`
 - `blockers`, `changed`, `pick`
@@ -28,7 +28,7 @@ This part requires updating the installed package or running the current checkou
 
 Existing tracker files from `0.1.x` continue to work. There is **no required schema rewrite** just to keep using the tracker.
 
-Automatic compatibility in `0.2.0`:
+Automatic compatibility in `1.0.0`:
 
 - legacy `reference` still works
 - additive `references[]` is supported for new data
@@ -40,7 +40,7 @@ Automatic compatibility in `0.2.0`:
 
 ### Phase 1: Upgrade Runtime
 
-1. Upgrade the code to `0.2.0`.
+1. Upgrade the code to `1.0.0`.
 2. Restart the shared daemon on the same workspace.
 3. Verify the live contract:
    - `GET /help`
@@ -103,7 +103,7 @@ Do **not** start with old completed tasks unless they are still referenced.
 
 ## Which Fields To Evaluate
 
-For active-task migration work, evaluate the **full 0.2.0 author-owned field set** and fill whatever the repo/docs/tracker evidence actually supports. Do not silently stop after the first few convenient fields.
+For active-task migration work, evaluate the **full 1.0.0 author-owned field set** and fill whatever the repo/docs/tracker evidence actually supports. Do not silently stop after the first few convenient fields.
 
 ### Author-owned field families to evaluate for active tasks
 
@@ -278,7 +278,7 @@ Stop and report the result after verification. Do **not** commit or refresh a PR
 Use this with an LLM that already has tracker read access and patch/HTTP write access:
 
 ```text
-Migrate tracker metadata for project <slug> from the 0.1.x contract to the 0.2.0 contract.
+Migrate tracker metadata for project <slug> from the 0.1.x contract to the 1.0.0 contract.
 
 Goal:
 - Improve retrieval, ranking, execution, and verification quality for active work.
@@ -375,7 +375,7 @@ Suggested order per task:
 
 ## Operational Checklist
 
-1. Upgrade runtime to `0.2.0`.
+1. Upgrade runtime to `1.0.0`.
 2. Restart the shared daemon on the same workspace.
 3. Confirm `/help` or `tracker://help` reflects the new contract.
 4. Leave existing tracker files alone unless they need high-value metadata.

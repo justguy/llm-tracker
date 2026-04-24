@@ -167,6 +167,8 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 
 **Landing gate.** For linked repo-local trackers, patch the tracker **before** you commit or push the matching code, and include the tracker JSON diff in the same commit. Patching after a commit/push leaves the working tree dirty; patching after a squash-merge dirties `main`. Pure runtime fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON — those are safe to touch anytime. See the agent contract at `/help` for the full rule.
 
+> Before push or merge, prove `.llm-tracker/trackers/hoplon.json` on the branch contains the live tracker truth for the touched tasks. Compare `tracker_brief` against the repo file and against `origin/main`. Do not restore, stash, or discard tracker diffs. If merging would regress tracker truth, stop and make a tracker-sync commit/PR first.
+
 ## Agent Help
 
 > **For agents.** The authoritative contract LLMs should follow is
@@ -495,7 +497,7 @@ Patch failures now return `error`, `type`, and `hint` so agents do not have to r
 
 Full schema, merge semantics, field ownership, versioning, rollback, and the whole LLM-facing contract → **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 
-Migrating an older `0.1.x` workspace or tracker set to the `0.2.0` contract, including agent backfill guidance for the new fields → **[MIGRATING.md](./MIGRATING.md)**.
+Migrating an older `0.1.x` workspace or tracker set to the `1.0.0` contract, including agent backfill guidance for the new fields → **[MIGRATING.md](./MIGRATING.md)**.
 
 That migration guide also covers existing shared-workspace projects linked from repo worktrees: relink the slug to the intended branch file, `reload` it, backfill bounded active tasks first, verify with `execute` / `verify` / `search`, and stop before any commit unless the human asked for one.
 

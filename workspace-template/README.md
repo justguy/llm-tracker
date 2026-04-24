@@ -66,6 +66,8 @@ When the tracker file lives inside a repo, durable tracker writes (anything othe
 - **Verify with `tracker_brief` (or `/brief`) before committing.** The brief pack reflects the final post-patch state the hub will persist — if it looks wrong, fix it before you stage anything.
 - **Safe no-op writes.** Runtime-only fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON; feel free to patch them at any time.
 
+> Before push or merge, prove `.llm-tracker/trackers/hoplon.json` on the branch contains the live tracker truth for the touched tasks. Compare `tracker_brief` against the repo file and against `origin/main`. Do not restore, stash, or discard tracker diffs. If merging would regress tracker truth, stop and make a tracker-sync commit/PR first.
+
 ---
 
 ## 1. TL;DR

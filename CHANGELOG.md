@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.0](https://github.com/justguy/llm-tracker/compare/llm-tracker-v0.2.0...llm-tracker-v1.0.0) (2026-04-24)
+
+### BREAKING CHANGES
+
+* promote the migration-required tracker contract and UI redesign from the internal `0.2.0` line to the public `1.0.0` release.
+
+### Features
+
+* add the Variant A2 board redesign with top-bar agent actions, command palette, hero strip, inline task drawer, settings modal, and light/dark themes.
+* add task tree grouping with `kind: "group"` plus `parent_id` containment, while keeping blocker semantics on `dependencies[]`.
+* add the derived dependency graph view and optional containment overlay.
+* add repo-linked tracker guidance for durable state, runtime overlays, branch-safe patching, and post-merge cleanliness.
+
 ## [0.2.0](https://github.com/justguy/llm-tracker/compare/llm-tracker-v0.1.1...llm-tracker-v0.2.0) (2026-04-15)
 
 
