@@ -119,7 +119,7 @@ test("daemon stop succeeds with an active websocket client attached", async () =
     const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
     assert.equal(started.status, 0, started.stderr || started.stdout);
 
-    const ws = new WebSocket(`ws://localhost:${port}/ws`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
     await new Promise((resolve, reject) => {
       ws.once("open", resolve);
       ws.once("error", reject);
