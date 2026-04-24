@@ -46,6 +46,12 @@ const PRIORITY_LABEL = {
   p3: "P3",
 };
 
+const TASK_DRAWER_MODES = new Set(["brief", "why", "execute", "verify"]);
+
+export function normalizeTaskDrawerMode(mode) {
+  return TASK_DRAWER_MODES.has(mode) ? mode : "brief";
+}
+
 const NONE = html`<span class="card__drawer-placeholder">— none —</span>`;
 
 function DrawerSection({ label, children }) {
@@ -330,8 +336,9 @@ function PackEmpty({ mode }) {
   `;
 }
 
-export function TaskInlineDrawer({ slug, task, onOpenTask, onClose }) {
-  const [mode, setMode] = useState("brief");
+export function TaskInlineDrawer({ slug, task, initialMode = "brief", onOpenTask, onClose }) {
+  const normalizedInitialMode = normalizeTaskDrawerMode(initialMode);
+  const [mode, setMode] = useState(normalizedInitialMode);
   const [cache, setCache] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -339,11 +346,11 @@ export function TaskInlineDrawer({ slug, task, onOpenTask, onClose }) {
   const abortRef = useRef(null);
 
   useEffect(() => {
-    setMode("brief");
+    setMode(normalizedInitialMode);
     setCache({});
     setError(null);
     setLoading(false);
-  }, [slug, task?.id]);
+  }, [slug, task?.id, normalizedInitialMode]);
 
   useEffect(() => {
     if (!slug || !task?.id) return undefined;

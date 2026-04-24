@@ -9,7 +9,7 @@ import {
 import {
   HeroStripView,
   loadNextRecommendation
-} from "../ui/app.js";
+} from "../ui/hero-strip.js";
 
 function collectVNodeText(node) {
   if (Array.isArray(node)) {
@@ -200,6 +200,39 @@ test("HeroStripView renders the recommended task and wires PICK and READ actions
     ["pick", "llm-tracker", "t23"],
     ["read", "llm-tracker", "t23", "brief"]
   ]);
+});
+
+test("HeroStripView disables stale PICK and READ actions while loading", () => {
+  const calls = [];
+  const vnode = HeroStripView({
+    summary: heroSummary(),
+    slug: "new-slug",
+    nextLoading: true,
+    nextTask: {
+      id: "old-task",
+      title: "Stale task",
+      reason: ["old recommendation"]
+    },
+    onPickTask: (...args) => calls.push(["pick", ...args]),
+    onOpenTaskModal: (...args) => calls.push(["read", ...args])
+  });
+
+  const text = collectVNodeText(vnode).replace(/\s+/g, " ").trim();
+  assert.match(text, /Loading ranked shortlist/);
+  assert.doesNotMatch(text, /Stale task/);
+  assert.doesNotMatch(text, /old-task/);
+
+  const pickBtn = findButtonByLabel(vnode, "PICK");
+  const readBtn = findButtonByLabel(vnode, "READ");
+  assert.ok(pickBtn);
+  assert.ok(readBtn);
+  assert.equal(pickBtn.props.disabled, true);
+  assert.equal(readBtn.props.disabled, true);
+
+  pickBtn.props.onClick();
+  readBtn.props.onClick();
+
+  assert.deepEqual(calls, []);
 });
 
 test("HeroStripView renders loading, error, and empty states without a recommended task", () => {
