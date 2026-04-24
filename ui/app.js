@@ -305,9 +305,36 @@ function Dropdown({ value, options, onChange, renderLabel, className }) {
 }
 
 // ─────── Filter toggles (status + block) ───────
-function FilterToggles({ counts, statusFilters, toggleStatus, blockedCount, openCount, blockFilters, toggleBlock }) {
+function FilterToggles({
+  counts,
+  statusFilters,
+  toggleStatus,
+  blockedCount,
+  openCount,
+  blockFilters,
+  toggleBlock,
+  boardView,
+  setBoardView
+}) {
   return html`
     <div class="filter-toggles">
+      <div class="filter-group view-filter-group" role="group" aria-label="Board view">
+        <span class="filter-label">VIEW</span>
+        <button
+          class=${`view-toggle ${boardView === "swimlane" ? "active" : ""}`}
+          onClick=${() => setBoardView("swimlane")}
+          title="Show swimlane board"
+        >
+          swimlane
+        </button>
+        <button
+          class=${`view-toggle ${boardView === "tree" ? "active" : ""}`}
+          onClick=${() => setBoardView("tree")}
+          title="Show task tree"
+        >
+          tree
+        </button>
+      </div>
       <div class="filter-group">
         <span class="filter-label">STATUS</span>
         ${STATUS_ORDER.map(
@@ -357,6 +384,153 @@ const STATUS_PILL_LABEL = {
   blocked: "BLOCKED",
 };
 
+function taskParentId(task) {
+  return typeof task?.parent_id === "string" && task.parent_id.trim()
+    ? task.parent_id.trim()
+    : null;
+}
+
+function isGroupTask(task) {
+  return task?.kind === "group";
+}
+
+function priorityIndex(priorityId, priorities = []) {
+  const index = priorities.findIndex((priority) => priority.id === priorityId);
+  return index === -1 ? priorities.length : index;
+}
+
+function taskMatchesText(task, filterQuery) {
+  if (!filterQuery) return true;
+  const q = filterQuery.toLowerCase();
+  if (task.title.toLowerCase().includes(q)) return true;
+  if (task.id.toLowerCase().includes(q)) return true;
+  if ((task.goal || "").toLowerCase().includes(q)) return true;
+  const tags = (task.context && task.context.tags) || [];
+  if (tags.some((tag) => String(tag).toLowerCase().includes(q))) return true;
+  return false;
+}
+
+function taskIsBlocked(task, blocked) {
+  return !!(blocked?.[task.id] && blocked[task.id].length > 0);
+}
+
+function taskMatchesBoardFilters(task, { filterQuery, statusFilters, blockFilters, blocked }) {
+  const statusOk = !statusFilters || statusFilters.size === 0 || statusFilters.has(task.status);
+  const blockOk =
+    !blockFilters ||
+    blockFilters.size === 0 ||
+    blockFilters.has(taskIsBlocked(task, blocked) ? "blocked" : "open");
+  return statusOk && blockOk && taskMatchesText(task, filterQuery);
+}
+
+function countTasksByStatus(tasks = []) {
+  const counts = {};
+  for (const task of tasks) counts[task.status] = (counts[task.status] || 0) + 1;
+  return counts;
+}
+
+function flattenTreeTasks(task, childrenByParent, path = new Set()) {
+  if (!task || path.has(task.id)) return [];
+  const nextPath = new Set(path);
+  nextPath.add(task.id);
+  const children = childrenByParent.get(task.id) || [];
+  return [task, ...children.flatMap((child) => flattenTreeTasks(child, childrenByParent, nextPath))];
+}
+
+function summarizeTreeTasks(tasks = [], blocked = {}) {
+  const counts = countTasksByStatus(tasks);
+  const total = tasks.length;
+  const done = counts.complete || 0;
+  const blockedCount = tasks.filter((task) => taskIsBlocked(task, blocked)).length;
+  return {
+    counts,
+    total,
+    done,
+    active: counts.in_progress || 0,
+    blocked: blockedCount,
+    pct: total === 0 ? 0 : Math.round((done / total) * 100)
+  };
+}
+
+export function buildTreeModel(project) {
+  const tasks = project?.data?.tasks || [];
+  const swimlanes = project?.data?.meta?.swimlanes || [];
+  const priorities = project?.data?.meta?.priorities || [];
+  const taskOrder = new Map(tasks.map((task, index) => [task.id, index]));
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const hasExplicitTree = tasks.some((task) => isGroupTask(task) || taskParentId(task));
+
+  const compareTasks = (a, b) => {
+    const laneCompare = String(a.placement?.swimlaneId || "").localeCompare(String(b.placement?.swimlaneId || ""));
+    if (laneCompare !== 0) return laneCompare;
+    const priorityCompare =
+      priorityIndex(a.placement?.priorityId, priorities) - priorityIndex(b.placement?.priorityId, priorities);
+    if (priorityCompare !== 0) return priorityCompare;
+    return (taskOrder.get(a.id) ?? 0) - (taskOrder.get(b.id) ?? 0);
+  };
+
+  if (!hasExplicitTree) {
+    return {
+      mode: "swimlane",
+      roots: swimlanes.map((lane) => ({
+        id: `swimlane:${lane.id}`,
+        label: lane.label,
+        description: lane.description || null,
+        lane,
+        tasks: tasks
+          .filter((task) => task.placement?.swimlaneId === lane.id)
+          .sort(compareTasks)
+      })),
+      childrenByParent: new Map(),
+      taskOrder
+    };
+  }
+
+  const childrenByParent = new Map();
+  const roots = [];
+  for (const task of tasks) {
+    const parentId = taskParentId(task);
+    if (parentId && parentId !== task.id && byId.has(parentId)) {
+      if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+      childrenByParent.get(parentId).push(task);
+    } else {
+      roots.push(task);
+    }
+  }
+
+  for (const children of childrenByParent.values()) children.sort(compareTasks);
+  roots.sort(compareTasks);
+
+  return {
+    mode: "explicit",
+    roots,
+    childrenByParent,
+    taskOrder
+  };
+}
+
+export function collectTreeCollapseIds(model) {
+  if (!model) return [];
+  if (model.mode === "swimlane") {
+    return model.roots
+      .filter((root) => root.tasks.length > 0)
+      .map((root) => root.id);
+  }
+
+  const ids = [];
+  const visit = (task, path = new Set()) => {
+    if (!task || path.has(task.id)) return;
+    const nextPath = new Set(path);
+    nextPath.add(task.id);
+    const children = model.childrenByParent.get(task.id) || [];
+    if (children.length > 0) ids.push(`task:${task.id}`);
+    for (const child of children) visit(child, nextPath);
+  };
+
+  for (const root of model.roots) visit(root);
+  return ids;
+}
+
 function Card({
   task,
   blockedBy,
@@ -382,6 +556,7 @@ function Card({
       ? [task.reference]
       : [];
   const summary = task.goal || ctx.notes || "";
+  const canDrag = typeof onDragStart === "function";
   const classes = [
     "card",
     `status-${task.status}`,
@@ -394,13 +569,19 @@ function Card({
   return html`
     <div
       class=${classes}
-      draggable="true"
+      draggable=${canDrag}
       data-task-id=${task.id}
       role="button"
       tabIndex="0"
       aria-label=${`Task ${task.id}: ${task.title}`}
-      onDragStart=${(e) => onDragStart(e, task)}
-      onDragEnd=${onDragEnd}
+      onDragStart=${(e) => {
+        if (!canDrag) {
+          e.preventDefault();
+          return;
+        }
+        onDragStart(e, task);
+      }}
+      onDragEnd=${(e) => onDragEnd && onDragEnd(e)}
       onClick=${() => onToggleExpand && onToggleExpand(task)}
       onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleExpand && onToggleExpand(task); } }}
     >
@@ -538,30 +719,9 @@ function Cell({
   const ref = useRef(null);
   const [over, setOver] = useState(false);
 
-  const matchesText = (t) => {
-    if (!filterQuery) return true;
-    const q = filterQuery.toLowerCase();
-    if (t.title.toLowerCase().includes(q)) return true;
-    if (t.id.toLowerCase().includes(q)) return true;
-    if ((t.goal || "").toLowerCase().includes(q)) return true;
-    const tags = (t.context && t.context.tags) || [];
-    if (tags.some((tag) => String(tag).toLowerCase().includes(q))) return true;
-    return false;
-  };
-
-  const matchesStatus = (t) => {
-    if (!statusFilters || statusFilters.size === 0) return true;
-    return statusFilters.has(t.status);
-  };
-
-  const isBlocked = (t) => blocked[t.id] && blocked[t.id].length > 0;
-
-  const matchesBlock = (t) => {
-    if (!blockFilters || blockFilters.size === 0) return true;
-    return blockFilters.has(isBlocked(t) ? "blocked" : "open");
-  };
-
-  const filtered = tasks.filter((t) => matchesStatus(t) && matchesBlock(t) && matchesText(t));
+  const filtered = tasks.filter((t) =>
+    taskMatchesBoardFilters(t, { filterQuery, statusFilters, blockFilters, blocked })
+  );
 
   const handleDragOver = (e) => {
     if (!dragState.taskId) return;
@@ -639,6 +799,299 @@ function Cell({
           </${Fragment}>
         `
       )}
+    </div>
+  `;
+}
+
+function TreeTaskCard({
+  slug,
+  task,
+  depth,
+  blocked,
+  fuzzyQuery,
+  fuzzyMatchMap,
+  activeTask,
+  activeTaskMode,
+  onDeleteTask,
+  onSaveComment,
+  onOpenTask,
+  onCloseTask,
+  onOpenTaskModal
+}) {
+  return html`
+    <div class="tree-task" style=${`--tree-depth: ${depth}`}>
+      <${Card}
+        task=${task}
+        blockedBy=${blocked[task.id]}
+        searchMatch=${fuzzyMatchMap?.get(task.id) || null}
+        fuzzyActive=${!!(fuzzyQuery && fuzzyQuery.trim())}
+        activeMode=${activeTask?.id === task.id ? activeTaskMode : "brief"}
+        expanded=${activeTask?.id === task.id}
+        onDelete=${onDeleteTask}
+        onSaveComment=${onSaveComment}
+        onToggleExpand=${(selected) => onOpenTask && onOpenTask(selected, "brief")}
+        onOpenTaskModal=${onOpenTaskModal}
+      />
+      ${activeTask?.id === task.id
+        ? html`<${TaskInlineDrawer}
+            slug=${slug}
+            task=${activeTask}
+            onOpenTask=${(taskId, mode) => onOpenTask && onOpenTask({ id: taskId }, mode)}
+            onClose=${onCloseTask}
+          />`
+        : null}
+    </div>
+  `;
+}
+
+function TreeGroupHeader({
+  id,
+  title,
+  subtitle,
+  status,
+  depth,
+  summary,
+  collapsed,
+  canToggle,
+  task,
+  onToggle,
+  onOpenTask,
+  onOpenTaskModal
+}) {
+  return html`
+    <div class="tree-group__header" style=${`--tree-depth: ${depth}`}>
+      <button
+        class="tree-group__toggle"
+        disabled=${!canToggle}
+        aria-label=${`${collapsed ? "Expand" : "Collapse"} ${title}`}
+        aria-expanded=${!collapsed}
+        onClick=${onToggle}
+      >${canToggle ? (collapsed ? "▸" : "▾") : "·"}</button>
+      <div class="tree-group__main">
+        <div class="tree-group__title-row">
+          <span class="tree-group__id">${id}</span>
+          <span class="tree-group__title">${title}</span>
+          ${status
+            ? html`<span class=${`tree-group__status status-${status}`}>
+                ${STATUS_PILL_LABEL[status] || status.toUpperCase()}
+              </span>`
+            : null}
+        </div>
+        ${subtitle ? html`<div class="tree-group__subtitle">${subtitle}</div>` : null}
+      </div>
+      <div class="tree-group__stats">
+        <span>${summary.total} tasks</span>
+        <span>${summary.active} active</span>
+        <span>${summary.done} done</span>
+        ${summary.blocked > 0 ? html`<span class="warn">${summary.blocked} blocked</span>` : null}
+        <span>${summary.pct}%</span>
+      </div>
+      ${task
+        ? html`<div class="tree-group__actions">
+            <${Bracket}
+              label="READ"
+              title=${`Brief for ${task.id}`}
+              onClick=${(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onOpenTask && onOpenTask(task, "brief");
+              }}
+            />
+            <${Bracket}
+              label="WHY"
+              title=${`Why — ${task.id}`}
+              onClick=${(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onOpenTaskModal && onOpenTaskModal(task, "why");
+              }}
+            />
+          </div>`
+        : null}
+    </div>
+  `;
+}
+
+function TreeView({
+  project,
+  slug,
+  filterQuery,
+  statusFilters,
+  blockFilters,
+  fuzzyQuery,
+  fuzzyMatchMap,
+  activeTask,
+  activeTaskMode,
+  onDeleteTask,
+  onSaveComment,
+  onOpenTask,
+  onCloseTask,
+  onOpenTaskModal
+}) {
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const model = useMemo(() => buildTreeModel(project), [project]);
+  const collapsibleIds = useMemo(() => collectTreeCollapseIds(model), [model]);
+  const collapsedCount = collapsibleIds.filter((id) => collapsed.has(id)).length;
+  const blocked = project.derived?.blocked || {};
+  const filterState = { filterQuery, statusFilters, blockFilters, blocked };
+
+  const toggleCollapsed = (id) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const renderTask = (task, depth) => html`
+    <${TreeTaskCard}
+      key=${task.id}
+      slug=${slug}
+      task=${task}
+      depth=${depth}
+      blocked=${blocked}
+      fuzzyQuery=${fuzzyQuery}
+      fuzzyMatchMap=${fuzzyMatchMap}
+      activeTask=${activeTask?.id === task.id ? activeTask : null}
+      activeTaskMode=${activeTaskMode}
+      onDeleteTask=${onDeleteTask}
+      onSaveComment=${onSaveComment}
+      onOpenTask=${onOpenTask}
+      onCloseTask=${onCloseTask}
+      onOpenTaskModal=${onOpenTaskModal}
+    />
+  `;
+
+  const renderExplicitNode = (task, depth = 0, path = new Set()) => {
+    if (!task || path.has(task.id)) {
+      return html`<div class="tree-cycle" style=${`--tree-depth: ${depth}`}>cycle skipped</div>`;
+    }
+
+    const nextPath = new Set(path);
+    nextPath.add(task.id);
+    const children = model.childrenByParent.get(task.id) || [];
+    const childNodes = children
+      .map((child) => renderExplicitNode(child, depth + 1, nextPath))
+      .filter(Boolean);
+    const selfVisible = taskMatchesBoardFilters(task, filterState);
+    const grouped = isGroupTask(task) || children.length > 0;
+
+    if (!grouped) return selfVisible ? renderTask(task, depth) : null;
+    if (!selfVisible && childNodes.length === 0) return null;
+
+    const nodeId = `task:${task.id}`;
+    const isCollapsed = collapsed.has(nodeId);
+    const descendants = children.flatMap((child) => flattenTreeTasks(child, model.childrenByParent, nextPath));
+    const summary = summarizeTreeTasks(descendants, blocked);
+
+    return html`
+      <div class="tree-node tree-node--group" key=${task.id}>
+        <${TreeGroupHeader}
+          id=${task.id}
+          title=${task.title}
+          subtitle=${task.goal || task.context?.notes || null}
+          status=${task.status}
+          depth=${depth}
+          summary=${summary}
+          collapsed=${isCollapsed}
+          canToggle=${childNodes.length > 0}
+          task=${task}
+          onToggle=${() => toggleCollapsed(nodeId)}
+          onOpenTask=${onOpenTask}
+          onOpenTaskModal=${onOpenTaskModal}
+        />
+        ${activeTask?.id === task.id
+          ? html`<div class="tree-group__drawer" style=${`--tree-depth: ${depth + 1}`}>
+              <${TaskInlineDrawer}
+                slug=${slug}
+                task=${activeTask}
+                onOpenTask=${(taskId, mode) => onOpenTask && onOpenTask({ id: taskId }, mode)}
+                onClose=${onCloseTask}
+              />
+            </div>`
+          : null}
+        ${!isCollapsed && childNodes.length > 0
+          ? html`<div class="tree-children">${childNodes}</div>`
+          : null}
+      </div>
+    `;
+  };
+
+  const renderSwimlaneRoot = (root) => {
+    const laneTextMatches =
+      !!filterQuery &&
+      (root.label.toLowerCase().includes(filterQuery.toLowerCase()) ||
+        root.id.toLowerCase().includes(filterQuery.toLowerCase()));
+    const childFilterState = laneTextMatches ? { ...filterState, filterQuery: "" } : filterState;
+    const visibleTasks = root.tasks.filter((task) => taskMatchesBoardFilters(task, childFilterState));
+    const filtersActive =
+      !!filterQuery ||
+      (statusFilters && statusFilters.size > 0) ||
+      (blockFilters && blockFilters.size > 0);
+    if (visibleTasks.length === 0 && filtersActive && !laneTextMatches) return null;
+
+    const nodeId = root.id;
+    const isCollapsed = collapsed.has(nodeId);
+    const summary = summarizeTreeTasks(root.tasks, blocked);
+    const childNodes = visibleTasks.map((task) => renderTask(task, 1));
+
+    return html`
+      <div class="tree-node tree-node--swimlane" key=${root.id}>
+        <${TreeGroupHeader}
+          id=${root.lane.id}
+          title=${root.label}
+          subtitle=${root.description}
+          depth=${0}
+          summary=${summary}
+          collapsed=${isCollapsed}
+          canToggle=${childNodes.length > 0}
+          onToggle=${() => toggleCollapsed(nodeId)}
+        />
+        ${!isCollapsed
+          ? html`<div class="tree-children">
+              ${childNodes.length > 0
+                ? childNodes
+                : html`<div class="tree-empty" style=${`--tree-depth: 1`}>no tasks</div>`}
+            </div>`
+          : null}
+      </div>
+    `;
+  };
+
+  const nodes = model.mode === "swimlane"
+    ? model.roots.map(renderSwimlaneRoot).filter(Boolean)
+    : model.roots.map((task) => renderExplicitNode(task, 0)).filter(Boolean);
+
+  return html`
+    <div class="tree-wrap">
+      <div class="tree-view">
+        <div class="tree-view__header">
+          <span>${model.mode === "swimlane" ? "swimlanes as groups" : "task groups"}</span>
+          <div class="tree-view__header-meta">
+            <span>${nodes.length} roots</span>
+            <div class="tree-view__actions">
+              <${Bracket}
+                label="EXPAND"
+                soft
+                title="Expand all tree groups"
+                disabled=${collapsedCount === 0}
+                onClick=${() => setCollapsed(new Set())}
+              />
+              <${Bracket}
+                label="COLLAPSE"
+                soft
+                title="Collapse all tree groups"
+                disabled=${collapsibleIds.length === 0 || collapsedCount === collapsibleIds.length}
+                onClick=${() => setCollapsed(new Set(collapsibleIds))}
+              />
+            </div>
+          </div>
+        </div>
+        ${nodes.length > 0
+          ? nodes
+          : html`<div class="tree-empty" style=${`--tree-depth: 0`}>no matching tasks</div>`}
+      </div>
     </div>
   `;
 }
@@ -934,6 +1387,7 @@ function ProjectPane({
   onTogglePin,
   filter,
   searchMode,
+  boardView,
   fuzzyMatchMap,
   statusFilters,
   blockFilters,
@@ -967,25 +1421,42 @@ function ProjectPane({
         ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
         : null}
       ${data
-        ? html`<${Matrix}
-            project=${project}
-            slug=${slug}
-            filterQuery=${searchMode === "filter" ? filter : ""}
-            statusFilters=${statusFilters}
-            blockFilters=${blockFilters}
-            fuzzyQuery=${searchMode === "fuzzy" ? filter : ""}
-            fuzzyMatchMap=${fuzzyMatchMap}
-            activeTask=${activeTask}
-            activeTaskMode=${openTaskMode}
-            onMove=${(args) => onMove(slug, args)}
-            onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
-            onMoveLane=${(laneId, direction) => onMoveLane(slug, laneId, direction)}
-            onDeleteTask=${(task) => onDeleteTask(slug, task)}
-            onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
-            onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
-            onCloseTask=${onCloseTask}
-            onOpenTaskModal=${onOpenTaskModal}
-          />`
+        ? boardView === "tree"
+          ? html`<${TreeView}
+              project=${project}
+              slug=${slug}
+              filterQuery=${searchMode === "filter" ? filter : ""}
+              statusFilters=${statusFilters}
+              blockFilters=${blockFilters}
+              fuzzyQuery=${searchMode === "fuzzy" ? filter : ""}
+              fuzzyMatchMap=${fuzzyMatchMap}
+              activeTask=${activeTask}
+              activeTaskMode=${openTaskMode}
+              onDeleteTask=${(task) => onDeleteTask(slug, task)}
+              onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
+              onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
+              onCloseTask=${onCloseTask}
+              onOpenTaskModal=${onOpenTaskModal}
+            />`
+          : html`<${Matrix}
+              project=${project}
+              slug=${slug}
+              filterQuery=${searchMode === "filter" ? filter : ""}
+              statusFilters=${statusFilters}
+              blockFilters=${blockFilters}
+              fuzzyQuery=${searchMode === "fuzzy" ? filter : ""}
+              fuzzyMatchMap=${fuzzyMatchMap}
+              activeTask=${activeTask}
+              activeTaskMode=${openTaskMode}
+              onMove=${(args) => onMove(slug, args)}
+              onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
+              onMoveLane=${(laneId, direction) => onMoveLane(slug, laneId, direction)}
+              onDeleteTask=${(task) => onDeleteTask(slug, task)}
+              onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
+              onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
+              onCloseTask=${onCloseTask}
+              onOpenTaskModal=${onOpenTaskModal}
+            />`
         : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
     </section>
   `;
@@ -1140,6 +1611,8 @@ function HelpModal({ workspace, onClose }) {
             <ul class="rules">
               <li><b>status</b> not_started → in_progress → complete (or deferred when parked)</li>
               <li><b>assignee</b> its model ID when it claims a task</li>
+              <li><b>kind</b> optional "group" for tree-view container rows</li>
+              <li><b>parent_id</b> optional containing task ID; supports nested groups and is not a blocker</li>
               <li><b>dependencies</b> task IDs this one blocks on</li>
               <li><b>blocker_reason</b> one sentence when stuck</li>
               <li><b>context.*</b> tags, files_touched, notes — free-form diagnostics</li>
@@ -1938,6 +2411,7 @@ function App() {
   const [activeSlug, setActiveSlug] = useState(initialSettings.activeSlug || null);
   const [filter, setFilter] = useState("");
   const [searchMode, setSearchMode] = useState("filter");
+  const [boardView, setBoardView] = useState(initialSettings.boardView === "tree" ? "tree" : "swimlane");
   const [fuzzyState, setFuzzyState] = useState({
     slug: null,
     query: "",
@@ -1986,8 +2460,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug });
-  }, [theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug]);
+    saveSettings({ theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView });
+  }, [theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -2655,7 +3129,6 @@ function App() {
           />`
         : null}
       <div class="banner-row">
-        <div class="banner-spacer"></div>
         <${FilterToggles}
           counts=${derived.counts}
           statusFilters=${statusFilters}
@@ -2664,6 +3137,8 @@ function App() {
           openCount=${derived.total - Object.keys(derived.blocked || {}).length}
           blockFilters=${blockFilters}
           toggleBlock=${toggleBlock}
+          boardView=${boardView}
+          setBoardView=${setBoardView}
         />
       </div>
       <div class=${`workspace-split ${solo ? "has-solo" : ""}`}>
@@ -2679,6 +3154,7 @@ function App() {
             onTogglePin=${onTogglePinProject}
             filter=${filter}
             searchMode=${searchMode}
+            boardView=${boardView}
             fuzzyMatchMap=${fuzzyMatchMap}
             statusFilters=${statusFilters}
             blockFilters=${blockFilters}

@@ -59,6 +59,8 @@ const schema = {
         properties: {
           id: { type: "string", minLength: 1 },
           title: { type: "string", minLength: 1 },
+          kind: { enum: ["task", "group"] },
+          parent_id: { type: ["string", "null"] },
           goal: { type: "string" },
           status: { enum: STATUS_VALUES },
           outcome: {
@@ -187,6 +189,36 @@ export function validateProject(data) {
       if (!taskIds.has(dep)) {
         errors.push(`/tasks/${i}/dependencies: "${dep}" is not a task id in this project`);
       }
+    }
+
+    if (typeof t.parent_id === "string") {
+      const parentId = t.parent_id.trim();
+      if (!parentId) {
+        errors.push(`/tasks/${i}/parent_id: must be a non-empty task id or null`);
+      } else if (parentId === t.id) {
+        errors.push(`/tasks/${i}/parent_id: task cannot be its own parent`);
+      } else if (!taskIds.has(parentId)) {
+        errors.push(`/tasks/${i}/parent_id: "${parentId}" is not a task id in this project`);
+      }
+    }
+  }
+
+  const parentById = new Map(
+    data.tasks
+      .filter((task) => typeof task.parent_id === "string" && task.parent_id.trim())
+      .map((task) => [task.id, task.parent_id.trim()])
+  );
+  for (let i = 0; i < data.tasks.length; i++) {
+    const task = data.tasks[i];
+    const seen = new Set([task.id]);
+    let current = parentById.get(task.id);
+    while (current) {
+      if (seen.has(current)) {
+        errors.push(`/tasks/${i}/parent_id: parent chain contains a cycle`);
+        break;
+      }
+      seen.add(current);
+      current = parentById.get(current);
     }
   }
 

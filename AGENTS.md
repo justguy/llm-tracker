@@ -42,3 +42,5 @@ For this repo specifically:
 - the migration guide's field order is a sequence, not permission to ignore the rest of the author-owned fields when evidence exists
 - for linked repo-local trackers such as `<repo>/.llm-tracker/trackers/<slug>.json` or `<repo>/.phalanx/<slug>.json`, keep repo file references portable and relative to the repo root; do not rewrite them into machine-specific absolute paths just to force snippet extraction
 - if a valid repo-relative reference is not producing snippets, verify the shared workspace link and use `reload`; treat persistent misses as a resolver/runtime issue to report, not as a reason to bake absolute paths into tracker data
+- use `kind: "group"` plus `parent_id` for task tree containment; nested groups are valid, but dependencies remain the only blocker graph
+- do not use `dependencies` to express grouping, and do not use `parent_id` to express blocking; if no explicit groups exist, the UI tree view treats swimlanes as the root groups

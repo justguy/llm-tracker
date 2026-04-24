@@ -49,6 +49,31 @@ test("rejects dependency pointing at nonexistent task", () => {
   assert.ok(errors.some((e) => e.includes("does-not-exist")));
 });
 
+test("accepts task tree grouping with kind and parent_id", () => {
+  const p = validProject();
+  p.tasks[0].kind = "group";
+  p.tasks[1].parent_id = "t1";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("rejects parent_id pointing at nonexistent task", () => {
+  const p = validProject();
+  p.tasks[1].parent_id = "does-not-exist";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("parent_id") && e.includes("does-not-exist")));
+});
+
+test("rejects parent_id cycles", () => {
+  const p = validProject();
+  p.tasks[0].parent_id = "t2";
+  p.tasks[1].parent_id = "t1";
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("parent chain contains a cycle")));
+});
+
 test("rejects bad slug pattern", () => {
   const p = validProject();
   p.meta.slug = "Bad Slug!";

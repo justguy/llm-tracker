@@ -72,7 +72,7 @@ When the tracker file lives inside a repo, durable tracker writes (anything othe
 
 - **Hub owns structure. You own content.**
 - **Hub enforces** — task array order, task existence (no accidental deletion), human UI state (`meta.swimlanes[i].collapsed`), version stamps (`updatedAt`, `rev`).
-- **You write freely** — `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
+- **You write freely** — `status`, `assignee`, `dependencies`, `kind`, `parent_id`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **Patch-mode new tasks must start open** — when you append a brand-new task through Mode A or Mode B, use `not_started` or `in_progress`, not `complete` or `deferred`.
 - **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
 - **When you need to confirm linked topology**, `GET /api/projects/<slug>` includes `file`, the effective tracker JSON path the hub will write.
@@ -125,6 +125,8 @@ If any is "no" or "unsure," ask the human before proceeding.
 
 - `status` — `not_started` → `in_progress` when you start, → `complete` when shipped, → `deferred` when parked
 - `assignee` — your model ID when you claim a task
+- `kind` — optional `task` or `group`; `group` marks a container row in tree view
+- `parent_id` — optional task ID for tree grouping; this is containment, not a blocker
 - `dependencies` — task IDs this one blocks on; drives the derived **block state** (§5)
 - `blocker_reason` — one sentence when stuck
 - `context.*` — `tags`, `files_touched`, `notes`, anything diagnostic (shallow-merged per key)
@@ -184,6 +186,8 @@ Tasks are ordered by array index. Hub owns the order.
 | ---------------- | ---------------------------------------------- | :------: | ----------------------------------------------------- |
 | `id`             | string                                         |    ✓    | Unique within the project. Immutable.                 |
 | `title`          | string                                         |    ✓    | Card headline.                                        |
+| `kind`           | `task`\|`group`                                |          | Optional tree-view type. Default behavior is `task`. `group` marks a container/epic row. |
+| `parent_id`      | string \| null                                 |          | Optional containing task ID for tree grouping. Must reference an existing task and must not form a cycle. |
 | `goal`           | string                                         |          | One or two sentences under the title.                 |
 | `status`         | enum (§5)                                      |    ✓    | `not_started` \| `in_progress` \| `complete` \| `deferred` |
 | `outcome`        | string \| null                                 |          | Optional first-class marker for a bounded slice that landed. Canonical value: `partial_slice_landed`. |
@@ -204,6 +208,56 @@ Tasks are ordered by array index. Hub owns the order.
 | `context`        | object (freeform)                              |          | Shallow-merged per key on patch. Set a key to `null` in the patch to delete it. Direct file edits do **not** bypass the merge — see §4.3b. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
+
+Task tree rules:
+
+- `parent_id` means "belongs under this larger piece"; it does **not** block execution.
+- `dependencies` means "cannot start until these task IDs are complete"; dependencies may point across groups or levels.
+- Use `kind: "group"` for explicit containers such as epics, milestones, or feature slices.
+- Groups may be nested: a `kind: "group"` task can set `parent_id` to another group task, and leaf tasks can sit under any depth.
+- A task with children renders as a group in tree view even if `kind` is omitted, but new container rows should set `kind: "group"` explicitly.
+- Group `status` is still authored like any other task status. The tree view shows descendant progress counts, but the hub does not auto-complete a group when its children complete.
+- If no task has `kind: "group"` or `parent_id`, the UI tree view treats swimlanes as the top-level groups.
+- Tree view display order is swimlane, then declared priority order, then hub-owned task array order.
+- `parent_id` must reference an existing task, cannot point to the task itself, and parent chains must not contain cycles.
+- Agents should normally claim executable leaf tasks, not broad group rows, unless the human explicitly asks for planning or decomposition work.
+- Do not use `dependencies` to express containment. Do not use `parent_id` to express blocking.
+
+Example nested tree:
+
+```json
+{
+  "tasks": [
+    {
+      "id": "g-tree-ui",
+      "title": "Tree UI",
+      "kind": "group",
+      "status": "in_progress",
+      "placement": { "swimlaneId": "implementation", "priorityId": "p0" },
+      "dependencies": []
+    },
+    {
+      "id": "g-tree-inspection",
+      "title": "Tree Inspection Tools",
+      "kind": "group",
+      "parent_id": "g-tree-ui",
+      "status": "not_started",
+      "placement": { "swimlaneId": "implementation", "priorityId": "p1" },
+      "dependencies": ["ui-tree-renderer"]
+    },
+    {
+      "id": "ui-inspection-counts",
+      "title": "Verify nested group counts",
+      "parent_id": "g-tree-inspection",
+      "status": "not_started",
+      "placement": { "swimlaneId": "verification", "priorityId": "p1" },
+      "dependencies": ["ui-inspection-breadcrumbs"]
+    }
+  ]
+}
+```
+
+In that example, `g-tree-inspection` belongs under `g-tree-ui`, while `ui-inspection-counts` is blocked by `ui-inspection-breadcrumbs`. Those relationships are intentionally separate.
 
 Prefer `references[]` for new data. Legacy `reference` remains valid for backward compatibility and is normalized alongside `references[]` when the hub builds ranked `next` responses.
 

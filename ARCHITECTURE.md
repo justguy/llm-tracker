@@ -114,6 +114,8 @@ Ordered by array index. Hub owns the order.
 | ---------------- | ---------------------------------------------- | :------: | ----------------------------------------------------- |
 | `id`             | string                                         |    ✓     | Unique, immutable.                                    |
 | `title`          | string                                         |    ✓     | Card headline.                                        |
+| `kind`           | `task`\|`group`                                |          | Optional tree-view type. `group` marks a container row. |
+| `parent_id`      | string \| null                                 |          | Optional containing task ID for tree grouping. Must reference an existing task and must not form a cycle. |
 | `goal`           | string                                         |          | Short description under the title.                    |
 | `status`         | `not_started`\|`in_progress`\|`complete`\|`deferred` |  ✓   | See §Status vocabulary.                               |
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓     | Both values must exist in `meta`.                     |
@@ -136,11 +138,24 @@ Ordered by array index. Hub owns the order.
 
 New writers should prefer `references[]`. Legacy `reference` remains valid for backward compatibility and is normalized alongside `references[]` in ranked `next` responses.
 
+### Task tree semantics
+
+`kind` and `parent_id` add containment without changing dependency semantics:
+
+- `kind: "group"` marks an epic/container row in tree view.
+- `parent_id` points to the containing task or group. It may point to a nested group at any depth.
+- `dependencies[]` remains the only blocker graph. Dependencies may point across groups or levels.
+- Group status is authored state, not a derived rollup. Tree view renders descendant counts separately.
+- A task with children renders as a group even if `kind` is omitted, but writers should set `kind: "group"` for new container rows.
+- If no task declares `kind: "group"` or `parent_id`, tree view treats swimlanes as root groups.
+- Tree view display order is swimlane, then declared priority order, then hub-owned task array order.
+
 ### Cross-reference rules
 
 - Every `task.placement.swimlaneId` must appear in `meta.swimlanes`.
 - Every `task.placement.priorityId` must appear in `meta.priorities`.
 - Every `task.dependencies[]` entry must reference an existing `task.id`.
+- Every `task.parent_id`, when present, must reference an existing `task.id`; parent chains cannot contain cycles.
 - Every `task.id` must be unique.
 
 Violations → hub writes `<slug>.errors.json` and keeps the prior valid state live.
@@ -458,7 +473,7 @@ All errors return JSON: `{error, type?, hint?}`. Default body limit: 1 MB (overr
 
 | Field                                              | Owner       |
 | -------------------------------------------------- | ----------- |
-| task `status`, `assignee`, `dependencies`, `blocker_reason`, `context.*` | LLM |
+| task `status`, `assignee`, `dependencies`, `kind`, `parent_id`, `blocker_reason`, `context.*` | LLM |
 | task `placement.priorityId`, `placement.swimlaneId`| LLM (shared with UI drag; last-write-wins)           |
 | `meta.name`, `meta.priorities`, `meta.swimlanes[].{id,label,description}`, `meta.scratchpad` | LLM |
 | `meta.swimlanes[].collapsed`                       | Human (UI)  |
