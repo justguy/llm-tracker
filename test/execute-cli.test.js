@@ -37,7 +37,7 @@ function findFreePort() {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);
-    server.listen(0, "::", () => {
+    server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : null;
       server.close((closeErr) => {
@@ -52,7 +52,7 @@ async function waitForProject(port, slug) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://localhost:${port}/api/projects/${slug}`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/projects/${slug}`);
       if (res.status === 200) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));

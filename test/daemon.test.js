@@ -54,7 +54,7 @@ function findFreePort() {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);
-    server.listen(0, "::", () => {
+    server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : null;
       server.close((closeErr) => {
@@ -82,13 +82,13 @@ test("daemon mode starts in the background, creates .runtime, and stops cleanly"
     assert.equal(meta.port, port);
     assert.ok(meta.pid > 0);
 
-    const health = await fetch(`http://localhost:${port}/api/workspace`);
+    const health = await fetch(`http://127.0.0.1:${port}/api/workspace`);
     assert.equal(health.status, 200);
     const workspacePayload = await health.json();
     assert.equal(workspacePayload.workspace, workspace);
     assert.equal(workspacePayload.help, "/help");
 
-    const help = await fetch(`http://localhost:${port}/help`);
+    const help = await fetch(`http://127.0.0.1:${port}/help`);
     assert.equal(help.status, 200);
     assert.match(await help.text(), /test workspace/);
 
@@ -158,7 +158,7 @@ test("daemon restart restarts the same workspace on the recorded port", async ()
     assert.equal(after.port, port);
     assert.notEqual(after.pid, before.pid);
 
-    const health = await fetch(`http://localhost:${port}/api/workspace`);
+    const health = await fetch(`http://127.0.0.1:${port}/api/workspace`);
     assert.equal(health.status, 200);
   } finally {
     stopDaemon(workspace);
@@ -175,26 +175,26 @@ test("history, undo, and redo endpoints work through the running hub", async () 
     const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
     assert.equal(started.status, 0, started.stderr || started.stdout);
 
-    const pick = await fetch(`http://localhost:${port}/api/projects/test-project/pick`, {
+    const pick = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/pick`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ assignee: "codex-live" })
     });
     assert.equal(pick.status, 200);
 
-    const history = await fetch(`http://localhost:${port}/api/projects/test-project/history?limit=5`);
+    const history = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/history?limit=5`);
     assert.equal(history.status, 200);
     const historyPayload = await history.json();
     assert.ok(historyPayload.events.length >= 1);
 
-    const undo = await fetch(`http://localhost:${port}/api/projects/test-project/undo`, {
+    const undo = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/undo`, {
       method: "POST"
     });
     assert.equal(undo.status, 200);
     const undoPayload = await undo.json();
     assert.equal(undoPayload.action, "undo");
 
-    const redo = await fetch(`http://localhost:${port}/api/projects/test-project/redo`, {
+    const redo = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/redo`, {
       method: "POST"
     });
     assert.equal(redo.status, 200);

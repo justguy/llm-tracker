@@ -40,7 +40,7 @@ export function resolvePort(workspace, flagPort) {
 
 export async function httpRequest(workspace, portFlag, method, path, body) {
   const port = resolvePort(workspace, portFlag);
-  const url = `http://localhost:${port}${path}`;
+  const url = `http://127.0.0.1:${port}${path}`;
   const headers = {};
   if (body) headers["Content-Type"] = "application/json";
   const token = process.env.LLM_TRACKER_TOKEN;

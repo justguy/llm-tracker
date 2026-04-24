@@ -37,7 +37,7 @@ function findFreePort() {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);
-    server.listen(0, "::", () => {
+    server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : null;
       server.close((closeErr) => {
@@ -52,7 +52,7 @@ async function waitForProject(port, slug) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://localhost:${port}/api/projects/${slug}`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/projects/${slug}`);
       if (res.status === 200) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -88,7 +88,7 @@ test("llm-tracker link eagerly loads a symlinked tracker without waiting for wat
     assert.equal(linked.status, 0, linked.stderr || linked.stdout);
     assert.match(linked.stdout, /loaded: yes/);
 
-    const project = await fetch(`http://localhost:${port}/api/projects/external-project`);
+    const project = await fetch(`http://127.0.0.1:${port}/api/projects/external-project`);
     assert.equal(project.status, 200);
   } finally {
     stopDaemon(workspace);
@@ -114,7 +114,7 @@ test("slug routes auto-reload a tracker from disk before polling catches up", as
     });
     writeFileSync(join(workspace, "trackers", "lazy-loaded.json"), JSON.stringify(project, null, 2));
 
-    const res = await fetch(`http://localhost:${port}/api/projects/lazy-loaded`);
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/lazy-loaded`);
     assert.equal(res.status, 200);
 
     const json = await res.json();
@@ -143,7 +143,7 @@ test("project list refreshes from disk before returning projects", async () => {
     });
     writeFileSync(join(workspace, "trackers", "list-reloaded.json"), JSON.stringify(project, null, 2));
 
-    const res = await fetch(`http://localhost:${port}/api/projects`);
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`);
     assert.equal(res.status, 200);
 
     const json = await res.json();
@@ -174,7 +174,7 @@ test("llm-tracker reload reloads a tracker from disk on demand", async () => {
     assert.equal(reloaded.status, 0, reloaded.stderr || reloaded.stdout);
     assert.match(reloaded.stdout, /Reloaded test-project/);
 
-    const body = await fetch(`http://localhost:${port}/api/projects/test-project`);
+    const body = await fetch(`http://127.0.0.1:${port}/api/projects/test-project`);
     const json = await body.json();
     assert.equal(json.data.tasks[0].comment, "Reloaded from disk");
   } finally {

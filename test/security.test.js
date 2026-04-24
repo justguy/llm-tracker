@@ -116,7 +116,7 @@ test("same-origin and no-origin POST are allowed", async () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Origin: `http://localhost:${port}`
+        Origin: `http://127.0.0.1:${port}`
       },
       body: JSON.stringify({ meta: { scratchpad: "hi" } })
     });
@@ -228,7 +228,7 @@ test("bearer token is required and browser UI uses a session cookie without expo
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Origin: `http://localhost:${port}`,
+        Origin: `http://127.0.0.1:${port}`,
         Cookie: (cookie || "").split(";")[0]
       },
       body: JSON.stringify({ meta: { scratchpad: "ui" } })
@@ -286,7 +286,7 @@ test("websocket allows same-origin upgrade", async () => {
     assert.equal(started.status, 0, started.stderr || started.stdout);
 
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
-      headers: { Origin: `http://localhost:${port}` }
+      headers: { Origin: `http://127.0.0.1:${port}` }
     });
     await new Promise((resolve, reject) => {
       ws.once("open", resolve);
