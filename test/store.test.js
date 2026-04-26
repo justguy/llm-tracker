@@ -48,6 +48,34 @@ test("ingest invalid JSON writes error file", () => {
   }
 });
 
+test("ingest valid no-op reload clears a prior parse error", () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+
+    const initial = store.ingest(file, readFileSync(file, "utf-8"));
+    assert.equal(initial.ok, true);
+
+    const validRaw = readFileSync(file, "utf-8");
+    writeFileSync(file, "{ not json");
+    const broken = store.ingest(file, readFileSync(file, "utf-8"));
+    assert.equal(broken.ok, false);
+    assert.equal(store.get("test-project").error.kind, "parse");
+    assert.equal(existsSync(errorPath(ws, "test-project")), true);
+
+    writeFileSync(file, validRaw);
+    const recovered = store.ingest(file, readFileSync(file, "utf-8"));
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.noop, true);
+    assert.equal(store.get("test-project").error, null);
+    assert.equal(existsSync(errorPath(ws, "test-project")), false);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyMove: cross-cell preserves other tasks' placements", async () => {
   const ws = setupWorkspace();
   try {

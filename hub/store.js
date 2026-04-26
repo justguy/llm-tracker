@@ -388,6 +388,8 @@ export class Store {
             );
           } catch {}
         }
+        prev.error = null;
+        clearErrorFile(this.workspace, slug);
         return {
           ok: true,
           slug,
