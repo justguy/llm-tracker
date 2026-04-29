@@ -354,11 +354,19 @@ Successful `POST /api/projects/<slug>/patch` responses are authoritative immedia
 
 Patch payloads may include top-level `expectedRev`. If it does not match the current project rev, the hub rejects the write with `409` and returns `type: "conflict"`, `expectedRev`, `currentRev`, and a retry hint.
 
+Patch payloads may also include structural operation arrays when a narrow merge is clearer than a full replacement:
+
+- `swimlaneOps`: `{op:"add"|"update"|"move"|"remove"}` with lane ids, optional `index`/`direction`, and `reassignTo` when removing a lane with tasks.
+- `taskOps`: `{op:"move"|"archive"|"split"|"merge"}` for card placement, deferring folded work, creating an open follow-up after a source task, or recording a source task as merged into a target.
+
 Patch payloads stay small. Typical shape:
 
 ```json
 {
   "expectedRev": 42,
+  "taskOps": [
+    { "op": "move", "id": "t-002", "swimlaneId": "active", "priorityId": "p0" }
+  ],
   "tasks": {
     "t-001": {
       "status": "complete",

@@ -261,6 +261,171 @@ test("applyPatch: expectedRev must be a non-negative integer", async () => {
   }
 });
 
+test("applyPatch: swimlaneOps add, update, move, and remove lanes structurally", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      swimlaneOps: [
+        { op: "add", lane: { id: "qa", label: "QA", collapsed: true }, index: 1 },
+        { op: "update", id: "ops", patch: { label: "Operations", collapsed: true } },
+        { op: "move", id: "qa", direction: "down" },
+        { op: "remove", id: "ops", reassignTo: "qa" }
+      ]
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, false);
+    assert.ok(res.notes.appended.includes("swimlane:qa"));
+    assert.ok(res.notes.updated.includes("swimlane:ops"));
+    assert.ok(
+      res.notes.ignored.some((message) => message.includes("meta.swimlanes[ops].collapsed"))
+    );
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.deepEqual(
+      after.meta.swimlanes.map((lane) => lane.id),
+      ["exec", "qa"]
+    );
+    assert.equal(after.meta.swimlanes.find((lane) => lane.id === "qa").collapsed, undefined);
+    assert.deepEqual(after.tasks.find((task) => task.id === "t3").placement, {
+      swimlaneId: "qa",
+      priorityId: "p1"
+    });
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: taskOps move, archive, split, and merge tasks structurally", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      taskOps: [
+        { op: "move", id: "t2", swimlaneId: "ops", priorityId: "p1", targetIndex: 0 },
+        { op: "archive", id: "t3", reason: "Folded into follow-up work" },
+        {
+          op: "split",
+          sourceId: "t1",
+          newTask: {
+            id: "t1a",
+            title: "Task 1 follow-up",
+            status: "not_started"
+          }
+        },
+        { op: "merge", sourceId: "t1a", targetId: "t2" }
+      ]
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, false);
+    assert.ok(res.notes.updated.includes("t2"));
+    assert.ok(res.notes.updated.includes("t3"));
+    assert.ok(res.notes.appended.includes("t1a"));
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.deepEqual(
+      after.tasks.map((task) => task.id),
+      ["t1", "t1a", "t2", "t3"]
+    );
+    assert.deepEqual(after.tasks.find((task) => task.id === "t2").placement, {
+      swimlaneId: "ops",
+      priorityId: "p1"
+    });
+    assert.equal(after.tasks.find((task) => task.id === "t3").status, "deferred");
+    assert.equal(after.tasks.find((task) => task.id === "t3").blocker_reason, "Folded into follow-up work");
+    assert.equal(after.tasks.find((task) => task.id === "t1a").status, "deferred");
+    assert.equal(after.tasks.find((task) => task.id === "t1a").context.merged_into, "t2");
+    assert.deepEqual(after.tasks.find((task) => task.id === "t2").context.merged_from, ["t1a"]);
+    assert.deepEqual(after.tasks.find((task) => task.id === "t2").related, ["t1a"]);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: structural ops reject ambiguous or stale mixed payloads", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const malformed = await store.applyPatch("test-project", {
+      taskOps: { op: "move", id: "t1" }
+    });
+    assert.equal(malformed.ok, false);
+    assert.equal(malformed.status, 400);
+    assert.match(malformed.message, /taskOps must be an array/);
+
+    const mixedLanePayload = await store.applyPatch("test-project", {
+      swimlaneOps: [{ op: "remove", id: "ops", reassignTo: "exec" }],
+      meta: { swimlanes: validProject().meta.swimlanes }
+    });
+    assert.equal(mixedLanePayload.ok, false);
+    assert.match(mixedLanePayload.message, /do not mix swimlaneOps/);
+
+    const mixedPlacementPayload = await store.applyPatch("test-project", {
+      taskOps: [{ op: "move", id: "t1", swimlaneId: "ops", priorityId: "p1" }],
+      tasks: { t1: { placement: { swimlaneId: "exec", priorityId: "p0" } } }
+    });
+    assert.equal(mixedPlacementPayload.ok, false);
+    assert.match(mixedPlacementPayload.message, /do not mix taskOps.move/);
+
+    const badIndex = await store.applyPatch("test-project", {
+      taskOps: [{ op: "move", id: "t1", swimlaneId: "ops", priorityId: "p1", targetIndex: -1 }]
+    });
+    assert.equal(badIndex.ok, false);
+    assert.match(badIndex.message, /targetIndex/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: taskOps split refuses deleted task ids", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    project.meta.deleted_tasks = ["t-deleted"];
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(project));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      taskOps: [
+        {
+          op: "split",
+          sourceId: "t1",
+          newTask: {
+            id: "t-deleted",
+            title: "Resurrected task",
+            status: "not_started"
+          }
+        }
+      ]
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.match(res.message, /deleted by a human/);
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.tasks.some((task) => task.id === "t-deleted"), false);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyPatch: normalizes legacy partial status to in_progress", async () => {
   const ws = setupWorkspace();
   try {

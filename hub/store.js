@@ -134,6 +134,34 @@ function collectPatchTaskArray(patch) {
   return Object.entries(patch.tasks).map(([id, task]) => ({ id, ...(task || {}) }));
 }
 
+function cloneProject(project) {
+  return project ? JSON.parse(JSON.stringify(project)) : project;
+}
+
+function structuralOpsFromPatch(patch) {
+  return {
+    swimlaneOps: Array.isArray(patch?.swimlaneOps) ? patch.swimlaneOps : [],
+    taskOps: Array.isArray(patch?.taskOps) ? patch.taskOps : []
+  };
+}
+
+function validateStructuralOpsShape(patch) {
+  if (!patch || typeof patch !== "object") return null;
+  if ("swimlaneOps" in patch && !Array.isArray(patch.swimlaneOps)) {
+    return "swimlaneOps must be an array";
+  }
+  if ("taskOps" in patch && !Array.isArray(patch.taskOps)) {
+    return "taskOps must be an array";
+  }
+  return null;
+}
+
+function patchWithoutStructuralOps(patch) {
+  if (!patch || typeof patch !== "object") return patch;
+  const { swimlaneOps, taskOps, ...rest } = patch;
+  return rest;
+}
+
 function validatePatchGuardrails(existing, patch) {
   if (!existing || !patch || typeof patch !== "object") return { ok: true };
   const existingIds = new Set((existing.tasks || []).map((task) => task.id));
@@ -225,6 +253,212 @@ function explainNoopPatch(notes) {
     rejected: [],
     retryShape: "Skip the write, or change at least one mutable field before retrying."
   };
+}
+
+function insertTaskInCell(tasks, task, { swimlaneId, priorityId, targetIndex }) {
+  task.placement = { swimlaneId, priorityId };
+  const insertBeforeIdsInCell = [];
+  let seen = 0;
+  for (const existing of tasks) {
+    if (existing.placement?.swimlaneId === swimlaneId && existing.placement?.priorityId === priorityId) {
+      if (seen === targetIndex) insertBeforeIdsInCell.push(existing.id);
+      seen++;
+    }
+  }
+
+  if (typeof targetIndex === "number" && targetIndex >= 0 && insertBeforeIdsInCell.length > 0) {
+    const anchorIdx = tasks.findIndex((existing) => existing.id === insertBeforeIdsInCell[0]);
+    tasks.splice(anchorIdx, 0, task);
+    return;
+  }
+
+  let lastCellIdx = -1;
+  for (let i = 0; i < tasks.length; i++) {
+    const existing = tasks[i];
+    if (existing.placement?.swimlaneId === swimlaneId && existing.placement?.priorityId === priorityId) {
+      lastCellIdx = i;
+    }
+  }
+  if (lastCellIdx >= 0) tasks.splice(lastCellIdx + 1, 0, task);
+  else tasks.push(task);
+}
+
+function applyStructuralOps(existing, patch, notes) {
+  const shapeError = validateStructuralOpsShape(patch);
+  if (shapeError) return { ok: false, status: 400, message: shapeError };
+
+  const { swimlaneOps, taskOps } = structuralOpsFromPatch(patch);
+  if (swimlaneOps.length === 0 && taskOps.length === 0) {
+    return { ok: true, data: existing };
+  }
+  if (swimlaneOps.length > 0 && patch?.meta && "swimlanes" in patch.meta) {
+    return {
+      ok: false,
+      status: 400,
+      message: "do not mix swimlaneOps with meta.swimlanes in the same patch"
+    };
+  }
+  if (taskOps.some((op) => (op?.op || op?.kind) === "move")) {
+    const movedIds = new Set(
+      taskOps
+        .filter((op) => (op?.op || op?.kind) === "move")
+        .map((op) => op?.id || op?.taskId || op?.sourceId)
+        .filter(Boolean)
+    );
+    const taskPatches = Array.isArray(patch?.tasks)
+      ? patch.tasks
+      : Object.entries(patch?.tasks || {}).map(([id, task]) => ({ id, ...(task || {}) }));
+    for (const taskPatch of taskPatches) {
+      if (movedIds.has(taskPatch.id) && "placement" in taskPatch) {
+        return {
+          ok: false,
+          status: 400,
+          message: `do not mix taskOps.move for ${taskPatch.id} with tasks.${taskPatch.id}.placement in the same patch`
+        };
+      }
+    }
+  }
+
+  const data = cloneProject(existing);
+  const lanes = data.meta?.swimlanes || [];
+  const tasks = data.tasks || [];
+  const laneIds = () => new Set(lanes.map((lane) => lane.id));
+  const priorityIds = () => new Set((data.meta?.priorities || []).map((priority) => priority.id));
+  const taskIds = () => new Set(tasks.map((task) => task.id));
+  const tombstones = () => new Set(Array.isArray(data.meta?.deleted_tasks) ? data.meta.deleted_tasks : []);
+
+  const fail = (message, status = 400) => ({ ok: false, status, message });
+
+  for (const op of swimlaneOps) {
+    const kind = op?.op || op?.kind;
+    const id = op?.id || op?.swimlaneId || op?.lane?.id;
+    if (!kind) return fail("swimlaneOps entries require op");
+    if (kind !== "add" && !id) return fail(`swimlaneOps.${kind} requires id`);
+
+    if (kind === "add") {
+      const lane = { ...(op.lane || {}) };
+      if (!lane.id) return fail("swimlaneOps.add requires lane.id");
+      if (laneIds().has(lane.id)) return fail(`swimlane ${lane.id} already exists`);
+      delete lane.collapsed;
+      const index = Number.isInteger(op.index) ? Math.max(0, Math.min(op.index, lanes.length)) : lanes.length;
+      lanes.splice(index, 0, lane);
+      notes.appended.push(`swimlane:${lane.id}`);
+    } else if (kind === "update") {
+      const lane = lanes.find((item) => item.id === id);
+      if (!lane) return fail(`swimlane ${id} not found`, 404);
+      const updates = op.patch || op.lane || {};
+      for (const key of ["label", "description"]) {
+        if (key in updates) lane[key] = updates[key];
+      }
+      if ("collapsed" in updates) notes.ignored.push(`meta.swimlanes[${id}].collapsed is human-owned`);
+      notes.updated.push(`swimlane:${id}`);
+    } else if (kind === "move") {
+      const from = lanes.findIndex((lane) => lane.id === id);
+      if (from === -1) return fail(`swimlane ${id} not found`, 404);
+      let to = from;
+      if (Number.isInteger(op.index)) to = Math.max(0, Math.min(op.index, lanes.length - 1));
+      else if (op.direction === "up") to = Math.max(0, from - 1);
+      else if (op.direction === "down") to = Math.min(lanes.length - 1, from + 1);
+      else return fail("swimlaneOps.move requires index or direction up|down");
+      if (to !== from) {
+        const [lane] = lanes.splice(from, 1);
+        lanes.splice(to, 0, lane);
+        notes.updated.push(`swimlane:${id}`);
+      }
+    } else if (kind === "remove") {
+      if (lanes.length <= 1) return fail("cannot remove the last swimlane");
+      const index = lanes.findIndex((lane) => lane.id === id);
+      if (index === -1) return fail(`swimlane ${id} not found`, 404);
+      const affected = tasks.filter((task) => task.placement?.swimlaneId === id);
+      const reassignTo = op.reassignTo || op.reassignToSwimlaneId;
+      if (affected.length > 0 && !reassignTo) {
+        return fail(`swimlane ${id} still has tasks; provide reassignTo`);
+      }
+      if (reassignTo === id) return fail("swimlaneOps.remove reassignTo must name a different swimlane");
+      if (reassignTo && !laneIds().has(reassignTo)) return fail(`reassignTo swimlane ${reassignTo} not found`);
+      for (const task of affected) task.placement.swimlaneId = reassignTo;
+      lanes.splice(index, 1);
+      notes.updated.push(`swimlane:${id}`);
+    } else {
+      return fail(`unsupported swimlane op ${kind}`);
+    }
+  }
+
+  for (const op of taskOps) {
+    const kind = op?.op || op?.kind;
+    const id = op?.id || op?.taskId || op?.sourceId;
+    if (!kind) return fail("taskOps entries require op");
+    if (kind !== "split" && !id) return fail(`taskOps.${kind} requires id`);
+
+    if (kind === "move") {
+      const index = tasks.findIndex((task) => task.id === id);
+      if (index === -1) return fail(`task ${id} not found`, 404);
+      const placement = op.placement || {};
+      const swimlaneId = placement.swimlaneId || op.swimlaneId;
+      const priorityId = placement.priorityId || op.priorityId;
+      if ("targetIndex" in op && (!Number.isInteger(op.targetIndex) || op.targetIndex < 0)) {
+        return fail("taskOps.move targetIndex must be a non-negative integer");
+      }
+      if (!laneIds().has(swimlaneId)) return fail(`unknown swimlaneId ${swimlaneId}`);
+      if (!priorityIds().has(priorityId)) return fail(`unknown priorityId ${priorityId}`);
+      const [task] = tasks.splice(index, 1);
+      insertTaskInCell(tasks, task, { swimlaneId, priorityId, targetIndex: op.targetIndex });
+      notes.updated.push(id);
+    } else if (kind === "archive") {
+      const task = tasks.find((item) => item.id === id);
+      if (!task) return fail(`task ${id} not found`, 404);
+      task.status = "deferred";
+      if (op.reason) task.blocker_reason = op.reason;
+      notes.updated.push(id);
+    } else if (kind === "split") {
+      const sourceId = op.sourceId || op.from || op.id;
+      const source = tasks.find((task) => task.id === sourceId);
+      if (!source) return fail(`task ${sourceId} not found`, 404);
+      const newTask = { ...(op.newTask || {}) };
+      if (!newTask.id || !newTask.title) return fail("taskOps.split requires newTask.id and newTask.title");
+      if (taskIds().has(newTask.id)) return fail(`task ${newTask.id} already exists`);
+      if (tombstones().has(newTask.id)) {
+        return fail(`task ${newTask.id} was deleted by a human; pick a new id to reopen the work`);
+      }
+      newTask.status = newTask.status || "not_started";
+      if (newTask.status !== "not_started" && newTask.status !== "in_progress") {
+        return fail("split newTask.status must be not_started or in_progress");
+      }
+      newTask.placement = newTask.placement || { ...(source.placement || {}) };
+      if (!laneIds().has(newTask.placement.swimlaneId)) {
+        return fail(`unknown swimlaneId ${newTask.placement.swimlaneId}`);
+      }
+      if (!priorityIds().has(newTask.placement.priorityId)) {
+        return fail(`unknown priorityId ${newTask.placement.priorityId}`);
+      }
+      newTask.dependencies = Array.isArray(newTask.dependencies) ? newTask.dependencies : [];
+      const sourceIndex = tasks.findIndex((task) => task.id === sourceId);
+      tasks.splice(sourceIndex + 1, 0, newTask);
+      notes.appended.push(newTask.id);
+    } else if (kind === "merge") {
+      const sourceId = op.sourceId || op.id;
+      const targetId = op.targetId || op.into;
+      if (!sourceId || !targetId) return fail("taskOps.merge requires sourceId and targetId");
+      if (sourceId === targetId) return fail("taskOps.merge sourceId and targetId must differ");
+      const source = tasks.find((task) => task.id === sourceId);
+      const target = tasks.find((task) => task.id === targetId);
+      if (!source) return fail(`task ${sourceId} not found`, 404);
+      if (!target) return fail(`task ${targetId} not found`, 404);
+      const related = new Set([...(target.related || []), sourceId]);
+      target.related = [...related];
+      target.context = {
+        ...(target.context || {}),
+        merged_from: [...new Set([...(target.context?.merged_from || []), sourceId])]
+      };
+      source.status = "deferred";
+      source.context = { ...(source.context || {}), merged_into: targetId };
+      notes.updated.push(targetId, sourceId);
+    } else {
+      return fail(`unsupported task op ${kind}`);
+    }
+  }
+
+  return { ok: true, data };
 }
 
 function latestRecordedRev(workspace, slug) {
@@ -838,7 +1072,26 @@ export class Store {
 
       const normalizationNotes = { warnings: [] };
       patch = normalizeProjectStatuses(patch, normalizationNotes).data;
-      const { merged, notes } = mergeProject(existing, patch);
+      const notes = defaultNotes();
+      const structural = applyStructuralOps(existing, patch, notes);
+      if (!structural.ok) {
+        return {
+          ok: false,
+          status: structural.status || 400,
+          type: "schema",
+          message: structural.message,
+          hint: inferTrackerErrorHint(structural.message),
+          notes
+        };
+      }
+      const { merged, notes: mergeNotes } = mergeProject(
+        structural.data,
+        patchWithoutStructuralOps(patch)
+      );
+      notes.ignored.push(...mergeNotes.ignored);
+      notes.warnings.push(...mergeNotes.warnings);
+      notes.appended.push(...mergeNotes.appended);
+      notes.updated.push(...mergeNotes.updated);
       if (normalizationNotes.warnings.length > 0) {
         notes.warnings.push(...normalizationNotes.warnings);
       }

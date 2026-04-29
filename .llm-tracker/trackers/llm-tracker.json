@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 26,
-    "updatedAt": "2026-04-29T05:55:32.162Z"
+    "rev": 28,
+    "updatedAt": "2026-04-29T12:52:14.213Z"
   },
   "tasks": [
     {
@@ -173,7 +173,7 @@
       "id": "t8",
       "title": "Add first-class structural ops instead of full PUT fallbacks",
       "goal": "Support routine structural edits through narrow patch operations: swimlane add/update/move/remove plus task move, archive, split, and merge, so board maintenance never requires full PUT.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p0"
@@ -189,9 +189,18 @@
         ],
         "github_issue_number": 21,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/21",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "notes": "Added first-class structural patch ops in Store.applyPatch: swimlaneOps add/update/move/remove and taskOps move/archive/split/merge. Added defensive validation for malformed op arrays, stale mixed structural/full-field payloads, invalid targetIndex, and tombstoned split ids. Updated MCP patch schema text and /help docs. Verification: node --test test/store.test.js test/mcp-tools.test.js; npm test (261/261).",
+        "files_touched": [
+          "hub/store.js",
+          "test/store.test.js",
+          "bin/mcp-write-tools.js",
+          "README.md",
+          "workspace-template/README.md"
+        ]
       },
-      "effort": "l"
+      "effort": "l",
+      "assignee": "codex"
     },
     {
       "dependencies": [

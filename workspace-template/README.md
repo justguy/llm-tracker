@@ -134,12 +134,12 @@ If any is "no" or "unsure," ask the human before proceeding.
 - `context.*` — `tags`, `files_touched`, `notes`, anything diagnostic (shallow-merged per key)
 - `placement.priorityId` and `placement.swimlaneId` — you *can* change these; last-write-wins against human drags
 - `meta.scratchpad` — status note to the human (rendered as a one-line `NOTE` row above the board, with `[EXPAND]` to show the full text and `[EDIT]` for an inline textarea)
-- **New tasks** — include them in your patch; hub appends to the end of `tasks[]`, but brand-new patch tasks must start as `not_started` or `in_progress`
+- **New tasks** — include them in your patch; hub appends normal new task IDs to the end of `tasks[]`, while `taskOps.split` inserts an open follow-up after its source task. Brand-new patch tasks must start as `not_started` or `in_progress`.
 
 **What the hub enforces (you can't break these even if you try):**
 
-- **Array order in `tasks[]`** — hub preserves its own order regardless of what you submit. Reorder happens only through the UI's drag endpoint.
-- **Swimlane order in `meta.swimlanes`** — row order is human/UI-controlled. Reorder happens only through the UI lane move controls.
+- **Array order in `tasks[]`** — hub preserves its own order for normal `tasks` patches. Reorder through the UI drag endpoint or `taskOps.move`.
+- **Swimlane order in `meta.swimlanes`** — hub preserves its own order for normal `meta.swimlanes` patches. Reorder through the UI lane move controls or `swimlaneOps.move`.
 - **Deletion** — missing task IDs are kept, not deleted. To archive, set `status: "deferred"`. Deletion is human-only via the UI.
 - **Tombstones** — when a human deletes a task, the id is recorded in `meta.deleted_tasks`. Any incoming write that tries to re-add that id is dropped with an `ignored` note. Pick a **new id** if you really need to reopen the work.
 - **`meta.swimlanes[i].collapsed`** — human UI state. Hub always keeps the existing value; your submissions for this field are dropped.
@@ -800,9 +800,27 @@ If `expectedRev` does not match the current project rev, the hub rejects the wri
 
 - `tasks` patch keyed by id → each listed task is field-merged with existing (shallow merge on `context` and `placement`; other fields replaced).
 - `tasks` patch as an array → same, but tasks missing from the array are **preserved, not deleted**, with a warning in `notes`.
-- New task IDs → **appended to the end of `tasks[]`**. You can't insert or reorder, and brand-new patch tasks must start as `not_started` or `in_progress`.
+- New task IDs in `tasks` → **appended to the end of `tasks[]`**, and brand-new patch tasks must start as `not_started` or `in_progress`. Use `taskOps.split` when you need to create an open follow-up immediately after a source task.
+- `swimlaneOps` → structural lane edits without a full replacement. Supported ops: `add` with `lane`, `update` with `id` + `patch`, `move` with `index` or `direction: "up"|"down"`, and `remove` with `reassignTo` when tasks still live in the lane.
+- `taskOps` → structural task edits without a full replacement. Supported ops: `move` with `swimlaneId`/`priorityId`/optional `targetIndex`, `archive` with optional `reason`, `split` with `sourceId` + open `newTask`, and `merge` with `sourceId` + `targetId`.
 - `meta.swimlanes[i].collapsed` → always dropped. Hub keeps whatever's on disk.
 - `updatedAt`, `rev` → always dropped. Hub-owned.
+
+Structural patch example:
+
+```json
+{
+  "expectedRev": 42,
+  "swimlaneOps": [
+    { "op": "add", "lane": { "id": "qa", "label": "QA" }, "index": 1 },
+    { "op": "remove", "id": "old-lane", "reassignTo": "qa" }
+  ],
+  "taskOps": [
+    { "op": "move", "id": "t-002", "swimlaneId": "qa", "priorityId": "p0", "targetIndex": 0 },
+    { "op": "split", "sourceId": "t-003", "newTask": { "id": "t-003a", "title": "Follow-up", "status": "not_started" } }
+  ]
+}
+```
 
 ---
 
