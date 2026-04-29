@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 (2026-04-29)
+
+### Bug Fixes
+
+* make linked repo-local tracker files the only project truth so branch checkouts and rollbacks carry task state with code.
+* add `llm-tracker repair-linked-overlays` for explicit one-time migration of legacy shared runtime overlays into linked tracker files.
+* fix boolean CLI flag parsing when adjacent flags are passed without values.
+
 ## [1.0.0](https://github.com/justguy/llm-tracker/compare/llm-tracker-v0.2.0...llm-tracker-v1.0.0) (2026-04-24)
 
 ### BREAKING CHANGES

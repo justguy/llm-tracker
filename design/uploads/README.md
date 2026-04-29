@@ -146,8 +146,9 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
 - durable tracker writes still land on the linked repo-local tracker file itself; that is sync, not relocation
 - if that linked tracker JSON is versioned inside the repo, expect successful patch writes that change durable fields to update the repo-visible JSON file in place
-- linked trackers now split high-churn runtime state into the shared workspace overlay at `.runtime/overlays/<slug>.json`
-- for linked trackers, runtime churn such as task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer needs to dirty the repo-visible JSON
+- linked trackers use the repo-local tracker JSON as the only project truth
+- for linked trackers, task state, assignee, blocker notes, scratchpad, timestamps, and rev all write through to the repo-visible JSON so branch checkouts and rollbacks carry tracker state with code
+- legacy linked-tracker overlays in `.runtime/overlays/<slug>.json` are not project truth and are cleared on ingest/write
 - durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
 
 ## Agent Help

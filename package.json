@@ -1,6 +1,6 @@
 {
   "name": "llm-tracker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "File-system-as-database project tracker for LLM agents and humans. Hub-authoritative merge, Bloomberg-terminal UI, two write modes (file patches or HTTP).",
   "type": "module",
   "bin": {

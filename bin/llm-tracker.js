@@ -13,6 +13,7 @@ import { startMcpServer } from "./mcp-server.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
 import { cmdReload } from "./commands/reload.js";
+import { cmdRepairLinkedOverlays } from "./commands/repair-linked-overlays.js";
 import { cmdSearch } from "./commands/search.js";
 import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
@@ -45,7 +46,13 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=");
-      args.flags[k] = v === undefined ? argv[++i] ?? true : v;
+      if (v !== undefined) {
+        args.flags[k] = v;
+      } else if (argv[i + 1] && !argv[i + 1].startsWith("--")) {
+        args.flags[k] = argv[++i];
+      } else {
+        args.flags[k] = true;
+      }
     } else {
       args._.push(a);
     }
@@ -589,6 +596,7 @@ async function main() {
   if (cmd === "restore") return cmdRestore(args);
   if (cmd === "since") return cmdSince(args);
   if (cmd === "link") return cmdLink(args);
+  if (cmd === "repair-linked-overlays") return cmdRepairLinkedOverlays(args, { resolveWorkspace });
   if (cmd === "shortcuts") return cmdShortcuts(args);
   if (cmd === "mcp") return startMcpServer({ workspace: args.flags.path, portFlag: args.flags.port });
   if (cmd === "daemon") return cmdDaemon(args);
@@ -622,6 +630,7 @@ Usage:
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)
   llm-tracker restore <slug> [--rev <rev>]             Restore a deleted project from its snapshot (requires hub)
   llm-tracker link <slug> <abs-path>                   Symlink an external tracker file into the workspace (requires hub)
+  llm-tracker repair-linked-overlays [slug...] [--write] Apply legacy overlays to linked repo-local trackers
   llm-tracker shortcuts [--alias NAME]                 Print shell shortcuts for zero-token lt next / lt brief usage
   llm-tracker help                                     Show this help
 

@@ -509,7 +509,7 @@ Two deployment topologies are supported:
 
 In the recommended topology, repo-local tracker files are usually linked in via Option C. The shared daemon remains the source of truth for HTTP, `patches/`, `.runtime/`, and the central UI, while the linked repo-local file is watched for direct edits.
 
-Linked-tracker writes are still sync, not relocation: durable tracker edits go through the workspace registration and update the linked repo-local JSON in place. High-churn runtime fields now live in `<shared-workspace>/.runtime/overlays/<slug>.json` for linked trackers, so `status` / `assignee` / `blocker_reason` / `meta.scratchpad` / `updatedAt` / `rev` changes no longer need to dirty the repo-visible tracker file.
+Linked-tracker writes are still sync, not relocation: tracker edits go through the workspace registration and update the linked repo-local JSON in place. For linked trackers, the repo-local JSON is the only project truth, so task state, assignee, blocker notes, scratchpad, timestamps, and rev move with branch checkouts and rollbacks. Legacy overlay files in `<shared-workspace>/.runtime/overlays/<slug>.json` are not project truth and are cleared on ingest/write.
 
 Daemon mode is explicit:
 

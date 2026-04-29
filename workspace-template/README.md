@@ -47,24 +47,24 @@ The system supports two shapes:
 If a project keeps its tracker JSON in a repo and the hub registers it via **§7 Option C**, the repo-local file is only the project file. The **workspace is still the shared workspace** containing this README. That means:
 
 - `patches/` means `<shared-workspace>/patches/`, not `<repo>/.llm-tracker/patches/`
-- `.runtime/` means the shared workspace runtime metadata
+- `.runtime/` means shared workspace runtime metadata for the daemon, not linked repo-local project truth
 - HTTP calls should still target the shared daemon
 - the repo-local tracker JSON is a linked durable target of the shared hub, not branch-local scratch state or a merge artifact
 - durable tracker writes still update the linked repo-local tracker file in place; that is sync, not relocation
 - if that repo-local tracker JSON is versioned in the project, expect successful patch writes that change durable fields to update that repo-visible JSON file in place
-- linked trackers store runtime churn in `<shared-workspace>/.runtime/overlays/<slug>.json`
-- for linked trackers, task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer need to dirty the repo-visible JSON
+- for linked trackers, the repo-local tracker JSON is the only project truth; task state, assignee, blocker notes, scratchpad, timestamps, and rev write through to that repo-visible JSON
+- legacy linked-tracker overlays in `<shared-workspace>/.runtime/overlays/<slug>.json` are not project truth and are cleared on ingest/write
 - never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 ### Landing gate — order tracker writes before the commit
 
-When the tracker file lives inside a repo, durable tracker writes (anything other than pure runtime churn — see above) update the repo-visible JSON in place. Writing to the tracker **after** you have already committed or pushed leaves an unexpected uncommitted diff on the branch, which the human then has to reconcile. Avoid that:
+When the tracker file lives inside a repo, tracker writes update the repo-visible JSON in place. Writing to the tracker **after** you have already committed or pushed leaves an unexpected uncommitted diff on the branch, which the human then has to reconcile. Avoid that:
 
 - **Update the tracker first.** Land status transitions, new tasks, `goal` / `context.*` / reference edits, and any structural changes via `tracker_patch` (or `POST /api/projects/<slug>/patch`) **before** you stage or commit the corresponding code changes.
 - **Include the tracker diff in the same commit.** For linked repo-local tracker files, `git status` will show the tracker JSON alongside your code after the patch lands. Stage and commit them together; do not push and then patch.
 - **Never patch post-merge.** Writing "merged PR #N" metadata into the tracker after a squash-merge to `main` will dirty `main`. If you need that history, put it in the PR body, a commit message, or `.history/<slug>.jsonl` (hub-owned, append-only), not in durable tracker fields.
 - **Verify with `tracker_brief` (or `/brief`) before committing.** The brief pack reflects the final post-patch state the hub will persist — if it looks wrong, fix it before you stage anything.
-- **Safe no-op writes.** Runtime-only fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON; feel free to patch them at any time.
+- **Avoid post-commit tracker writes.** For linked repo-local trackers, even status notes and assignment changes are branch state because the repo JSON is the only project truth.
 
 > Before push or merge, prove `.llm-tracker/trackers/hoplon.json` on the branch contains the live tracker truth for the touched tasks. Compare `tracker_brief` against the repo file and against `origin/main`. Do not restore, stash, or discard tracker diffs. If merging would regress tracker truth, stop and make a tracker-sync commit/PR first.
 
@@ -973,6 +973,7 @@ Error shape:
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |
 | `llm-tracker rollback <slug> <rev>`                       | Roll back to a prior rev (human-only).                                        |    **yes**   |
 | `llm-tracker link <slug> <abs-path>`                      | Symlink an external tracker (Option C).                                       |    **yes**   |
+| `llm-tracker repair-linked-overlays [slug...] [--write]`  | One-time repair for legacy linked overlay state; dry-run by default.          |     no       |
 | `llm-tracker help`                                        | Show usage.                                                                   |     no       |
 
 When a background daemon is running, hub-backed CLI commands reuse the recorded daemon port from `.runtime/daemon.json` if you omit `--port`. Do not edit `.runtime/` by hand.

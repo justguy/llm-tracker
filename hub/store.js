@@ -314,6 +314,7 @@ export class Store {
       let incoming = normalizeProjectStatuses(loadedIncoming.data, normalizationNotes).data;
       const incomingBase = loadedIncoming.base;
       const overlayEnabled = loadedIncoming.overlayEnabled;
+      const legacyOverlayPresent = loadedIncoming.legacyOverlayPresent === true;
 
       // Cold-start resume: if we don't have in-memory state but incoming matches
       // a known snapshot at incoming.meta.rev, adopt without bumping.
@@ -342,6 +343,7 @@ export class Store {
               );
               entry.overlayEnabled = overlayEnabled;
               this.projects.set(slug, entry);
+              if (legacyOverlayPresent) clearRuntimeOverlay(this.workspace, slug);
               clearErrorFile(this.workspace, slug);
               return { ok: true, slug, event: "UPDATE", project: entry, resumed: true };
             }
@@ -388,6 +390,7 @@ export class Store {
             );
           } catch {}
         }
+        if (legacyOverlayPresent) clearRuntimeOverlay(this.workspace, slug);
         prev.error = null;
         clearErrorFile(this.workspace, slug);
         return {
@@ -741,6 +744,7 @@ export class Store {
       let existing = current?.data || null;
       let existingBase = current?.base || null;
       let overlayEnabled = current?.overlayEnabled === true;
+      let legacyOverlayPresent = false;
       let currentRev = current?.rev ?? null;
       try {
         if (!existing || !existingBase) {
@@ -748,6 +752,7 @@ export class Store {
           existing = loaded.data;
           existingBase = loaded.base;
           overlayEnabled = loaded.overlayEnabled;
+          legacyOverlayPresent = loaded.legacyOverlayPresent === true;
         }
       } catch (e) {
         return { ok: false, status: 500, message: `tracker file not parseable: ${e.message}` };
@@ -783,6 +788,7 @@ export class Store {
 
       const delta = computeDelta(existing, merged);
       if (!hasChanges(delta)) {
+        if (legacyOverlayPresent) clearRuntimeOverlay(this.workspace, slug);
         if (!current || !current.data) {
           const entry = this._entry(slug, file, existing, existingBase, currentRev, defaultNotes());
           entry.overlayEnabled = overlayEnabled;
