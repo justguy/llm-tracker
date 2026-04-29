@@ -111,6 +111,54 @@ test("applyPatch bumps rev and writes history", async () => {
   }
 });
 
+test("structural applyPatch ops bump rev, stamp updatedAt, snapshot, and write history", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+    const rev1 = store.get("test-project").rev;
+
+    const patch = await store.applyPatch("test-project", {
+      swimlaneOps: [{ op: "add", lane: { id: "qa", label: "QA" } }],
+      taskOps: [{ op: "move", id: "t1", swimlaneId: "qa", priorityId: "p1", targetIndex: 0 }]
+    });
+
+    assert.equal(patch.ok, true);
+    assert.equal(patch.noop, false);
+    assert.equal(patch.rev, rev1 + 1);
+
+    const entry = store.get("test-project");
+    assert.equal(entry.rev, rev1 + 1);
+
+    const onDisk = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(onDisk.meta.rev, rev1 + 1);
+    assert.ok(onDisk.meta.updatedAt);
+    assert.ok(Date.parse(onDisk.meta.updatedAt));
+    assert.ok(onDisk.meta.swimlanes.some((lane) => lane.id === "qa"));
+    assert.deepEqual(onDisk.tasks.find((task) => task.id === "t1").placement, {
+      swimlaneId: "qa",
+      priorityId: "p1"
+    });
+
+    const snap = readSnapshot(ws, "test-project", rev1 + 1);
+    assert.ok(snap);
+    assert.ok(snap.meta.swimlanes.some((lane) => lane.id === "qa"));
+
+    const sinceRev1 = store.getSince("test-project", rev1);
+    assert.equal(sinceRev1.currentRev, rev1 + 1);
+    assert.ok(sinceRev1.events.some((event) => event.rev === rev1 + 1));
+    assert.ok(
+      sinceRev1.events
+        .find((event) => event.rev === rev1 + 1)
+        .summary.some((item) => item.id === "t1" || item.key === "swimlanes")
+    );
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("rollback replays a prior snapshot as a new rev", async () => {
   const ws = setupWorkspace();
   try {

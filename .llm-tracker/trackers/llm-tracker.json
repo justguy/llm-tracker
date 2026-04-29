@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 32,
-    "updatedAt": "2026-04-29T21:49:35.626Z"
+    "rev": 34,
+    "updatedAt": "2026-04-29T21:51:11.541Z"
   },
   "tasks": [
     {
@@ -249,7 +249,7 @@
       "id": "t10",
       "title": "Make structural ops first-class rev/history mutations",
       "goal": "Every effective structural op should bump `rev`, stamp `updatedAt`, append history, and broadcast immediately instead of behaving like a merge edge case.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p1"
@@ -263,9 +263,14 @@
         ],
         "github_issue_number": 23,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/23",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "notes": "Confirmed structural ops already mutate through Store.applyPatch and added regression coverage proving effective swimlaneOps/taskOps bump rev, stamp updatedAt, persist snapshots, and append history with changed structural fields. Verification: node --test test/versioning.test.js.",
+        "files_touched": [
+          "test/versioning.test.js"
+        ]
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "codex"
     },
     {
       "dependencies": [],
