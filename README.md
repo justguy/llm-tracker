@@ -350,7 +350,7 @@ curl -X POST http://localhost:4400/api/projects/<slug>/redo
 curl -X POST http://localhost:4400/api/projects/<slug>/reload
 ```
 
-Successful `POST /api/projects/<slug>/patch` responses are authoritative immediately. They now return the accepted post-write `rev`, `updatedAt`, `noop`, `noopReason`, and `file` (the effective tracker JSON path the hub wrote, which is the repo-local target for linked projects). When `noop: true`, `noopReason` explains whether the submitted values already matched current state or which operation was ignored/rejected and how to retry. When `file` points at a repo-local tracker, durable patch writes are expected to update that visible JSON file right away.
+Successful `POST /api/projects/<slug>/patch` responses are authoritative immediately. They now return the accepted post-write `rev`, `updatedAt`, `noop`, `noopReason`, `workspace`, `port`, `file`, `registrationFile`, and `topology` (`shared-workspace` or `repo-linked`). `file` is the effective tracker JSON path the hub wrote, which is the repo-local target for linked projects. When `noop: true`, `noopReason` explains whether the submitted values already matched current state or which operation was ignored/rejected and how to retry. When `file` points at a repo-local tracker, durable patch writes are expected to update that visible JSON file right away.
 
 Patch payloads may include top-level `expectedRev`. If it does not match the current project rev, the hub rejects the write with `409` and returns `type: "conflict"`, `expectedRev`, `currentRev`, and a retry hint.
 

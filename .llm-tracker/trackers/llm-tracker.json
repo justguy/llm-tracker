@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 34,
-    "updatedAt": "2026-04-29T21:51:11.541Z"
+    "rev": 35,
+    "updatedAt": "2026-04-29T22:01:42.904Z"
   },
   "tasks": [
     {
@@ -388,7 +388,7 @@
       "id": "t15",
       "title": "Expose the effective target on every read and write",
       "goal": "Every authoritative read and write response should include daemon port, workspace path, actual tracker file path, and whether the topology is shared-workspace or repo-linked.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p1"
@@ -403,9 +403,19 @@
         ],
         "github_issue_number": 28,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/28",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "notes": "Added unavoidable effective-target metadata to HTTP project reads, project lists, websocket snapshots/broadcasts, intelligence read payloads, and write responses: workspace, port, effective file, registrationFile, and topology (shared-workspace or repo-linked). Updated README and /help wording. Verification so far: node --test test/security.test.js test/watcher-scope.test.js.",
+        "files_touched": [
+          "hub/server.js",
+          "hub/routes/intelligence.js",
+          "test/security.test.js",
+          "test/watcher-scope.test.js",
+          "README.md",
+          "workspace-template/README.md"
+        ]
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "codex"
     },
     {
       "dependencies": [],

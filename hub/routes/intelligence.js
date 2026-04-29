@@ -14,9 +14,10 @@ function clampLimit(value, fallback, max) {
   return Math.min(parsed, max);
 }
 
-export function registerIntelligenceRoutes(app, { workspace, store }) {
+export function registerIntelligenceRoutes(app, { workspace, store, targetFor = () => ({}) }) {
   const queryValue = (value) => (Array.isArray(value) ? value[0] : value);
   const requireQuery = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
+  const withTarget = (slug, payload) => ({ ...payload, ...targetFor(slug) });
 
   const pickHandler = async (req, res) => {
     const body = req.body || {};
@@ -27,7 +28,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       comment: body.comment
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
-    res.json(result.payload);
+    res.json(withTarget(req.params.slug, result.payload));
   };
 
   app.get("/api/projects/:slug/next", (req, res) => {
@@ -40,7 +41,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       entry,
       limit: clampLimit(req.query.limit, 5, 5)
     });
-    res.json(payload);
+    res.json(withTarget(req.params.slug, payload));
   });
 
   app.get("/api/projects/:slug/search", async (req, res) => {
@@ -60,7 +61,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
     if (result?.ok === false) {
       return res.status(result.status || 503).json({ error: result.message });
     }
-    res.json(result);
+    res.json(withTarget(req.params.slug, result));
   });
 
   const fuzzyHandler = (req, res) => {
@@ -76,7 +77,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       query,
       limit: clampLimit(req.query.limit, 10, 50)
     });
-    res.json(result);
+    res.json(withTarget(req.params.slug, result));
   };
 
   app.get("/api/projects/:slug/fuzzy", fuzzyHandler);
@@ -93,7 +94,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       taskId: req.params.taskId
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
-    res.json(result.payload);
+    res.json(withTarget(req.params.slug, result.payload));
   });
 
   app.get("/api/projects/:slug/tasks/:taskId/why", (req, res) => {
@@ -107,7 +108,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       taskId: req.params.taskId
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
-    res.json(result.payload);
+    res.json(withTarget(req.params.slug, result.payload));
   });
 
   app.get("/api/projects/:slug/tasks/:taskId/execute", (req, res) => {
@@ -121,7 +122,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       taskId: req.params.taskId
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
-    res.json(result.payload);
+    res.json(withTarget(req.params.slug, result.payload));
   });
 
   app.get("/api/projects/:slug/tasks/:taskId/verify", (req, res) => {
@@ -135,7 +136,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       taskId: req.params.taskId
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
-    res.json(result.payload);
+    res.json(withTarget(req.params.slug, result.payload));
   });
 
   app.get("/api/projects/:slug/blockers", (req, res) => {
@@ -147,7 +148,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       slug: req.params.slug,
       entry
     });
-    res.json(payload);
+    res.json(withTarget(req.params.slug, payload));
   });
 
   app.get("/api/projects/:slug/changed", (req, res) => {
@@ -167,7 +168,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       fromRev,
       limit: clampLimit(req.query.limit, 20, 50)
     });
-    res.json(payload);
+    res.json(withTarget(req.params.slug, payload));
   });
 
   app.get("/api/projects/:slug/decisions", (req, res) => {
@@ -180,7 +181,7 @@ export function registerIntelligenceRoutes(app, { workspace, store }) {
       entry,
       limit: clampLimit(req.query.limit, 20, 20)
     });
-    res.json(payload);
+    res.json(withTarget(req.params.slug, payload));
   });
 
   app.post("/api/projects/:slug/pick", pickHandler);

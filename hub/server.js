@@ -133,24 +133,6 @@ const MIME = {
   ".svg": "image/svg+xml"
 };
 
-function projectPayload(slug, entry) {
-  if (!entry) return { slug, data: null, derived: null, error: null, file: null };
-  let file = entry.path || null;
-  if (file) {
-    try {
-      file = realpathSync(file);
-    } catch {}
-  }
-  return {
-    slug,
-    data: entry.data,
-    derived: entry.derived,
-    rev: entry.rev,
-    error: entry.error || null,
-    file
-  };
-}
-
 function isLinkedTrackerPath(filePath) {
   if (!filePath) return false;
   try {
@@ -160,10 +142,61 @@ function isLinkedTrackerPath(filePath) {
   }
 }
 
-function snapshot(store) {
+function targetPayload(slug, entry, { workspace = null, port = null } = {}) {
+  const registrationFile = entry?.path || (workspace ? join(workspace, "trackers", `${slug}.json`) : null);
+  let file = registrationFile;
+  if (file) {
+    try {
+      file = realpathSync(file);
+    } catch {}
+  }
+  const topology = registrationFile && isLinkedTrackerPath(registrationFile)
+    ? "repo-linked"
+    : "shared-workspace";
+
+  return {
+    workspace,
+    port,
+    file: file || null,
+    registrationFile: registrationFile || null,
+    topology
+  };
+}
+
+function projectPayload(slug, entry, runtime = {}) {
+  const target = targetPayload(slug, entry, runtime);
+  if (!entry) {
+    return {
+      slug,
+      data: null,
+      derived: null,
+      rev: null,
+      error: null,
+      file: target.file,
+      workspace: target.workspace,
+      port: target.port,
+      topology: target.topology,
+      target
+    };
+  }
+  return {
+    slug,
+    data: entry.data,
+    derived: entry.derived,
+    rev: entry.rev,
+    error: entry.error || null,
+    file: target.file,
+    workspace: target.workspace,
+    port: target.port,
+    topology: target.topology,
+    target
+  };
+}
+
+function snapshot(store, runtime = {}) {
   const projects = {};
   for (const { slug } of store.list()) {
-    projects[slug] = projectPayload(slug, store.get(slug));
+    projects[slug] = projectPayload(slug, store.get(slug), runtime);
   }
   return projects;
 }
@@ -172,6 +205,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   const store = new Store(workspace);
   const app = express();
   const uiSessions = new Map();
+  const runtime = { workspace, port };
+  const projectFor = (slug, entry) => projectPayload(slug, entry, runtime);
+  const targetFor = (slug, entry = store.get(slug)) => targetPayload(slug, entry, runtime);
 
   const bindHost = host || process.env.LLM_TRACKER_HOST || "127.0.0.1";
   const bearerToken =
@@ -295,7 +331,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   });
 
   app.get("/api/workspace", (_req, res) => {
-    res.json({ workspace, readme: readmePath, help: "/help" });
+    res.json({ workspace, port, readme: readmePath, help: "/help" });
   });
 
   app.get("/help", (_req, res) => {
@@ -353,7 +389,14 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
   app.get("/api/projects", async (_req, res) => {
     await reloadAllProjects({ broadcastUpdate: false });
-    res.json({ projects: store.list() });
+    res.json({
+      workspace,
+      port,
+      projects: store.list().map((project) => ({
+        ...project,
+        ...targetFor(project.slug)
+      }))
+    });
   });
 
   app.param("slug", async (req, _res, next, slug) => {
@@ -371,21 +414,22 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       entry = store.get(req.params.slug);
       if (!entry) return res.status(404).json({ error: "not found" });
     }
-    res.json(projectPayload(req.params.slug, entry));
+    res.json(projectFor(req.params.slug, entry));
   });
-  registerIntelligenceRoutes(app, { workspace, store });
+  registerIntelligenceRoutes(app, { workspace, store, targetFor });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {
     const r = await store.createOrReplace(req.params.slug, req.body || {});
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
-    res.json({ ok: true, slug: req.params.slug });
+    const entry = store.get(req.params.slug);
+    res.json({ ok: true, slug: req.params.slug, ...targetFor(req.params.slug, entry) });
   });
 
   app.delete("/api/projects/:slug", async (req, res) => {
     const r = await store.deleteProject(req.params.slug);
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
     broadcast({ type: "REMOVE", slug: req.params.slug });
-    res.json({ ok: true, slug: req.params.slug, rev: r.deletedRev ?? null });
+    res.json({ ok: true, slug: req.params.slug, rev: r.deletedRev ?? null, ...targetFor(req.params.slug) });
   });
 
   app.post("/api/projects/:slug/restore", async (req, res) => {
@@ -405,15 +449,16 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     broadcast({
       type: "UPDATE",
       slug: req.params.slug,
-      project: projectPayload(req.params.slug, entry)
+      project: projectFor(req.params.slug, entry)
     });
     res.json({
       ok: true,
       slug: req.params.slug,
       restoredFromRev: result.restoredFromRev,
       rev: entry?.rev ?? result.newRev ?? null,
-      file: result.file,
-      loaded: !!entry
+      file: targetFor(req.params.slug, entry).file || result.file,
+      loaded: !!entry,
+      ...targetFor(req.params.slug, entry)
     });
   });
 
@@ -435,7 +480,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       linkPath: r.linkPath,
       target: r.target,
       loaded: true,
-      rev: store.get(req.params.slug)?.rev ?? null
+      rev: store.get(req.params.slug)?.rev ?? null,
+      ...targetFor(req.params.slug)
     });
   });
 
@@ -447,7 +493,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       slug: req.params.slug,
       rev: store.get(req.params.slug)?.rev ?? null,
       event: result.event,
-      noop: result.noop === true
+      noop: result.noop === true,
+      ...targetFor(req.params.slug)
     });
   });
 
@@ -463,7 +510,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   app.delete("/api/projects/:slug/tasks/:taskId", async (req, res) => {
     const r = await store.deleteTask(req.params.slug, req.params.taskId);
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
-    res.json({ ok: true });
+    res.json({ ok: true, ...targetFor(req.params.slug) });
   });
 
   app.get("/api/projects/:slug/since/:rev", (req, res) => {
@@ -473,12 +520,12 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     }
     const result = store.getSince(req.params.slug, fromRev);
     if (!result) return res.status(404).json({ error: "project not found" });
-    res.json(result);
+    res.json({ ...result, ...targetFor(req.params.slug) });
   });
 
   app.get("/api/projects/:slug/revisions", (req, res) => {
     const revisions = store.revisions(req.params.slug);
-    res.json({ slug: req.params.slug, revisions });
+    res.json({ slug: req.params.slug, revisions, ...targetFor(req.params.slug) });
   });
 
   app.get("/api/projects/:slug/history", (req, res) => {
@@ -496,7 +543,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
     const history = store.history(req.params.slug, { fromRev, limit });
     if (!history) return res.status(404).json({ error: "project not found" });
-    res.json(history);
+    res.json({ ...history, ...targetFor(req.params.slug) });
   });
 
   app.post("/api/projects/:slug/rollback", async (req, res) => {
@@ -511,9 +558,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     broadcast({
       type: "UPDATE",
       slug: req.params.slug,
-      project: projectPayload(req.params.slug, entry)
+      project: projectFor(req.params.slug, entry)
     });
-    res.json({ ok: true, from: r.from, to: r.to, newRev: r.newRev });
+    res.json({ ok: true, from: r.from, to: r.to, newRev: r.newRev, ...targetFor(req.params.slug, entry) });
   });
 
   app.post("/api/projects/:slug/undo", async (req, res) => {
@@ -523,9 +570,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     broadcast({
       type: "UPDATE",
       slug: req.params.slug,
-      project: projectPayload(req.params.slug, entry)
+      project: projectFor(req.params.slug, entry)
     });
-    res.json({ ok: true, from: result.from, to: result.to, newRev: result.newRev, action: "undo" });
+    res.json({ ok: true, from: result.from, to: result.to, newRev: result.newRev, action: "undo", ...targetFor(req.params.slug, entry) });
   });
 
   app.post("/api/projects/:slug/redo", async (req, res) => {
@@ -535,9 +582,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     broadcast({
       type: "UPDATE",
       slug: req.params.slug,
-      project: projectPayload(req.params.slug, entry)
+      project: projectFor(req.params.slug, entry)
     });
-    res.json({ ok: true, from: result.from, to: result.to, newRev: result.newRev, action: "redo" });
+    res.json({ ok: true, from: result.from, to: result.to, newRev: result.newRev, action: "redo", ...targetFor(req.params.slug, entry) });
   });
 
   app.post("/api/projects/:slug/patch", rejectOversizedMutableFields, async (req, res) => {
@@ -551,7 +598,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
         repair: r.repair || null,
         expectedRev: Number.isInteger(r.expectedRev) ? r.expectedRev : null,
         currentRev: Number.isInteger(r.currentRev) ? r.currentRev : null,
-        notes: r.notes || null
+        notes: r.notes || null,
+        ...targetFor(req.params.slug)
       });
     }
     const entry = store.get(req.params.slug);
@@ -559,17 +607,19 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       broadcast({
         type: "UPDATE",
         slug: req.params.slug,
-        project: projectPayload(req.params.slug, entry)
+        project: projectFor(req.params.slug, entry)
       });
     }
+    const target = targetFor(req.params.slug, entry);
     res.json({
       ok: true,
       rev: r.rev ?? entry?.rev ?? null,
       updatedAt: entry?.data?.meta?.updatedAt ?? null,
-      file: projectPayload(req.params.slug, entry).file,
+      file: target.file,
       notes: r.notes,
       noopReason: r.noopReason || null,
-      noop: r.noop === true
+      noop: r.noop === true,
+      ...target
     });
   });
 
@@ -584,9 +634,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     broadcast({
       type: "UPDATE",
       slug: req.params.slug,
-      project: projectPayload(req.params.slug, entry)
+      project: projectFor(req.params.slug, entry)
     });
-    res.json({ ok: true, noop: r.noop === true });
+    res.json({ ok: true, noop: r.noop === true, ...targetFor(req.params.slug, entry) });
   });
 
   app.post("/api/projects/:slug/swimlane-move", async (req, res) => {
@@ -600,9 +650,9 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     broadcast({
       type: "UPDATE",
       slug: req.params.slug,
-      project: projectPayload(req.params.slug, entry)
+      project: projectFor(req.params.slug, entry)
     });
-    res.json({ ok: true, noop: r.noop === true });
+    res.json({ ok: true, noop: r.noop === true, ...targetFor(req.params.slug, entry) });
   });
 
   app.post("/api/projects/:slug/move", async (req, res) => {
@@ -617,7 +667,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       targetIndex
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
-    res.json({ ok: true });
+    res.json({ ok: true, ...targetFor(req.params.slug) });
   });
 
   app.get("/README.md", (_req, res) => {
@@ -741,7 +791,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   }
 
   wss.on("connection", (ws) => {
-    ws.send(JSON.stringify({ type: "SNAPSHOT", projects: snapshot(store) }));
+    ws.send(JSON.stringify({ type: "SNAPSHOT", projects: snapshot(store, runtime) }));
   });
 
   const trackersDir = join(workspace, "trackers");
@@ -857,7 +907,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       broadcast({
         type: "UPDATE",
         slug,
-        project: projectPayload(slug, store.get(slug))
+        project: projectFor(slug, store.get(slug))
       });
     }
     try {
@@ -924,7 +974,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       broadcast({
         type: result.event,
         slug: result.slug,
-        project: projectPayload(result.slug, store.get(result.slug))
+        project: projectFor(result.slug, store.get(result.slug))
       });
     }
     return result;

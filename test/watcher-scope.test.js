@@ -74,6 +74,11 @@ test("symlink target edits propagate through the dedicated polling watcher", asy
     assert.equal(initial.status, 200);
     const initialBody = await initial.json();
     assert.equal(initialBody.file, realpathSync(targetPath));
+    assert.equal(initialBody.workspace, workspace);
+    assert.equal(initialBody.port, port);
+    assert.equal(initialBody.topology, "repo-linked");
+    assert.equal(initialBody.target.registrationFile, join(workspace, "trackers", "linked.json"));
+    assert.equal(initialBody.target.file, realpathSync(targetPath));
 
     // Edit the symlink target directly (not the workspace symlink) — the
     // polling watcher for the linked target must pick this up.

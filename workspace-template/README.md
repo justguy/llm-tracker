@@ -77,7 +77,7 @@ When the tracker file lives inside a repo, tracker writes update the repo-visibl
 - **You write freely** — `status`, `assignee`, `dependencies`, `kind`, `parent_id`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **Patch-mode new tasks must start open** — when you append a brand-new task through Mode A or Mode B, use `not_started` or `in_progress`, not `complete` or `deferred`.
 - **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
-- **When you need to confirm linked topology**, `GET /api/projects/<slug>` includes `file`, the effective tracker JSON path the hub will write.
+- **When you need to confirm linked topology**, `GET /api/projects/<slug>` includes `workspace`, `port`, `file`, `registrationFile`, and `topology`. `file` is the effective tracker JSON path the hub will write.
 - **When the human asks a feature-shaped or fuzzy question**, prefer `GET /api/projects/<slug>/search?q=...` for semantic search or `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic lexical matching before rereading the full tracker.
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
 - **When you need the task rationale**, prefer `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
@@ -781,7 +781,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 **On failure:** rerun with `curl -i` to capture the response. The hub returns structured JSON: `{error, type, hint}`.
 
-On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, `noop`, and `noopReason`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly. If `noop: true`, `noopReason` explains whether the submitted values already matched current state or which operation was ignored/rejected and how to retry. If that target lives in the repo, durable patch writes are expected to update that visible JSON file immediately.
+On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `workspace`, `port`, `file`, `registrationFile`, `topology`, `noop`, and `noopReason`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly. If `noop: true`, `noopReason` explains whether the submitted values already matched current state or which operation was ignored/rejected and how to retry. If that target lives in the repo, durable patch writes are expected to update that visible JSON file immediately.
 
 To protect against stale writes, include a top-level `expectedRev` in the patch body:
 
