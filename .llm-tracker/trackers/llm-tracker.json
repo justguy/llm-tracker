@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 35,
-    "updatedAt": "2026-04-29T22:01:42.904Z"
+    "rev": 37,
+    "updatedAt": "2026-04-29T22:04:28.651Z"
   },
   "tasks": [
     {
@@ -315,7 +315,7 @@
       "id": "t12",
       "title": "Document structural patch ops in README, /help, and MCP guidance",
       "goal": "Update the public contract so agents know the exact structural op shapes, hub-owned fields, conflict modes, and retry strategy for patch-driven board maintenance.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p2"
@@ -330,9 +330,18 @@
         ],
         "github_issue_number": 25,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/25",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "notes": "Structural patch contract is now documented in README, /help, MCP tool schema text, and MCP prompts. Prompt guidance covers swimlaneOps, taskOps, expectedRev, repair retry shapes, and file-patch fallback behavior. Verification: node --test test/mcp-tools.test.js.",
+        "files_touched": [
+          "README.md",
+          "workspace-template/README.md",
+          "bin/mcp-write-tools.js",
+          "bin/mcp-prompts.js",
+          "test/mcp-tools.test.js"
+        ]
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "codex"
     },
     {
       "dependencies": [

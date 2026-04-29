@@ -112,7 +112,8 @@ export function getPrompt(workspace, name, args = {}) {
           "2. Read resource `tracker://workspace/runtime` for daemon state, patch directory, and MCP write rules.",
           `3. MCP read tools do not require the daemon. MCP write tools ${WRITE_TOOL_NAMES.map((tool) => `\`${tool}\``).join(", ")} do require the hub or daemon.`,
           `4. If the hub is unavailable, file-mode patches go in \`${join(workspace, "patches")}\` as \`${patchExample}\`. Rejections create a sibling \`.errors.json\` file.`,
-          "5. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_pick` and `tracker_patch`, and finally `tracker_verify`."
+          "5. Structural board edits belong in `swimlaneOps` and `taskOps`; stale writes can use `expectedRev`, and structural failures may return `repair` with a retry shape.",
+          "6. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_pick` and `tracker_patch`, and finally `tracker_verify`."
         ].join("\n")
       );
     case "tracker_pick_next":
@@ -173,6 +174,8 @@ export function getPrompt(workspace, name, args = {}) {
           "If the hub is reachable, prefer `tracker_patch` so hub locking, revisioning, and broadcasts stay authoritative.",
           `Patch files belong in \`${join(workspace, "patches")}\`.`,
           `Use a filename like \`${patchExample}\`.`,
+          "Use `swimlaneOps` for lane add/update/move/remove and `taskOps` for task move/archive/split/merge instead of full tracker rewrites.",
+          "Include top-level `expectedRev` when guarding against stale context; if structural validation returns `repair`, retry with the provided operation shape.",
           "Patch mode is the fallback for when the hub is unavailable; MCP write tools remain hub-backed.",
           "If a patch is rejected, inspect the sibling `.errors.json` file for the structured validation error.",
           "Once the hub is reachable again, prefer `tracker_patch` or HTTP writes so locking, revisioning, and broadcasts stay authoritative."
