@@ -22,12 +22,14 @@ test("buildTrackerErrorBody emits error, type, hint, and legacy compatibility fi
   const body = buildTrackerErrorBody({
     message: "/tasks/0/references/0: reference must use path:line or path:line-line; bare URLs are invalid",
     kind: "schema",
-    path: "/tmp/example.json"
+    path: "/tmp/example.json",
+    repair: { moveTasksTo: "exec" }
   });
 
   assert.equal(body.error, body.message);
   assert.equal(body.type, "schema");
   assert.equal(body.kind, "schema");
   assert.equal(body.path, "/tmp/example.json");
+  assert.deepEqual(body.repair, { moveTasksTo: "exec" });
   assert.match(body.hint, /path:line/);
 });

@@ -17,6 +17,10 @@ export function inferTrackerErrorHint(message = "") {
     return "Register the project first with the full tracker file or `PUT /api/projects/:slug`, then use patch mode for updates.";
   }
 
+  if (message.includes("still has tasks; provide reassignTo")) {
+    return "Retry the structural removal with `reassignTo` set to another swimlane id from the repair payload.";
+  }
+
   return null;
 }
 
@@ -27,6 +31,7 @@ export function buildTrackerErrorBody({
   hint = null,
   path = null,
   notes = null,
+  repair = null,
   expectedRev = null,
   currentRev = null,
   timestamp = new Date().toISOString()
@@ -42,6 +47,7 @@ export function buildTrackerErrorBody({
   if (inferredHint) body.hint = inferredHint;
   if (path) body.path = path;
   if (notes !== null && notes !== undefined) body.notes = notes;
+  if (repair !== null && repair !== undefined) body.repair = repair;
   if (expectedRev !== null && expectedRev !== undefined) body.expectedRev = expectedRev;
   if (currentRev !== null && currentRev !== undefined) body.currentRev = currentRev;
 

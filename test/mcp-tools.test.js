@@ -82,3 +82,31 @@ test("tracker_patch direct mode returns structured expectedRev conflicts", async
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test("tracker_patch direct mode returns structural repair payloads", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-structural-repair-");
+  try {
+    const tool = createTools(workspace).get("tracker_patch");
+
+    const result = await tool.handler({
+      slug: "test-project",
+      mode: "direct",
+      patch: {
+        swimlaneOps: [{ op: "remove", id: "ops" }]
+      }
+    });
+
+    assert.equal(result.isError, true);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.status, 400);
+    assert.equal(payload.type, "schema");
+    assert.equal(payload.repair.moveTasksTo, "exec");
+    assert.deepEqual(payload.repair.affectedTaskIds, ["t3"]);
+    assert.deepEqual(payload.repair.swimlaneOps, [
+      { op: "remove", id: "ops", reassignTo: "exec" }
+    ]);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

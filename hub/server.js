@@ -548,6 +548,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
         error: r.message,
         type: r.type || null,
         hint: r.hint || null,
+        repair: r.repair || null,
         expectedRev: Number.isInteger(r.expectedRev) ? r.expectedRev : null,
         currentRev: Number.isInteger(r.currentRev) ? r.currentRev : null,
         notes: r.notes || null
@@ -841,6 +842,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
               hint: r.hint || null,
               path: patchPath,
               notes: r.notes || null,
+              repair: r.repair || null,
               expectedRev: Number.isInteger(r.expectedRev) ? r.expectedRev : null,
               currentRev: Number.isInteger(r.currentRev) ? r.currentRev : null
             }),

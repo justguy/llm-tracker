@@ -806,6 +806,8 @@ If `expectedRev` does not match the current project rev, the hub rejects the wri
 - `meta.swimlanes[i].collapsed` → always dropped. Hub keeps whatever's on disk.
 - `updatedAt`, `rev` → always dropped. Hub-owned.
 
+Structural failures include `repair` when the hub can describe the safe retry. For example, removing a swimlane that still contains tasks returns `repair.moveTasksTo`, `repair.affectedTaskIds`, and `repair.swimlaneOps` with the required `reassignTo` field filled in.
+
 Structural patch example:
 
 ```json

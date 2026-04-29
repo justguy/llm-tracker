@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 28,
-    "updatedAt": "2026-04-29T12:52:14.213Z"
+    "rev": 30,
+    "updatedAt": "2026-04-29T21:46:20.181Z"
   },
   "tasks": [
     {
@@ -209,7 +209,7 @@
       "id": "t9",
       "title": "Add stronger validation for structural edits",
       "goal": "If a structural edit would strand tasks or create invalid board state, fail loudly and return a repair shape such as `moveTasksTo: <laneId>` instead of silently preserving or forcing full replacement.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p1"
@@ -224,9 +224,23 @@
         ],
         "github_issue_number": 22,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/22",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "notes": "Added explicit repair payloads for structural edits that would strand tasks. swimlaneOps.remove now returns repair.type, affectedTaskIds, validSwimlaneIds, moveTasksTo, and a ready retry swimlaneOps shape when reassignTo is missing or invalid. Repair now propagates through Store, HTTP patch responses, file-patch .errors.json bodies, and MCP direct structured errors. Verification: node --test test/store.test.js test/mcp-tools.test.js test/error-payload.test.js; node --test test/field-limits.test.js; npm test (264/264).",
+        "files_touched": [
+          "hub/store.js",
+          "hub/error-payload.js",
+          "hub/server.js",
+          "bin/mcp-write-tools.js",
+          "test/store.test.js",
+          "test/mcp-tools.test.js",
+          "test/error-payload.test.js",
+          "test/field-limits.test.js",
+          "README.md",
+          "workspace-template/README.md"
+        ]
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "codex"
     },
     {
       "dependencies": [

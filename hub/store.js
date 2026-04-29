@@ -232,6 +232,9 @@ function inferNoopRetryShape(messages) {
   if (text.includes("normalized legacy value")) {
     return "Retry with the canonical status value shown in the warning.";
   }
+  if (text.includes("still has tasks; provide reassignTo")) {
+    return "Retry the structural removal with `reassignTo` set to another swimlane id from the repair payload.";
+  }
   return "Retry with a mutable field change, or use the endpoint named in the warning for structural changes.";
 }
 
@@ -327,7 +330,24 @@ function applyStructuralOps(existing, patch, notes) {
   const taskIds = () => new Set(tasks.map((task) => task.id));
   const tombstones = () => new Set(Array.isArray(data.meta?.deleted_tasks) ? data.meta.deleted_tasks : []);
 
-  const fail = (message, status = 400) => ({ ok: false, status, message });
+  const fail = (message, status = 400, extra = {}) => ({ ok: false, status, message, ...extra });
+  const swimlaneReassignRepair = (id, affected) => {
+    const candidates = lanes.map((lane) => lane.id).filter((laneId) => laneId !== id);
+    const moveTasksTo = candidates[0] || null;
+    return {
+      type: "swimlane_reassign_required",
+      affectedTaskIds: affected.map((task) => task.id),
+      validSwimlaneIds: candidates,
+      moveTasksTo,
+      swimlaneOps: [
+        {
+          op: "remove",
+          id,
+          reassignTo: moveTasksTo || "<swimlaneId>"
+        }
+      ]
+    };
+  };
 
   for (const op of swimlaneOps) {
     const kind = op?.op || op?.kind;
@@ -372,10 +392,16 @@ function applyStructuralOps(existing, patch, notes) {
       const affected = tasks.filter((task) => task.placement?.swimlaneId === id);
       const reassignTo = op.reassignTo || op.reassignToSwimlaneId;
       if (affected.length > 0 && !reassignTo) {
-        return fail(`swimlane ${id} still has tasks; provide reassignTo`);
+        return fail(`swimlane ${id} still has tasks; provide reassignTo`, 400, {
+          repair: swimlaneReassignRepair(id, affected)
+        });
       }
       if (reassignTo === id) return fail("swimlaneOps.remove reassignTo must name a different swimlane");
-      if (reassignTo && !laneIds().has(reassignTo)) return fail(`reassignTo swimlane ${reassignTo} not found`);
+      if (reassignTo && !laneIds().has(reassignTo)) {
+        return fail(`reassignTo swimlane ${reassignTo} not found`, 400, {
+          repair: swimlaneReassignRepair(id, affected)
+        });
+      }
       for (const task of affected) task.placement.swimlaneId = reassignTo;
       lanes.splice(index, 1);
       notes.updated.push(`swimlane:${id}`);
@@ -1081,6 +1107,7 @@ export class Store {
           type: "schema",
           message: structural.message,
           hint: inferTrackerErrorHint(structural.message),
+          repair: structural.repair || null,
           notes
         };
       }

@@ -359,6 +359,8 @@ Patch payloads may also include structural operation arrays when a narrow merge 
 - `swimlaneOps`: `{op:"add"|"update"|"move"|"remove"}` with lane ids, optional `index`/`direction`, and `reassignTo` when removing a lane with tasks.
 - `taskOps`: `{op:"move"|"archive"|"split"|"merge"}` for card placement, deferring folded work, creating an open follow-up after a source task, or recording a source task as merged into a target.
 
+Structural failures return the same `{error, type, hint}` envelope plus `repair` when the hub can describe a safe retry. For example, removing a swimlane that still contains tasks returns `repair.moveTasksTo`, `repair.affectedTaskIds`, and a ready-to-retry `repair.swimlaneOps` shape.
+
 Patch payloads stay small. Typical shape:
 
 ```json

@@ -391,6 +391,45 @@ test("applyPatch: structural ops reject ambiguous or stale mixed payloads", asyn
   }
 });
 
+test("applyPatch: swimlaneOps remove returns repair shape when tasks need reassignment", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      swimlaneOps: [{ op: "remove", id: "ops" }]
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.equal(res.type, "schema");
+    assert.match(res.message, /provide reassignTo/);
+    assert.match(res.hint, /repair payload/);
+    assert.deepEqual(res.repair, {
+      type: "swimlane_reassign_required",
+      affectedTaskIds: ["t3"],
+      validSwimlaneIds: ["exec"],
+      moveTasksTo: "exec",
+      swimlaneOps: [{ op: "remove", id: "ops", reassignTo: "exec" }]
+    });
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.deepEqual(
+      after.meta.swimlanes.map((lane) => lane.id),
+      ["exec", "ops"]
+    );
+    assert.deepEqual(after.tasks.find((task) => task.id === "t3").placement, {
+      swimlaneId: "ops",
+      priorityId: "p1"
+    });
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyPatch: taskOps split refuses deleted task ids", async () => {
   const ws = setupWorkspace();
   try {
