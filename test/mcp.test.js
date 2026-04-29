@@ -489,6 +489,46 @@ test("tracker_patch goes through the running hub from MCP", async () => {
   }
 });
 
+test("tracker_patch hub mode preserves structured expectedRev conflicts", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-patch-conflict-");
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
+  const port = await findFreePort();
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const client = startMcp(workspace);
+    try {
+      await client.initialize();
+
+      const patched = await client.request("tools/call", {
+        name: "tracker_patch",
+        arguments: {
+          slug: "test-project",
+          patch: {
+            expectedRev: 0,
+            tasks: { t1: { status: "complete" } }
+          }
+        }
+      });
+
+      assert.equal(patched.result.isError, true);
+      const payload = JSON.parse(patched.result.content[0].text);
+      assert.equal(payload.ok, false);
+      assert.equal(payload.status, 409);
+      assert.equal(payload.type, "conflict");
+      assert.equal(payload.expectedRev, 0);
+      assert.equal(payload.currentRev, 1);
+    } finally {
+      await client.close();
+    }
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("tracker_history, tracker_undo, and tracker_redo work through MCP", async () => {
   const workspace = setupWorkspace("llm-tracker-mcp-history-");
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));

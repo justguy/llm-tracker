@@ -781,7 +781,20 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 **On failure:** rerun with `curl -i` to capture the response. The hub returns structured JSON: `{error, type, hint}`.
 
-On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, and `noop`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly. If that target lives in the repo, durable patch writes are expected to update that visible JSON file immediately.
+On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, `noop`, and `noopReason`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly. If `noop: true`, `noopReason` explains whether the submitted values already matched current state or which operation was ignored/rejected and how to retry. If that target lives in the repo, durable patch writes are expected to update that visible JSON file immediately.
+
+To protect against stale writes, include a top-level `expectedRev` in the patch body:
+
+```json
+{
+  "expectedRev": 42,
+  "tasks": {
+    "t-001": { "status": "complete" }
+  }
+}
+```
+
+If `expectedRev` does not match the current project rev, the hub rejects the write with `409` and returns `{error, type: "conflict", expectedRev, currentRev, hint}`. Refresh the project, reapply your intended change to the current state, and retry with the new rev.
 
 ### Merge semantics (both modes)
 

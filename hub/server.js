@@ -548,6 +548,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
         error: r.message,
         type: r.type || null,
         hint: r.hint || null,
+        expectedRev: Number.isInteger(r.expectedRev) ? r.expectedRev : null,
+        currentRev: Number.isInteger(r.currentRev) ? r.currentRev : null,
         notes: r.notes || null
       });
     }
@@ -565,6 +567,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       updatedAt: entry?.data?.meta?.updatedAt ?? null,
       file: projectPayload(req.params.slug, entry).file,
       notes: r.notes,
+      noopReason: r.noopReason || null,
       noop: r.noop === true
     });
   });
@@ -833,10 +836,13 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
           JSON.stringify(
             buildTrackerErrorBody({
               message: r.message,
-              kind: "schema",
+              kind: r.type || "schema",
               type: r.type || "schema",
+              hint: r.hint || null,
               path: patchPath,
-              notes: r.notes || null
+              notes: r.notes || null,
+              expectedRev: Number.isInteger(r.expectedRev) ? r.expectedRev : null,
+              currentRev: Number.isInteger(r.currentRev) ? r.currentRev : null
             }),
             null,
             2

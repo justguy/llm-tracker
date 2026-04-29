@@ -161,6 +161,72 @@ function validatePatchGuardrails(existing, patch) {
   };
 }
 
+function validateExpectedRev(patch, currentRev) {
+  if (!patch || typeof patch !== "object" || !Object.prototype.hasOwnProperty.call(patch, "expectedRev")) {
+    return { ok: true };
+  }
+  const expectedRev = patch.expectedRev;
+  if (!Number.isInteger(expectedRev) || expectedRev < 0) {
+    return {
+      ok: false,
+      status: 400,
+      type: "schema",
+      message: "expectedRev must be a non-negative integer",
+      hint: "Read the current project rev, then retry with `expectedRev` set to that exact integer."
+    };
+  }
+  if (expectedRev !== currentRev) {
+    return {
+      ok: false,
+      status: 409,
+      type: "conflict",
+      message: `stale write rejected: expectedRev ${expectedRev} does not match current rev ${currentRev}`,
+      hint: "Refresh the project, reapply your patch to the current state, and retry with the current rev.",
+      expectedRev,
+      currentRev
+    };
+  }
+  return { ok: true };
+}
+
+function nonEmptyStrings(values) {
+  return Array.isArray(values) ? values.filter((value) => typeof value === "string" && value) : [];
+}
+
+function inferNoopRetryShape(messages) {
+  const text = messages.join("\n");
+  if (text.includes("meta.swimlanes") && text.includes("cannot remove swimlane")) {
+    return "Swimlane removal is structural. Use `swimlaneOps.remove` when structural patch ops are available, or use `PUT /api/projects/:slug` for an intentional full structural replacement.";
+  }
+  if (text.includes("hub-owned") || text.includes("human-owned")) {
+    return "Remove hub-owned or human-owned fields from the patch and retry with mutable fields only.";
+  }
+  if (text.includes("normalized legacy value")) {
+    return "Retry with the canonical status value shown in the warning.";
+  }
+  return "Retry with a mutable field change, or use the endpoint named in the warning for structural changes.";
+}
+
+function explainNoopPatch(notes) {
+  const rejected = [
+    ...nonEmptyStrings(notes?.ignored),
+    ...nonEmptyStrings(notes?.warnings)
+  ];
+  if (rejected.length > 0) {
+    return {
+      reason:
+        "Patch accepted but project state did not change because the merge layer rejected or ignored every effective operation.",
+      rejected,
+      retryShape: inferNoopRetryShape(rejected)
+    };
+  }
+  return {
+    reason: "Patch accepted but all submitted values already matched the current project state.",
+    rejected: [],
+    retryShape: "Skip the write, or change at least one mutable field before retrying."
+  };
+}
+
 function latestRecordedRev(workspace, slug) {
   const snapRev = maxRev(workspace, slug);
   const historyRev = readHistory(workspace, slug).reduce((max, entry) => {
@@ -764,6 +830,9 @@ export class Store {
         currentRev = Number.isInteger(existing?.meta?.rev) ? existing.meta.rev : 0;
       }
 
+      const expectedRevGuard = validateExpectedRev(patch, currentRev);
+      if (!expectedRevGuard.ok) return expectedRevGuard;
+
       const guard = validatePatchGuardrails(existing, patch);
       if (!guard.ok) return guard;
 
@@ -795,7 +864,7 @@ export class Store {
           this.projects.set(slug, entry);
           clearErrorFile(this.workspace, slug);
         }
-        return { ok: true, notes, noop: true, rev: currentRev };
+        return { ok: true, notes, noop: true, noopReason: explainNoopPatch(notes), rev: currentRev };
       }
 
       const newRev = currentRev + 1;

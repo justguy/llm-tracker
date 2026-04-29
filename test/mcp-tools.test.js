@@ -56,3 +56,29 @@ test("tracker_patch validates required MCP arguments before attempting hub I/O",
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test("tracker_patch direct mode returns structured expectedRev conflicts", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-expected-rev-");
+  try {
+    const tool = createTools(workspace).get("tracker_patch");
+
+    const result = await tool.handler({
+      slug: "test-project",
+      mode: "direct",
+      patch: {
+        expectedRev: 0,
+        tasks: { t1: { status: "complete" } }
+      }
+    });
+
+    assert.equal(result.isError, true);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.status, 409);
+    assert.equal(payload.type, "conflict");
+    assert.equal(payload.expectedRev, 0);
+    assert.equal(payload.currentRev, 1);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

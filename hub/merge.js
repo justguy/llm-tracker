@@ -37,6 +37,9 @@ export function mergeProject(existing, incoming) {
       for (const prevLane of existingLanes) {
         const lane = incomingById.get(prevLane.id);
         if (!lane) {
+          notes.warnings.push(
+            `meta.swimlanes[${prevLane.id}] missing from incoming swimlanes; kept existing (cannot remove swimlane through patch semantics; use swimlaneOps.remove or PUT /api/projects/:slug for structural replacement)`
+          );
           nextLanes.push(prevLane);
           continue;
         }

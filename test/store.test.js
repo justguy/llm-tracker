@@ -189,6 +189,78 @@ test("applyPatch: updates only the fields the patch mentions", async () => {
   }
 });
 
+test("applyPatch: expectedRev accepts writes against the current rev", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+    const currentRev = store.get("test-project").rev;
+
+    const res = await store.applyPatch("test-project", {
+      expectedRev: currentRev,
+      tasks: { t1: { status: "complete" } }
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, false);
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.tasks.find((task) => task.id === "t1").status, "complete");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: expectedRev rejects stale writes without changing the file", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+    const before = readFileSync(file, "utf-8");
+    const currentRev = store.get("test-project").rev;
+
+    const res = await store.applyPatch("test-project", {
+      expectedRev: currentRev - 1,
+      tasks: { t1: { status: "complete" } }
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 409);
+    assert.equal(res.type, "conflict");
+    assert.equal(res.expectedRev, currentRev - 1);
+    assert.equal(res.currentRev, currentRev);
+    assert.match(res.message, /stale write rejected/);
+    assert.equal(readFileSync(file, "utf-8"), before);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: expectedRev must be a non-negative integer", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      expectedRev: "1",
+      tasks: { t1: { status: "complete" } }
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.equal(res.type, "schema");
+    assert.match(res.message, /expectedRev/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyPatch: normalizes legacy partial status to in_progress", async () => {
   const ws = setupWorkspace();
   try {
@@ -206,6 +278,64 @@ test("applyPatch: normalizes legacy partial status to in_progress", async () => 
     const after = JSON.parse(readFileSync(file, "utf-8"));
     const t1 = after.tasks.find((task) => task.id === "t1");
     assert.equal(t1.status, "in_progress");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: noop explains rejected structural swimlane removal", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const project = validProject();
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(project));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      meta: {
+        swimlanes: [project.meta.swimlanes[0]]
+      }
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, true);
+    assert.equal(res.rev, 1);
+    assert.match(res.noopReason.reason, /did not change/);
+    assert.ok(
+      res.noopReason.rejected.some(
+        (message) => message.includes("meta.swimlanes[ops]") && message.includes("swimlaneOps.remove")
+      )
+    );
+    assert.match(res.noopReason.retryShape, /Swimlane removal is structural/);
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.deepEqual(
+      after.meta.swimlanes.map((lane) => lane.id),
+      ["exec", "ops"]
+    );
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: noop explains already-current patch values", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      tasks: { t1: { status: "not_started" } }
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, true);
+    assert.deepEqual(res.noopReason.rejected, []);
+    assert.match(res.noopReason.reason, /already matched/);
+    assert.match(res.noopReason.retryShape, /Skip the write/);
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }

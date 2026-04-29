@@ -24,21 +24,26 @@ export function buildTrackerErrorBody({
   message,
   kind = null,
   type = null,
+  hint = null,
   path = null,
   notes = null,
+  expectedRev = null,
+  currentRev = null,
   timestamp = new Date().toISOString()
 } = {}) {
   const normalizedType = type || kind || null;
-  const hint = inferTrackerErrorHint(message);
+  const inferredHint = hint || inferTrackerErrorHint(message);
   const body = {
     error: message || "",
     type: normalizedType,
     timestamp
   };
 
-  if (hint) body.hint = hint;
+  if (inferredHint) body.hint = inferredHint;
   if (path) body.path = path;
   if (notes !== null && notes !== undefined) body.notes = notes;
+  if (expectedRev !== null && expectedRev !== undefined) body.expectedRev = expectedRev;
+  if (currentRev !== null && currentRev !== undefined) body.currentRev = currentRev;
 
   // Legacy fields kept for compatibility with any existing consumers.
   body.message = body.error;

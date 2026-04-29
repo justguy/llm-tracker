@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -45,6 +45,15 @@ function findFreePort() {
   });
 }
 
+async function waitForFile(file, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(file)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`timed out waiting for ${file}`);
+}
+
 test("oversized meta.scratchpad in patch is rejected at the route layer", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();
@@ -68,6 +77,78 @@ test("oversized meta.scratchpad in patch is rejected at the route layer", async 
     assert.equal(body.type, "field.too.large");
     assert.equal(body.field, "meta.scratchpad");
     assert.equal(body.max, 5000);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("stale expectedRev in HTTP patch is rejected with 409", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedRev: 0,
+        tasks: { t1: { status: "complete" } }
+      })
+    });
+
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.equal(body.type, "conflict");
+    assert.equal(body.expectedRev, 0);
+    assert.equal(body.currentRev, 1);
+    assert.match(body.error, /stale write rejected/);
+
+    const after = JSON.parse(readFileSync(join(workspace, "trackers", "test-project.json"), "utf-8"));
+    assert.equal(after.tasks.find((task) => task.id === "t1").status, "not_started");
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("stale expectedRev in file patch writes structured conflict errors", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const trackerFile = join(workspace, "trackers", "test-project.json");
+  writeFileSync(trackerFile, JSON.stringify(validProject(), null, 2));
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const patchFile = join(workspace, "patches", "test-project.stale.json");
+    const errorFile = join(workspace, "patches", "test-project.stale.errors.json");
+    writeFileSync(
+      patchFile,
+      JSON.stringify({
+        expectedRev: 0,
+        tasks: { t1: { status: "complete" } }
+      })
+    );
+
+    await waitForFile(errorFile);
+    const error = JSON.parse(readFileSync(errorFile, "utf-8"));
+    assert.equal(error.type, "conflict");
+    assert.equal(error.kind, "conflict");
+    assert.equal(error.expectedRev, 0);
+    assert.equal(error.currentRev, 1);
+    assert.match(error.hint, /Refresh/);
+
+    const after = JSON.parse(readFileSync(trackerFile, "utf-8"));
+    assert.equal(after.tasks.find((task) => task.id === "t1").status, "not_started");
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

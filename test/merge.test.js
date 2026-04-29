@@ -88,6 +88,26 @@ test("mergeProject preserves existing swimlane order when incoming rewrites rows
   );
 });
 
+test("mergeProject explains attempted swimlane removal through patch semantics", () => {
+  const existing = validProject();
+  const incoming = {
+    meta: {
+      swimlanes: [existing.meta.swimlanes[0]]
+    }
+  };
+
+  const { merged, notes } = mergeProject(existing, incoming);
+  assert.deepEqual(
+    merged.meta.swimlanes.map((lane) => lane.id),
+    ["exec", "ops"]
+  );
+  assert.ok(
+    notes.warnings.some(
+      (warning) => warning.includes("meta.swimlanes[ops]") && warning.includes("swimlaneOps.remove")
+    )
+  );
+});
+
 test("mergeProject strips collapsed from LLM's new swimlanes (hub-owned)", () => {
   const existing = validProject();
   const incoming = JSON.parse(JSON.stringify(existing));

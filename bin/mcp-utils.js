@@ -71,8 +71,13 @@ export async function runHubMutation({ workspace, portFlag, method, path, label,
     );
   }
   if (response.status >= 400) {
-    return makeTextResult(
-      `${label} failed (${response.status}): ${response.body.error || response.body.raw}`,
+    return makeJsonResult(
+      {
+        ok: false,
+        status: response.status,
+        error: response.body.error || response.body.raw,
+        ...response.body
+      },
       { isError: true }
     );
   }
