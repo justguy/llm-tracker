@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 31,
-    "updatedAt": "2026-04-29T21:47:43.910Z"
+    "rev": 32,
+    "updatedAt": "2026-04-29T21:49:35.626Z"
   },
   "tasks": [
     {
@@ -746,7 +746,7 @@
       "id": "t28",
       "title": "Refresh collapsed swimlane rows to 44px status strip",
       "goal": "Render each collapsed lane as a single 44px row (lane name + optional LIVE dot + tasks/active/done counts + inline progress bar + percentage), with a 1px ink-3 hover accent and up/down brackets that fade in on hover.",
-      "status": "in_progress",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p2"
@@ -764,7 +764,7 @@
           "ui/app.js",
           "ui/styles.css"
         ],
-        "notes": "Collapsed swimlane row now enforces the 44px strip, a 1px ink-3 hover accent, focus-visible bracket fade, and an optional LIVE badge via lane.live while keeping the existing expand and move controls."
+        "notes": "Synced repo-local tracker truth for work already landed in d40cae5: collapsed swimlane rows render as a 44px strip with lane title, optional LIVE badge, counts, inline progress, percentage, hover/focus accent, and bracket move controls. Existing files_touched retained: ui/app.js and ui/styles.css."
       },
       "effort": "s",
       "assignee": "codex",
