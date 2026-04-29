@@ -65,6 +65,36 @@ function findFreePort() {
   });
 }
 
+function waitForWsMessage(ws, predicate) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("timed out waiting for websocket message"));
+    }, 5000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+    }
+
+    function onError(err) {
+      cleanup();
+      reject(err);
+    }
+
+    function onMessage(raw) {
+      const message = JSON.parse(raw.toString());
+      if (!predicate(message)) return;
+      cleanup();
+      resolve(message);
+    }
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+  });
+}
+
 test("daemon mode starts in the background, creates .runtime, and stops cleanly", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();
@@ -135,6 +165,64 @@ test("daemon stop succeeds with an active websocket client attached", async () =
       setTimeout(resolve, 1000).unref?.();
     });
   } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("structural HTTP patch broadcasts UPDATE with the new rev", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+  let ws;
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    await waitForWsMessage(ws, (message) => message.type === "SNAPSHOT");
+
+    const updatePromise = waitForWsMessage(
+      ws,
+      (message) => message.type === "UPDATE" && message.slug === "test-project"
+    );
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        swimlaneOps: [{ op: "add", lane: { id: "qa", label: "QA" } }],
+        taskOps: [{ op: "move", id: "t1", swimlaneId: "qa", priorityId: "p1", targetIndex: 0 }]
+      })
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.noop, false);
+
+    const update = await updatePromise;
+    assert.equal(update.project.rev, body.rev);
+    assert.ok(update.project.data.meta.swimlanes.some((lane) => lane.id === "qa"));
+    assert.deepEqual(update.project.data.tasks.find((task) => task.id === "t1").placement, {
+      swimlaneId: "qa",
+      priorityId: "p1"
+    });
+  } finally {
+    if (ws && ws.readyState !== WebSocket.CLOSED) {
+      ws.close();
+      await new Promise((resolve) => {
+        ws.once("close", resolve);
+        setTimeout(resolve, 1000).unref?.();
+      });
+    }
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });
   }
