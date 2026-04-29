@@ -46,8 +46,8 @@
       }
     ],
     "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 30,
-    "updatedAt": "2026-04-29T21:46:20.181Z"
+    "rev": 31,
+    "updatedAt": "2026-04-29T21:47:43.910Z"
   },
   "tasks": [
     {
@@ -407,7 +407,7 @@
       "id": "t16",
       "title": "Add optimistic concurrency to tracker writes",
       "goal": "Allow patch-style writes to include `expectedRev` so callers can tell whether they are writing against stale state instead of being silently merged over.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p0"
@@ -422,9 +422,24 @@
         ],
         "github_issue_number": 29,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/29",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "notes": "Synced repo-local tracker truth for work already landed in 0890efb: patch writes support expectedRev, stale writes return 409 conflict with expectedRev/currentRev/hint, MCP hub/direct and file-patch errors preserve structured conflict payloads. Verification from implementation slice: npm test passed 257/257 before t8/t9 additions; current suite later passed 264/264.",
+        "files_touched": [
+          "hub/store.js",
+          "hub/server.js",
+          "hub/error-payload.js",
+          "bin/mcp-utils.js",
+          "bin/mcp-write-tools.js",
+          "test/store.test.js",
+          "test/field-limits.test.js",
+          "test/mcp-tools.test.js",
+          "test/mcp.test.js",
+          "README.md",
+          "workspace-template/README.md"
+        ]
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "codex"
     },
     {
       "dependencies": [],
