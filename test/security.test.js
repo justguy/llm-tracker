@@ -100,6 +100,36 @@ test("cross-origin POST is blocked with 403", async () => {
   }
 });
 
+test("malformed Referer on mutating request is blocked with 403", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Referer: "http://%"
+      },
+      body: JSON.stringify({ meta: { scratchpad: "blocked" } })
+    });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.match(body.error, /invalid Referer/);
+    assert.match(body.hint, /loopback/);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("same-origin and no-origin POST are allowed", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();

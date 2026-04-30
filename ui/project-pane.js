@@ -3,6 +3,21 @@ import { DependencyGraphView } from "./dependency-graph-view.js";
 import { Matrix } from "./matrix-view.js";
 import { TreeView } from "./tree-view.js";
 
+export function ErrorBanner({ error, prefix = null }) {
+  if (!error) return null;
+  const label = error.kind || error.type || "project";
+  const message = error.message || error.error || "unknown error";
+  return html`
+    <div class="error-banner">
+      <div>
+        <b>${label} error</b>
+        <span>${prefix ? `${prefix}; ` : ""}${message}</span>
+      </div>
+      ${error.hint ? html`<div class="error-banner__hint">Fix: ${error.hint}</div>` : null}
+    </div>
+  `;
+}
+
 export function ProjectPane({
   project,
   slug,
@@ -43,9 +58,7 @@ export function ProjectPane({
       class=${`project-pane ${isActive ? "active" : ""} ${solo ? "solo" : ""}`}
       onMouseDown=${() => onFocus && onFocus(slug)}
     >
-      ${project?.error
-        ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
-        : null}
+      <${ErrorBanner} error=${project?.error} prefix="last valid state shown" />
       ${data
         ? boardView === "graph"
           ? html`<${DependencyGraphView}

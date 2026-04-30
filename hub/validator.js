@@ -159,11 +159,33 @@ const compiled = ajv.compile(schema);
 
 function formatAjvError(err) {
   const path = err.instancePath || "/";
+  if (err.keyword === "maxLength") {
+    const limit = err.params.limit;
+    if (path === "/meta/scratchpad") {
+      return `${path}: meta.scratchpad is too long; limit ${limit} chars. Keep scratchpad as a short live status banner and move durable detail into task context, references, or project docs.`;
+    }
+    if (path.endsWith("/comment")) {
+      return `${path}: task.comment is too long; limit ${limit} chars. Keep comment as a short decision note and move full evidence/status detail into context.notes, context.<topic>, references[], definition_of_done, or expected_changes.`;
+    }
+    if (path.endsWith("/blocker_reason")) {
+      return `${path}: task.blocker_reason is too long; limit ${limit} chars. Summarize the current blocker and move detailed evidence into context.notes, references[], or expected_changes.`;
+    }
+    return `${path}: string is too long; limit ${limit} chars`;
+  }
   if (err.keyword === "enum") {
     return `${path}: must be one of [${err.params.allowedValues.join(", ")}]`;
   }
   if (err.keyword === "required") {
     return `${path}: missing required field "${err.params.missingProperty}"`;
+  }
+  if (err.keyword === "type") {
+    return `${path}: must be ${Array.isArray(err.params.type) ? err.params.type.join(" or ") : err.params.type}`;
+  }
+  if (err.keyword === "minItems") {
+    return `${path}: must contain at least ${err.params.limit} item`;
+  }
+  if (err.keyword === "uniqueItems") {
+    return `${path}: duplicate values are not allowed`;
   }
   if (err.keyword === "pattern") {
     if (path.includes("/reference") || path.includes("/references/")) {

@@ -206,6 +206,35 @@ test("stale expectedRev in HTTP patch is rejected with 409", async () => {
   }
 });
 
+test("array patch body is rejected with an actionable schema hint", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([])
+    });
+
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.type, "schema");
+    assert.match(body.error, /patch body must be a JSON object/);
+    assert.match(body.hint, /swimlaneOps/);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("structural HTTP patch returns repair payload for stranded swimlane tasks", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();
@@ -270,6 +299,41 @@ test("stale expectedRev in file patch writes structured conflict errors", async 
 
     const after = JSON.parse(readFileSync(trackerFile, "utf-8"));
     assert.equal(after.tasks.find((task) => task.id === "t1").status, "not_started");
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("reload surfaces direct-file schema hints for oversized task comments", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const trackerFile = join(workspace, "trackers", "test-project.json");
+  writeFileSync(trackerFile, JSON.stringify(validProject(), null, 2));
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const bad = validProject();
+    bad.tasks[0].comment = "c".repeat(501);
+    writeFileSync(trackerFile, JSON.stringify(bad, null, 2));
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/reload`, {
+      method: "POST"
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.type, "schema");
+    assert.match(body.error, /task\.comment is too long/);
+    assert.match(body.hint, /context\.notes/);
+
+    const list = await fetch(`http://127.0.0.1:${port}/api/projects`);
+    assert.equal(list.status, 200);
+    const payload = await list.json();
+    const project = payload.projects.find((item) => item.slug === "test-project");
+    assert.equal(project.error.type, "schema");
+    assert.match(project.error.hint, /task\.comment/);
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

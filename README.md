@@ -537,7 +537,7 @@ Two write modes:
 - **Mode A — File patches** (bash-less): LLM drops a JSON patch in `patches/<slug>.<ts>.json`; hub picks it up and deletes it.
 - **Mode B — HTTP patches** (fastest): `POST /api/projects/:slug/patch`; one-time `curl` approval in your CLI, then no filesystem access.
 
-Patch failures now return `error`, `type`, and `hint` so agents do not have to reverse-engineer raw schema regex output. The same hint-bearing payload is also written to `.errors.json` files in file-patch mode.
+Patch failures now return `error`, `type`, and `hint` so agents do not have to reverse-engineer raw schema regex output. The same hint-bearing payload is written to `.errors.json` files in file-patch mode and direct tracker-file validation failures. For oversized fields, keep `task.comment` as a short note, `task.blocker_reason` as the active blocker summary, and `meta.scratchpad` as a live status banner; move durable detail into `context.*`, `references[]`, `definition_of_done`, or `expected_changes`.
 
 Full schema, merge semantics, field ownership, versioning, rollback, and the whole LLM-facing contract → **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 
@@ -624,7 +624,7 @@ The hub is a local service. It ships three layers that matter if another process
 Body-size hardening:
 
 - Default JSON body limit is **1 MB** (override with `LLM_TRACKER_BODY_LIMIT`, e.g. `LLM_TRACKER_BODY_LIMIT=4mb`).
-- Route-level guards reject oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) before merge/validation runs, so hallucinated jumbo patches cost the hub almost nothing.
+- Route-level guards reject oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) before merge/validation runs, so hallucinated jumbo patches cost the hub almost nothing. Direct tracker-file edits cannot be preflighted before the file changes, but watcher/schema failures keep the prior valid state live, write a hint-bearing `<slug>.errors.json`, and tell the agent where to move the oversized content.
 
 ## Deleted-project restore
 

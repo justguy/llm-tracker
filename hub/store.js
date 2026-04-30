@@ -67,11 +67,14 @@ export function writeErrorFile(workspace, slug, err) {
   const body = buildTrackerErrorBody({
     message: err.message,
     kind: err.kind,
+    type: err.type || err.kind,
+    hint: err.hint || null,
     path: trackerPath(workspace, slug)
   });
   try {
     writeFileSync(file, JSON.stringify(body, null, 2));
   } catch {}
+  return body;
 }
 
 export function clearErrorFile(workspace, slug) {
@@ -194,6 +197,21 @@ function validatePatchGuardrails(existing, patch) {
     `new tasks added through patch mode must start as not_started or in_progress; ` +
     `rejecting ${violations.join(", ")}`;
 
+  return {
+    ok: false,
+    status: 400,
+    type: "schema",
+    message,
+    hint: inferTrackerErrorHint(message)
+  };
+}
+
+function validatePatchBodyShape(patch) {
+  if (patch && typeof patch === "object" && !Array.isArray(patch)) {
+    return { ok: true };
+  }
+  const message =
+    "patch body must be a JSON object with tasks, meta, swimlaneOps, taskOps, or expectedRev";
   return {
     ok: false,
     status: 400,
@@ -420,7 +438,7 @@ function applyStructuralOps(existing, patch, notes) {
       lanes.splice(index, 1);
       notes.updated.push(`swimlane:${id}`);
     } else {
-      return fail(`unsupported swimlane op ${kind}`);
+      return fail(`unsupported swimlane op ${kind}; supported ops are add, update, move, remove`);
     }
   }
 
@@ -438,6 +456,9 @@ function applyStructuralOps(existing, patch, notes) {
       const priorityId = placement.priorityId || op.priorityId;
       if ("targetIndex" in op && (!Number.isInteger(op.targetIndex) || op.targetIndex < 0)) {
         return fail("taskOps.move targetIndex must be a non-negative integer");
+      }
+      if (!swimlaneId || !priorityId) {
+        return fail(`taskOps.move for ${id} requires swimlaneId and priorityId, or placement.{swimlaneId, priorityId}`);
       }
       if (!laneIds().has(swimlaneId)) return fail(`unknown swimlaneId ${swimlaneId}`);
       if (!priorityIds().has(priorityId)) return fail(`unknown priorityId ${priorityId}`);
@@ -494,7 +515,7 @@ function applyStructuralOps(existing, patch, notes) {
       source.context = { ...(source.context || {}), merged_into: targetId };
       notes.updated.push(targetId, sourceId);
     } else {
-      return fail(`unsupported task op ${kind}`);
+      return fail(`unsupported task op ${kind}; supported ops are move, archive, split, merge`);
     }
   }
 
@@ -613,13 +634,12 @@ export class Store {
   list() {
     const out = [];
     for (const [slug, p] of this.projects) {
-      if (!p.data) continue;
       out.push({
         slug,
-        name: p.data.meta.name,
-        pct: p.derived.pct,
-        counts: p.derived.counts,
-        total: p.derived.total,
+        name: p.data?.meta?.name || slug,
+        pct: p.derived?.pct ?? 0,
+        counts: p.derived?.counts || {},
+        total: p.derived?.total ?? 0,
         rev: p.rev,
         error: p.error || null
       });
@@ -778,20 +798,29 @@ export class Store {
   }
 
   _recordError(slug, filePath, err) {
-    writeErrorFile(this.workspace, slug, err);
+    const body = writeErrorFile(this.workspace, slug, err);
+    const error = {
+      kind: err.kind || body.type || null,
+      type: body.type || err.kind || null,
+      message: body.error || err.message || "",
+      error: body.error || err.message || "",
+      hint: body.hint || null,
+      path: body.path || trackerPath(this.workspace, slug),
+      at: new Date().toISOString()
+    };
     const prev = this.projects.get(slug);
     if (prev) {
-      prev.error = { ...err, at: new Date().toISOString() };
-      return { ok: false, slug, event: "ERROR", project: prev };
+      prev.error = error;
+      return { ok: false, status: 400, slug, event: "ERROR", project: prev, ...error };
     }
     this.projects.set(slug, {
       data: null,
       derived: null,
       path: filePath,
       rev: 0,
-      error: { ...err, at: new Date().toISOString() }
+      error
     });
-    return { ok: false, slug, event: "ERROR", project: this.projects.get(slug) };
+    return { ok: false, status: 400, slug, event: "ERROR", project: this.projects.get(slug), ...error };
   }
 
   async createOrReplace(slug, data) {
@@ -1073,6 +1102,9 @@ export class Store {
 
   async applyPatch(slug, patch) {
     return this.withLock(slug, async () => {
+      const patchShape = validatePatchBodyShape(patch);
+      if (!patchShape.ok) return patchShape;
+
       const file = trackerPath(this.workspace, slug);
       if (!existsSync(file)) {
         return {

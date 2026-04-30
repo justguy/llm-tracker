@@ -48,6 +48,55 @@ test("ingest invalid JSON writes error file", () => {
   }
 });
 
+test("ingest schema error for overlong direct-file task comment gives an actionable hint", () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const p = validProject();
+    p.tasks[0].comment = "x".repeat(501);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(p));
+
+    const res = store.ingest(file, readFileSync(file, "utf-8"));
+
+    assert.equal(res.ok, false);
+    assert.equal(res.event, "ERROR");
+    const entry = store.get("test-project");
+    assert.equal(entry.error.kind, "schema");
+    assert.match(entry.error.message, /task\.comment is too long/);
+    assert.match(entry.error.hint, /500 chars/);
+    assert.match(entry.error.hint, /context\.notes/);
+    const error = JSON.parse(readFileSync(errorPath(ws, "test-project"), "utf-8"));
+    assert.equal(error.type, "schema");
+    assert.match(error.error, /task\.comment is too long/);
+    assert.match(error.hint, /references\[\]/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("list includes invalid cold-start projects with schema hints", () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const p = validProject();
+    p.tasks[0].comment = "x".repeat(501);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(p));
+
+    const res = store.ingest(file, readFileSync(file, "utf-8"));
+    assert.equal(res.ok, false);
+
+    const [listed] = store.list();
+    assert.equal(listed.slug, "test-project");
+    assert.equal(listed.name, "test-project");
+    assert.equal(listed.error.type, "schema");
+    assert.match(listed.error.hint, /task\.comment/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("ingest valid no-op reload clears a prior parse error", () => {
   const ws = setupWorkspace();
   try {
@@ -261,6 +310,26 @@ test("applyPatch: expectedRev must be a non-negative integer", async () => {
   }
 });
 
+test("applyPatch: body must be a JSON object", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", "not-an-object");
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.equal(res.type, "schema");
+    assert.match(res.message, /patch body must be a JSON object/);
+    assert.match(res.hint, /tasks/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyPatch: swimlaneOps add, update, move, and remove lanes structurally", async () => {
   const ws = setupWorkspace();
   try {
@@ -386,6 +455,24 @@ test("applyPatch: structural ops reject ambiguous or stale mixed payloads", asyn
     });
     assert.equal(badIndex.ok, false);
     assert.match(badIndex.message, /targetIndex/);
+
+    const missingMovePlacement = await store.applyPatch("test-project", {
+      taskOps: [{ op: "move", id: "t1" }]
+    });
+    assert.equal(missingMovePlacement.ok, false);
+    assert.match(missingMovePlacement.message, /requires swimlaneId and priorityId/);
+
+    const badLaneOp = await store.applyPatch("test-project", {
+      swimlaneOps: [{ op: "teleport", id: "ops" }]
+    });
+    assert.equal(badLaneOp.ok, false);
+    assert.match(badLaneOp.message, /supported ops are add, update, move, remove/);
+
+    const badTaskOp = await store.applyPatch("test-project", {
+      taskOps: [{ op: "teleport", id: "t1" }]
+    });
+    assert.equal(badTaskOp.ok, false);
+    assert.match(badTaskOp.message, /supported ops are move, archive, split, merge/);
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }

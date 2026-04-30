@@ -181,7 +181,8 @@ test("rejects a task comment over 500 chars", () => {
   p.tasks[0].comment = "x".repeat(501);
   const { ok, errors } = validateProject(p);
   assert.equal(ok, false);
-  assert.ok(errors.some((e) => e.includes("comment")));
+  assert.ok(errors.some((e) => e.includes("task.comment is too long")));
+  assert.ok(errors.some((e) => e.includes("context.notes")));
 });
 
 test("allows task comment to be null (clears the field)", () => {
@@ -203,7 +204,8 @@ test("rejects a scratchpad over 5000 chars", () => {
   p.meta.scratchpad = "x".repeat(5001);
   const { ok, errors } = validateProject(p);
   assert.equal(ok, false);
-  assert.ok(errors.some((e) => e.includes("scratchpad")));
+  assert.ok(errors.some((e) => e.includes("meta.scratchpad is too long")));
+  assert.ok(errors.some((e) => e.includes("short live status banner")));
 });
 
 test("requires at least one swimlane and priority", () => {

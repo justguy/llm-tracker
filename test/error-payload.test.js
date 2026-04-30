@@ -18,6 +18,15 @@ test("inferTrackerErrorHint explains patch-mode task creation guardrail", () => 
   assert.match(hint, /owning row/);
 });
 
+test("inferTrackerErrorHint explains overlong task comments", () => {
+  const hint = inferTrackerErrorHint(
+    "/tasks/46/comment: task.comment is too long; limit 500 chars. Keep comment as a short decision note and move full evidence/status detail into context.notes."
+  );
+  assert.match(hint, /500 chars/);
+  assert.match(hint, /context\.notes/);
+  assert.match(hint, /references\[\]/);
+});
+
 test("buildTrackerErrorBody emits error, type, hint, and legacy compatibility fields", () => {
   const body = buildTrackerErrorBody({
     message: "/tasks/0/references/0: reference must use path:line or path:line-line; bare URLs are invalid",

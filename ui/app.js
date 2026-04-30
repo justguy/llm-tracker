@@ -7,7 +7,7 @@ import { HelpModal } from "./modals/help.js";
 import { ProjectIntelligenceModal, TaskIntelligenceModal } from "./modals/intelligence.js";
 import { SettingsModal } from "./modals/settings.js";
 import { CommandPalette } from "./palette.js";
-import { ProjectPane } from "./project-pane.js";
+import { ErrorBanner, ProjectPane } from "./project-pane.js";
 import { ScratchpadRow } from "./scratchpad-row.js";
 import { ConnectionPip, Drawer, EmptyState } from "./shell-chrome.js";
 import {
@@ -690,7 +690,7 @@ function App() {
           pinnedSlugs=${pinnedSlugs}
           onTogglePinProject=${onTogglePinProject}
         />
-        ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
+        <${ErrorBanner} error=${err} />
         <div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>
         <${ConnectionPip} up=${wsUp} />
         ${drawerEl}

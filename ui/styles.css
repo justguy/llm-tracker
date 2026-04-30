@@ -2580,6 +2580,12 @@ body {
 }
 .error-banner b::before { content: "["; }
 .error-banner b::after { content: "]"; }
+.error-banner__hint {
+  margin-top: 4px;
+  color: var(--ink-2);
+  line-height: 1.45;
+  letter-spacing: 0;
+}
 
 /* ─────── Empty state ─────── */
 .empty-state {

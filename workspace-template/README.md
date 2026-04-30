@@ -34,7 +34,7 @@ Before you write anything:
 - WebSocket upgrades to `/ws` use the same origin gate. Cross-origin browser tabs are rejected with `403`, so other sites cannot subscribe to tracker broadcasts.
 - If the operator set `LLM_TRACKER_TOKEN`, every mutating request must carry `Authorization: Bearer <token>` (or `X-LLM-Tracker-Token: <token>`). The workspace `llm-tracker` CLI reads it from the same env var. The browser UI authenticates via a short-lived HttpOnly same-origin session cookie; the raw token is not exposed to page JavaScript.
 - If the operator set `LLM_TRACKER_TOKEN`, `/ws` also requires that bearer token header (or `X-LLM-Tracker-Token`) unless the upgrade request carries the browser UI's short-lived same-origin session cookie.
-- Default JSON body limit is 1 MB. Oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) are rejected before merge.
+- Default JSON body limit is 1 MB. Oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) are rejected before merge. Direct tracker-file edits are validated after the file changes; if they fail schema, the hub keeps the prior valid state live and writes a hint-bearing `<slug>.errors.json`.
 - Deleted projects can be brought back by a human with `llm-tracker restore <slug>` or `POST /api/projects/<slug>/restore`. Agents must not call this unless explicitly asked.
 
 ### Supported topologies
@@ -1028,7 +1028,7 @@ Additional keys render as `key: value` rows automatically.
 
 - **Mode A (file patch)** → hub writes `patches/<same-name>.errors.json` next to your patch. Patch file is kept so you can fix and retry.
 - **Mode B (HTTP)** → response body has `ok: false` and `{error, type, hint}`. Use `curl -i` to capture full headers.
-- **Direct file edit of `trackers/<slug>.json`** (registration only) → `trackers/<slug>.errors.json`.
+- **Direct file edit of `trackers/<slug>.json`** (registration only) → `trackers/<slug>.errors.json`, while the prior valid state remains live in the hub/UI.
 
 Error shape:
 
@@ -1044,7 +1044,7 @@ Error shape:
 }
 ```
 
-`type` / `kind` is `parse` (malformed JSON) or `schema` (valid JSON, fails §4 or §4.5). `message` is kept for compatibility; prefer `error` + `hint` in new consumers. Prior valid state remains live.
+`type` / `kind` is `parse` (malformed JSON) or `schema` (valid JSON, fails §4 or §4.5). `message` is kept for compatibility; prefer `error` + `hint` in new consumers. Prior valid state remains live. If a limit guard fires, do not cram the same text back into the rejected field: keep `task.comment` short, keep `task.blocker_reason` focused on the active blocker, keep `meta.scratchpad` as a live status banner, and move durable detail into `context.*`, `references[]`, `definition_of_done`, or `expected_changes`.
 
 ---
 

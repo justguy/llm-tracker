@@ -654,7 +654,7 @@ Creating a second accidental workspace is the wrong fix because it forks the sou
 
 ### Body parsing & error format
 
-Express JSON body limit is **1 MB** by default and can be overridden with `LLM_TRACKER_BODY_LIMIT`. Route-level guards reject oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) before merge. Any body-parser failure (too-large, malformed JSON) is handled by a custom error middleware that returns `{error, type, hint}` instead of Express's default HTML error page — so LLMs always get a machine-readable response.
+Express JSON body limit is **1 MB** by default and can be overridden with `LLM_TRACKER_BODY_LIMIT`. Route-level guards reject oversized `meta.scratchpad` (> 5000 chars), `task.comment` (> 500 chars), and `task.blocker_reason` (> 2000 chars) before merge. Direct tracker-file edits cannot be preflighted by the route guard, so the watcher validates the merged state, keeps the previous valid project live on failure, writes a hint-bearing `<slug>.errors.json`, and surfaces that hint in the UI banner. Any body-parser failure (too-large, malformed JSON) is handled by a custom error middleware that returns `{error, type, hint}` instead of Express's default HTML error page — so LLMs always get a machine-readable response.
 
 ### Cold-start resume
 

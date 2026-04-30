@@ -282,7 +282,12 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
             hint: "Mutating requests must come from this hub origin or a loopback origin."
           });
         }
-      } catch {}
+      } catch {
+        return res.status(403).json({
+          error: "invalid Referer header",
+          hint: "Mutating requests must come from this hub origin or a loopback origin."
+        });
+      }
     }
     next();
   });
@@ -490,7 +495,17 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
   app.post("/api/projects/:slug/reload", async (req, res) => {
     const result = await reloadProject(req.params.slug);
-    if (!result?.ok) return res.status(result?.status || 400).json({ error: result?.message || "reload failed" });
+    if (!result?.ok) {
+      return res.status(result?.status || 400).json(
+        buildTrackerErrorBody({
+          message: result?.message || result?.error || "reload failed",
+          kind: result?.kind || result?.type || null,
+          type: result?.type || result?.kind || null,
+          hint: result?.hint || null,
+          path: result?.path || null
+        })
+      );
+    }
     res.json({
       ok: true,
       slug: req.params.slug,
@@ -1053,9 +1068,19 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
           ...targetFor(result.slug, entry)
         });
       } else {
+        const errorBody = buildTrackerErrorBody({
+          message: result.reason || result.message || result.error || "reload failed",
+          kind: result.kind || result.type || null,
+          type: result.type || result.kind || null,
+          hint: result.hint || null,
+          path: result.path || null
+        });
         errors.push({
           slug: result.slug || slugFromFile(filePath),
-          message: result.reason || result.message || "reload failed"
+          message: errorBody.error,
+          type: errorBody.type,
+          hint: errorBody.hint || null,
+          path: errorBody.path || null
         });
       }
     }
