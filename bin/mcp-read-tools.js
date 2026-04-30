@@ -5,6 +5,8 @@ import { getBriefPayload } from "../hub/briefs.js";
 import { getChangedPayload } from "../hub/changed.js";
 import { getDecisionsPayload } from "../hub/decisions.js";
 import { getExecutePayload } from "../hub/execute.js";
+import { getHandoffPayload } from "../hub/handoff.js";
+import { getHygienePayload, HYGIENE_DEFAULTS } from "../hub/hygiene.js";
 import { getNextPayload } from "../hub/next.js";
 import { getVerifyPayload } from "../hub/verify.js";
 import { getWhyPayload } from "../hub/why.js";
@@ -178,6 +180,33 @@ export function createReadTools(workspace) {
         })
     },
     {
+      name: "tracker_hygiene",
+      description:
+        "Return board hygiene helpers for one project: empty swimlanes (with removable flag), orphaned priorities, stale in_progress tasks, and blocked or decision-gated tasks missing narrative.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" },
+          staleAfterRevs: {
+            type: "integer",
+            minimum: HYGIENE_DEFAULTS.staleAfterRevsMin,
+            maximum: HYGIENE_DEFAULTS.staleAfterRevsMax,
+            description:
+              "How many revs an in_progress task may go untouched before it is reported as stale. Defaults to 10."
+          }
+        },
+        required: ["slug"]
+      },
+      handler: async (args = {}) =>
+        readToolPayload(getHygienePayload, workspace, nonEmptyString(args.slug), {
+          staleAfterRevs: clampInt(args.staleAfterRevs, {
+            fallback: HYGIENE_DEFAULTS.staleAfterRevs,
+            min: HYGIENE_DEFAULTS.staleAfterRevsMin,
+            max: HYGIENE_DEFAULTS.staleAfterRevsMax
+          })
+        })
+    },
+    {
       name: "tracker_decisions",
       description: "Return recent project decisions derived from task comments.",
       inputSchema: {
@@ -223,6 +252,29 @@ export function createReadTools(workspace) {
       handler: async (args = {}) =>
         readToolPayload(getVerifyPayload, workspace, nonEmptyString(args.slug), {
           taskId: nonEmptyString(args.taskId)
+        })
+    },
+    {
+      name: "tracker_handoff",
+      description:
+        "Return a deterministic handoff pack for one task: brief + why + execution contract + recent decisions + a pre-rendered markdown handoffPrompt for the next agent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Project slug" },
+          taskId: { type: "string", description: "Task id" },
+          fromAssignee: { type: "string", description: "Optional outgoing assignee label" },
+          toAssignee: { type: "string", description: "Optional incoming assignee label" },
+          from: { type: "string", description: "Alias for fromAssignee" },
+          to: { type: "string", description: "Alias for toAssignee" }
+        },
+        required: ["slug", "taskId"]
+      },
+      handler: async (args = {}) =>
+        readToolPayload(getHandoffPayload, workspace, nonEmptyString(args.slug), {
+          taskId: nonEmptyString(args.taskId),
+          fromAssignee: nonEmptyString(args.fromAssignee ?? args.from),
+          toAssignee: nonEmptyString(args.toAssignee ?? args.to)
         })
     },
     {

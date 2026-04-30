@@ -84,6 +84,33 @@ export function listPrompts() {
       ]
     },
     {
+      name: "tracker_handoff_task",
+      description:
+        "Generate a deterministic handoff pack and ready-to-paste prompt when transferring a task between agents.",
+      arguments: [
+        {
+          name: "slug",
+          description: "Project slug",
+          required: true
+        },
+        {
+          name: "taskId",
+          description: "Task id",
+          required: true
+        },
+        {
+          name: "from",
+          description: "Outgoing assignee label",
+          required: false
+        },
+        {
+          name: "to",
+          description: "Incoming assignee label",
+          required: false
+        }
+      ]
+    },
+    {
       name: "tracker_patch_write",
       description: "Explain the file-based patch workflow when the hub is unavailable.",
       arguments: [
@@ -167,6 +194,22 @@ export function getPrompt(workspace, name, args = {}) {
           "If verification fails, explain the missing evidence or unmet checks explicitly instead of marking the task complete."
         ].join("\n")
       );
+    case "tracker_handoff_task": {
+      const from = typeof args.from === "string" && args.from.trim() ? args.from.trim() : null;
+      const to = typeof args.to === "string" && args.to.trim() ? args.to.trim() : null;
+      const argSummary = [`slug: \`${slug}\``, `taskId: \`${taskId}\``];
+      if (from) argSummary.push(`fromAssignee: \`${from}\``);
+      if (to) argSummary.push(`toAssignee: \`${to}\``);
+      return makePrompt(
+        `Generate a deterministic handoff for ${slug}/${taskId}.`,
+        [
+          `Call \`tracker_handoff\` with ${argSummary.join(", ")} to assemble brief, why, execution contract, recent decisions, and a pre-rendered markdown handoff prompt.`,
+          "Paste the returned `handoffPrompt` field to the next agent verbatim instead of synthesizing a handoff by hand.",
+          `If the next agent needs structural board context first, also call \`tracker_project_status\` for \`${slug}\`.`,
+          "Do not mark the task complete from inside the handoff — the receiving agent verifies via `tracker_verify` after picking it up."
+        ].join("\n")
+      );
+    }
     case "tracker_patch_write":
       return makePrompt(
         "Use the file-based patch workflow when the hub is unavailable.",

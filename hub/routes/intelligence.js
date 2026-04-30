@@ -1,8 +1,11 @@
 import { getBriefPayload } from "../briefs.js";
 import { getBlockersPayload } from "../blockers.js";
 import { getChangedPayload } from "../changed.js";
+import { buildStoreLookup } from "../cross-project-deps.js";
 import { getDecisionsPayload } from "../decisions.js";
 import { getExecutePayload } from "../execute.js";
+import { getHandoffPayload } from "../handoff.js";
+import { clampStaleAfterRevs, getHygienePayload, HYGIENE_DEFAULTS } from "../hygiene.js";
 import { getNextPayload } from "../next.js";
 import { getFuzzyPayload, getSearchPayload } from "../search.js";
 import { getVerifyPayload } from "../verify.js";
@@ -23,6 +26,13 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
   const queryValue = (value) => (Array.isArray(value) ? value[0] : value);
   const requireQuery = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
   const withTarget = (slug, payload) => ({ ...payload, ...targetFor(slug) });
+  const externalLookup = buildStoreLookup(store);
+  const staleAfterQuery = (value) => {
+    const raw = queryValue(value);
+    if (raw === undefined) return HYGIENE_DEFAULTS.staleAfterRevs;
+    const parsed = Number(raw);
+    return clampStaleAfterRevs(parsed);
+  };
 
   const pickHandler = async (req, res) => {
     const body = req.body || {};
@@ -44,6 +54,7 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
+      externalLookup,
       limit: clampLimit(req.query.limit, 5, 5),
       includeGated: truthyQueryFlag(req.query.includeGated)
     });
@@ -61,6 +72,7 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
+      externalLookup,
       query,
       limit: clampLimit(req.query.limit, 10, 50)
     });
@@ -80,6 +92,8 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
     const result = getFuzzyPayload({
       slug: req.params.slug,
       entry,
+      workspace,
+      externalLookup,
       query,
       limit: clampLimit(req.query.limit, 10, 50)
     });
@@ -97,6 +111,7 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
+      externalLookup,
       taskId: req.params.taskId
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
@@ -111,6 +126,7 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
+      externalLookup,
       taskId: req.params.taskId
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
@@ -125,6 +141,7 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
+      externalLookup,
       taskId: req.params.taskId
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
@@ -139,7 +156,25 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
+      externalLookup,
       taskId: req.params.taskId
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
+    res.json(withTarget(req.params.slug, result.payload));
+  });
+
+  app.get("/api/projects/:slug/tasks/:taskId/handoff", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const result = getHandoffPayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      externalLookup,
+      taskId: req.params.taskId,
+      fromAssignee: requireQuery(queryValue(req.query.from)),
+      toAssignee: requireQuery(queryValue(req.query.to))
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.message });
     res.json(withTarget(req.params.slug, result.payload));
@@ -152,7 +187,8 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
     const payload = getBlockersPayload({
       workspace,
       slug: req.params.slug,
-      entry
+      entry,
+      externalLookup
     });
     res.json(withTarget(req.params.slug, payload));
   });
@@ -171,6 +207,7 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
+      externalLookup,
       fromRev,
       limit: clampLimit(req.query.limit, 20, 50)
     });
@@ -186,6 +223,20 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       slug: req.params.slug,
       entry,
       limit: clampLimit(req.query.limit, 20, 20)
+    });
+    res.json(withTarget(req.params.slug, payload));
+  });
+
+  app.get("/api/projects/:slug/hygiene", (req, res) => {
+    const entry = store.get(req.params.slug);
+    if (!entry) return res.status(404).json({ error: "not found" });
+
+    const payload = getHygienePayload({
+      workspace,
+      slug: req.params.slug,
+      entry,
+      externalLookup,
+      staleAfterRevs: staleAfterQuery(req.query.staleAfterRevs)
     });
     res.json(withTarget(req.params.slug, payload));
   });

@@ -1,6 +1,7 @@
 import { html } from "htm/preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import {
+  ExternalDependencyList,
   HistoryList,
   ReferenceList,
   SnippetList,
@@ -68,6 +69,7 @@ function BriefContent({ payload, onOpenTask }) {
   const task = payload.task || {};
   const goal = task.goal || null;
   const deps = payload.dependencies || [];
+  const externalDeps = task.external_dependencies || [];
   const refs = payload.references || [];
   const snippets = payload.snippets || [];
   const history = payload.recentHistory || [];
@@ -82,6 +84,12 @@ function BriefContent({ payload, onOpenTask }) {
         ? html`<${TaskSummaryList} items=${deps} empty="none" onOpenTask=${onOpenTask} />`
         : NONE}
     </${DrawerSection}>
+
+    ${externalDeps.length > 0
+      ? html`<${DrawerSection} label="EXTERNAL DEPENDENCIES">
+          <${ExternalDependencyList} items=${externalDeps} />
+        </${DrawerSection}>`
+      : null}
 
     <${DrawerSection} label="REFERENCES">
       ${refs.length > 0

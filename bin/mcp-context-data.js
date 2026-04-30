@@ -23,7 +23,9 @@ export const READ_TOOL_NAMES = [
   "tracker_verify",
   "tracker_blockers",
   "tracker_changed",
-  "tracker_history"
+  "tracker_handoff",
+  "tracker_history",
+  "tracker_hygiene"
 ];
 
 export const WRITE_TOOL_NAMES = [

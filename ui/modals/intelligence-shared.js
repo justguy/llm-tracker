@@ -111,6 +111,29 @@ export function TaskSummaryList({ items = [], empty = "none", onOpenTask = null 
   `;
 }
 
+export function ExternalDependencyList({ items = [], empty = "no external dependencies" }) {
+  if (!items.length) return html`<p class="muted">${empty}</p>`;
+  return html`
+    <ul class="intel-task-list">
+      ${items.map((item) => html`
+        <li key=${item.raw} class="intel-task-list-item">
+          <div class="intel-task-list-head">
+            <span class="badge slug-badge" title=${`External project: ${item.slug}`}>${item.slug}</span>
+            <span class="intel-task-link" title=${`External task ${item.slug}:${item.taskId}`}>${item.taskId}</span>
+            <span class="intel-task-title">${item.title || (item.exists ? "" : "(missing)")}</span>
+            ${item.status
+              ? html`<span class=${`badge status-${item.status}`}>${humanizeValue(item.status)}</span>`
+              : html`<span class="badge status-blocked">EXTERNAL</span>`}
+            ${item.blocking
+              ? html`<span class="badge status-blocked" title="Blocking this task">BLOCKING</span>`
+              : null}
+          </div>
+        </li>
+      `)}
+    </ul>
+  `;
+}
+
 export function SnippetList({ items = [], empty = "no snippets" }) {
   if (!items.length) return html`<p class="muted">${empty}</p>`;
   return html`

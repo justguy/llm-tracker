@@ -176,8 +176,10 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_decisions",
       "tracker_execute",
       "tracker_fuzzy_search",
+      "tracker_handoff",
       "tracker_help",
       "tracker_history",
+      "tracker_hygiene",
       "tracker_next",
       "tracker_patch",
       "tracker_pick",
@@ -277,6 +279,17 @@ test("MCP prompts expose tracker workflows and operational guidance", async () =
     assert.ok(names.includes("tracker_execute_task"));
     assert.ok(names.includes("tracker_verify_task"));
     assert.ok(names.includes("tracker_patch_write"));
+    assert.ok(names.includes("tracker_handoff_task"));
+
+    const handoff = await client.request("prompts/get", {
+      name: "tracker_handoff_task",
+      arguments: { slug: "test-project", taskId: "t1", from: "claude", to: "codex" }
+    });
+    const handoffText = handoff.result.messages[0].content.text;
+    assert.match(handoffText, /tracker_handoff/);
+    assert.match(handoffText, /test-project/);
+    assert.match(handoffText, /handoffPrompt/);
+    assert.match(handoffText, /codex/);
 
     const startHere = await client.request("prompts/get", { name: "tracker_start_here", arguments: {} });
     const startText = startHere.result.messages[0].content.text;

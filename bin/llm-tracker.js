@@ -9,6 +9,8 @@ import { cmdChanged } from "./commands/changed.js";
 import { cmdDecisions } from "./commands/decisions.js";
 import { cmdExecute } from "./commands/execute.js";
 import { cmdFuzzy } from "./commands/fuzzy.js";
+import { cmdHandoff } from "./commands/handoff.js";
+import { cmdHygiene } from "./commands/hygiene.js";
 import { startMcpServer } from "./mcp-server.js";
 import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
@@ -586,7 +588,9 @@ async function main() {
   if (cmd === "decisions") return cmdDecisions(args, { resolveWorkspace, httpRequest });
   if (cmd === "execute") return cmdExecute(args, { resolveWorkspace, httpRequest });
   if (cmd === "verify") return cmdVerify(args, { resolveWorkspace, httpRequest });
+  if (cmd === "handoff") return cmdHandoff(args, { resolveWorkspace, httpRequest });
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
+  if (cmd === "hygiene") return cmdHygiene(args, { resolveWorkspace, httpRequest });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
   if (cmd === "search") return cmdSearch(args, { resolveWorkspace, httpRequest });
   if (cmd === "fuzzy" || cmd === "fuzzy-search") return cmdFuzzy(args, { resolveWorkspace, httpRequest });
@@ -622,7 +626,9 @@ Usage:
   llm-tracker decisions <slug> [--json] [--limit N]    Print recent project decisions (requires hub)
   llm-tracker execute <slug> <taskId> [--json]         Print a deterministic execution pack (requires hub)
   llm-tracker verify <slug> <taskId> [--json]          Print a deterministic verification pack (requires hub)
+  llm-tracker handoff <slug> <taskId> [--from ID] [--to ID] [--json] [--prompt-only] Print a handoff pack with a ready-to-paste prompt (requires hub)
   llm-tracker blockers <slug> [--json]                 Print structurally blocked tasks (requires hub)
+  llm-tracker hygiene <slug> [--json] [--stale-after-revs N] Print board hygiene findings (requires hub)
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
   llm-tracker search <slug> <query> [--json] [--limit N] Semantic task search with local embeddings (requires hub)
   llm-tracker fuzzy|fuzzy-search <slug> <query> [--json] [--limit N]  Fuzzy lexical task search (requires hub)

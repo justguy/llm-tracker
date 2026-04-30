@@ -7,6 +7,7 @@ function executionContract(task) {
     expected_changes: task.expected_changes || [],
     allowed_paths: task.allowed_paths || [],
     approval_required_for: task.requires_approval || [],
+    repos: task.repos || null,
     traceability: task.traceability || {}
   };
 }
@@ -24,6 +25,16 @@ function buildExecutionPlan(task, references = []) {
       kind: "blockers",
       text: `Resolve blockers first: ${(task.blocked_by || task.blocking_on || []).join(", ")}`
     });
+    for (const ext of task.external_dependencies || []) {
+      if (!ext.blocking) continue;
+      const detail = ext.exists
+        ? `status=${ext.status || "?"}`
+        : "missing in workspace";
+      plan.push({
+        kind: "external_blocker",
+        text: `External dependency ${ext.slug}:${ext.taskId} (${detail})`
+      });
+    }
   } else if (task.actionability === "decision_gated") {
     plan.push({
       kind: "decision_required",
@@ -50,6 +61,33 @@ function buildExecutionPlan(task, references = []) {
     });
   }
 
+  if (task.repos) {
+    if (task.repos.primary) {
+      plan.push({
+        kind: "primary_repo",
+        text: `Primary repo: ${task.repos.primary}`
+      });
+    }
+    if ((task.repos.secondary || []).length > 0) {
+      plan.push({
+        kind: "secondary_repos",
+        text: `Touches secondary repos: ${task.repos.secondary.join(", ")}`
+      });
+    }
+    for (const [repo, paths] of Object.entries(task.repos.allowed_paths || {})) {
+      plan.push({
+        kind: "repo_allowed_paths",
+        text: `In ${repo}, keep edits within ${paths.join(", ")}`
+      });
+    }
+    for (const repo of task.repos.approval_required_for || []) {
+      plan.push({
+        kind: "repo_approval",
+        text: `Stop for approval before editing ${repo}`
+      });
+    }
+  }
+
   for (const constraint of task.constraints || []) {
     plan.push({
       kind: "constraint",
@@ -58,6 +96,7 @@ function buildExecutionPlan(task, references = []) {
   }
 
   for (const approval of task.requires_approval || []) {
+    if (typeof approval === "string" && approval.startsWith("repo:")) continue;
     plan.push({
       kind: "approval",
       text: `Stop for approval before: ${approval}`
@@ -85,6 +124,7 @@ export function buildExecutePayload({
   slug,
   data,
   history = [],
+  externalLookup = null,
   taskId,
   references = null,
   snippets = [],
@@ -94,6 +134,7 @@ export function buildExecutePayload({
     slug,
     data,
     history,
+    externalLookup,
     taskId,
     references,
     snippets,
@@ -121,8 +162,8 @@ export function buildExecutePayload({
   };
 }
 
-export function getExecutePayload({ workspace, slug, entry, taskId, now }) {
-  const result = getBriefPayload({ workspace, slug, entry, taskId, now });
+export function getExecutePayload({ workspace, slug, entry, externalLookup, taskId, now }) {
+  const result = getBriefPayload({ workspace, slug, entry, externalLookup, taskId, now });
   if (!result.ok) return result;
 
   return {

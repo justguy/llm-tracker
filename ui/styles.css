@@ -2395,6 +2395,19 @@ body {
   border-color: var(--amber-dim);
 }
 
+.badge.slug-badge {
+  color: var(--cyan);
+  background: var(--cyan-soft);
+  border-color: var(--cyan);
+  letter-spacing: 0.04em;
+}
+
+.badge.status-blocked {
+  color: var(--block);
+  background: var(--block-soft);
+  border-color: var(--block);
+}
+
 .badge.comment-badge {
   position: absolute;
   bottom: 6px;

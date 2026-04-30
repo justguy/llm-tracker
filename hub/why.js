@@ -1,3 +1,4 @@
+import { buildWorkspaceLookup } from "./cross-project-deps.js";
 import { readHistory } from "./snapshots.js";
 import { selectBriefReferences } from "./briefs.js";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
@@ -31,6 +32,8 @@ function summarizeTaskForWhy(task, context) {
     decision_reason: summary.decision_reason,
     not_actionable_reason: summary.not_actionable_reason,
     requires_approval: summary.requires_approval,
+    repos: summary.repos,
+    external_dependencies: summary.external_dependencies,
     traceability: summary.traceability,
     comment: summary.comment,
     lastTouchedRev: summary.lastTouchedRev,
@@ -172,10 +175,11 @@ export function buildWhyPayload({
   slug,
   data,
   history = [],
+  externalLookup = null,
   taskId,
   now = new Date().toISOString()
 }) {
-  const context = buildProjectTaskContext({ data, history });
+  const context = buildProjectTaskContext({ data, history, externalLookup });
   const task = context.byId.get(taskId);
   if (!task) return null;
 
@@ -207,13 +211,17 @@ export function buildWhyPayload({
   };
 }
 
-export function getWhyPayload({ workspace, slug, entry, taskId, now }) {
+export function getWhyPayload({ workspace, slug, entry, externalLookup, taskId, now }) {
   if (!entry?.data) return { ok: false, status: 404, message: "not found" };
   const history = readHistory(workspace, slug);
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: entry.data });
   const payload = buildWhyPayload({
     slug,
     data: entry.data,
     history,
+    externalLookup: lookup,
     taskId,
     now
   });

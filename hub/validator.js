@@ -1,5 +1,6 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
+import { parseDependencyRef } from "./cross-project-deps.js";
 import { EFFORT_VALUES, REFERENCE_PATTERN_SOURCE } from "./references.js";
 import { STATUS_VALUES, TASK_OUTCOME_VALUES } from "./status-vocabulary.js";
 
@@ -119,6 +120,30 @@ const schema = {
             type: ["array", "null"],
             items: { type: "string" }
           },
+          repos: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              primary: { type: ["string", "null"], minLength: 1 },
+              secondary: {
+                type: ["array", "null"],
+                items: { type: "string", minLength: 1 },
+                uniqueItems: true
+              },
+              allowed_paths: {
+                type: ["object", "null"],
+                additionalProperties: {
+                  type: "array",
+                  items: { type: "string", minLength: 1 }
+                }
+              },
+              approval_required_for: {
+                type: ["array", "null"],
+                items: { type: "string", minLength: 1 },
+                uniqueItems: true
+              }
+            }
+          },
           context: { type: "object" },
           updatedAt: { type: ["string", "null"] },
           rev: { type: ["integer", "null"] }
@@ -186,8 +211,63 @@ export function validateProject(data) {
   for (let i = 0; i < data.tasks.length; i++) {
     const t = data.tasks[i];
     for (const dep of t.dependencies || []) {
-      if (!taskIds.has(dep)) {
+      const ref = parseDependencyRef(dep);
+      if (!ref) {
+        errors.push(`/tasks/${i}/dependencies: "${dep}" is not a valid task id reference`);
+        continue;
+      }
+      if (ref.kind === "external") {
+        // Cross-project dependencies are validated for syntax only. Slug + task
+        // existence are checked at read time when the workspace lookup runs.
+        continue;
+      }
+      if (!taskIds.has(ref.taskId)) {
         errors.push(`/tasks/${i}/dependencies: "${dep}" is not a task id in this project`);
+      }
+    }
+
+    if (t.repos && typeof t.repos === "object") {
+      const primary = typeof t.repos.primary === "string" ? t.repos.primary.trim() : "";
+      const secondary = Array.isArray(t.repos.secondary)
+        ? t.repos.secondary
+            .filter((value) => typeof value === "string" && value.trim())
+            .map((value) => value.trim())
+        : [];
+      const declared = new Set();
+      if (primary) declared.add(primary);
+      for (const repo of secondary) {
+        if (repo === primary) {
+          errors.push(
+            `/tasks/${i}/repos/secondary: "${repo}" cannot also be the primary repo`
+          );
+          continue;
+        }
+        if (declared.has(repo)) {
+          errors.push(`/tasks/${i}/repos/secondary: duplicate repo "${repo}"`);
+          continue;
+        }
+        declared.add(repo);
+      }
+
+      if (t.repos.allowed_paths && typeof t.repos.allowed_paths === "object") {
+        for (const repo of Object.keys(t.repos.allowed_paths)) {
+          if (!declared.has(repo)) {
+            errors.push(
+              `/tasks/${i}/repos/allowed_paths: "${repo}" is not declared in repos.primary or repos.secondary`
+            );
+          }
+        }
+      }
+
+      if (Array.isArray(t.repos.approval_required_for)) {
+        for (const repo of t.repos.approval_required_for) {
+          if (typeof repo !== "string" || !repo.trim()) continue;
+          if (!declared.has(repo)) {
+            errors.push(
+              `/tasks/${i}/repos/approval_required_for: "${repo}" is not declared in repos.primary or repos.secondary`
+            );
+          }
+        }
       }
     }
 

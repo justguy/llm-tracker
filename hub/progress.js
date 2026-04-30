@@ -29,8 +29,8 @@ export function pctFor(tasks) {
   return denom === 0 ? 0 : Math.round((score / denom) * 100);
 }
 
-export function deriveBlocked(tasks) {
-  const context = buildProjectTaskContext({ data: { tasks } });
+export function deriveBlocked(tasks, { externalLookup = null } = {}) {
+  const context = buildProjectTaskContext({ data: { tasks }, externalLookup });
   const blocked = {};
   for (const t of tasks) {
     const summary = summarizeTask(t, context);
@@ -47,8 +47,8 @@ function zeroActionabilityCounts() {
   return counts;
 }
 
-export function deriveActionabilitySummary(data) {
-  const context = buildProjectTaskContext({ data });
+export function deriveActionabilitySummary(data, { externalLookup = null } = {}) {
+  const context = buildProjectTaskContext({ data, externalLookup });
   const counts = zeroActionabilityCounts();
   const byTask = {};
 
@@ -72,7 +72,7 @@ export function deriveActionabilitySummary(data) {
   };
 }
 
-export function deriveProject(data) {
+export function deriveProject(data, { externalLookup = null } = {}) {
   const perSwimlane = {};
   for (const lane of data.meta.swimlanes) {
     const laneTasks = data.tasks.filter((t) => t.placement.swimlaneId === lane.id);
@@ -87,7 +87,7 @@ export function deriveProject(data) {
     pct: pctFor(data.tasks),
     total: data.tasks.length,
     perSwimlane,
-    blocked: deriveBlocked(data.tasks),
-    actionability: deriveActionabilitySummary(data)
+    blocked: deriveBlocked(data.tasks, { externalLookup }),
+    actionability: deriveActionabilitySummary(data, { externalLookup })
   };
 }

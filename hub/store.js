@@ -33,6 +33,20 @@ import {
 } from "./snapshots.js";
 import { buildPickedPayload, resolvePickSelection } from "./pick.js";
 
+function lookupFromStoreProjects(projects, selfSlug, selfData) {
+  return (slug, taskId) => {
+    const data = slug === selfSlug ? selfData : projects.get(slug)?.data;
+    if (!data || !taskId) return { exists: false, status: null, title: null };
+    const task = (data.tasks || []).find((item) => item?.id === taskId);
+    if (!task) return { exists: false, status: null, title: null };
+    return {
+      exists: true,
+      status: task.status || null,
+      title: task.title || null
+    };
+  };
+}
+
 export function slugFromFile(filePath) {
   const base = basename(filePath);
   if (!base.endsWith(".json")) return null;
@@ -507,10 +521,11 @@ export class Store {
   }
 
   _entry(slug, filePath, data, base, rev, notes = defaultNotes()) {
+    const externalLookup = lookupFromStoreProjects(this.projects, slug, data);
     return {
       data,
       base,
-      derived: deriveProject(data),
+      derived: deriveProject(data, { externalLookup }),
       path: filePath,
       rev,
       error: null,
@@ -1177,10 +1192,12 @@ export class Store {
 
       const file = trackerPath(this.workspace, slug);
       const history = readHistory(this.workspace, slug);
+      const externalLookup = lookupFromStoreProjects(this.projects, slug, current.data);
       const selection = resolvePickSelection({
         slug,
         data: current.data,
         history,
+        externalLookup,
         taskId,
         assignee,
         force
@@ -1219,6 +1236,7 @@ export class Store {
             slug,
             data: current.data,
             history,
+            externalLookup,
             taskId: selection.taskId,
             autoSelected: selection.autoSelected,
             selectedBecause: selection.selectedBecause,
@@ -1257,6 +1275,7 @@ export class Store {
           slug,
           data: newState,
           history: [...history, { rev: newRev, delta }],
+          externalLookup: lookupFromStoreProjects(this.projects, slug, newState),
           taskId: selection.taskId,
           autoSelected: selection.autoSelected,
           selectedBecause: selection.selectedBecause,

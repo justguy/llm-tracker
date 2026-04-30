@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildWorkspaceLookup } from "./cross-project-deps.js";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
 const DEFAULT_LIMIT = 10;
@@ -511,13 +512,14 @@ async function embedText(text, runtime) {
   }
 }
 
-async function ensureSemanticIndex({ workspace, slug, entry, runtime }) {
+async function ensureSemanticIndex({ workspace, slug, entry, runtime, externalLookup = null }) {
   const key = cacheKey(workspace, slug);
   const rev = entry?.rev ?? entry?.data?.meta?.rev ?? null;
+  const cacheable = !externalLookup;
   const cached = semanticIndexCache.get(key);
-  if (cached && cached.rev === rev) return { items: cached.items, runtime };
+  if (cacheable && cached && cached.rev === rev) return { items: cached.items, runtime };
 
-  const context = buildProjectTaskContext({ data: entry?.data });
+  const context = buildProjectTaskContext({ data: entry?.data, externalLookup });
   const tasks = (entry?.data?.tasks || []).map((task) => ({
     task,
     summary: summarizeTask(task, context),
@@ -535,7 +537,7 @@ async function ensureSemanticIndex({ workspace, slug, entry, runtime }) {
     });
   }
 
-  semanticIndexCache.set(key, { rev, items });
+  if (cacheable) semanticIndexCache.set(key, { rev, items });
   return { items, runtime: activeRuntime };
 }
 
@@ -680,6 +682,7 @@ export async function getSearchPayload({
   workspace,
   slug,
   entry,
+  externalLookup = null,
   query,
   limit = DEFAULT_LIMIT,
   now = new Date().toISOString()
@@ -690,10 +693,13 @@ export async function getSearchPayload({
   const state = queryState(query);
   const rev = entry.rev ?? entry.data.meta?.rev ?? null;
   if (!state.raw) return emptyPayload({ slug, rev, query: "", mode: "semantic", now, limit: cappedLimit, model: EMBEDDING_MODEL });
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: entry.data });
 
   try {
     const runtime = await getExtractorRuntime();
-    const indexed = await ensureSemanticIndex({ workspace, slug, entry, runtime });
+    const indexed = await ensureSemanticIndex({ workspace, slug, entry, runtime, externalLookup: lookup });
     const embeddedQuery = await embedText(state.raw, indexed.runtime);
     const all = indexed.items
       .map((item) => ({
@@ -724,6 +730,7 @@ export async function getSearchPayload({
     const fallback = getFuzzyPayload({
       slug,
       entry,
+      externalLookup: lookup,
       query: state.raw,
       limit: cappedLimit,
       now
@@ -741,6 +748,8 @@ export async function getSearchPayload({
 export function getFuzzyPayload({
   slug,
   entry,
+  workspace = null,
+  externalLookup = null,
   query,
   limit = DEFAULT_LIMIT,
   now = new Date().toISOString()
@@ -752,7 +761,10 @@ export function getFuzzyPayload({
   const rev = entry.rev ?? entry.data.meta?.rev ?? null;
   if (!state.raw) return emptyPayload({ slug, rev, query: "", mode: "fuzzy", now, limit: cappedLimit });
 
-  const context = buildProjectTaskContext({ data: entry.data });
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: entry.data });
+  const context = buildProjectTaskContext({ data: entry.data, externalLookup: lookup });
   const all = (entry.data.tasks || [])
     .map((task) => fuzzyTaskMatch(task, summarizeTask(task, context), state))
     .filter(Boolean)
@@ -776,7 +788,10 @@ export function getFuzzyPayload({
   };
 }
 
-export async function buildSearchPayload({ slug, data, query, limit, now, workspace = null }) {
+export async function buildSearchPayload({ slug, data, query, limit, now, workspace = null, externalLookup = null }) {
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: data });
   return getSearchPayload({
     workspace,
     slug,
@@ -784,19 +799,25 @@ export async function buildSearchPayload({ slug, data, query, limit, now, worksp
       data,
       rev: data?.meta?.rev ?? null
     },
+    externalLookup: lookup,
     query,
     limit,
     now
   });
 }
 
-export function buildFuzzySearchPayload({ slug, data, query, limit, now }) {
+export function buildFuzzySearchPayload({ slug, data, query, limit, now, workspace = null, externalLookup = null }) {
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: data });
   return getFuzzyPayload({
     slug,
     entry: {
       data,
       rev: data?.meta?.rev ?? null
     },
+    workspace,
+    externalLookup: lookup,
     query,
     limit,
     now

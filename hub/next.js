@@ -1,3 +1,4 @@
+import { buildWorkspaceLookup } from "./cross-project-deps.js";
 import { readHistory } from "./snapshots.js";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
@@ -99,11 +100,12 @@ export function buildNextPayload({
   slug,
   data,
   history = [],
+  externalLookup = null,
   limit = 5,
   includeGated = false,
   now = new Date().toISOString()
 }) {
-  const context = buildProjectTaskContext({ data, history });
+  const context = buildProjectTaskContext({ data, history, externalLookup });
 
   const activeSummaries = (data?.tasks || [])
     .filter((task) => task.status === "not_started" || task.status === "in_progress")
@@ -142,13 +144,25 @@ export function buildNextPayload({
   };
 }
 
-export function getNextPayload({ workspace, slug, entry, limit = 5, includeGated = false, now }) {
+export function getNextPayload({
+  workspace,
+  slug,
+  entry,
+  externalLookup,
+  limit = 5,
+  includeGated = false,
+  now
+}) {
   if (!entry?.data) return null;
   const history = readHistory(workspace, slug);
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: entry.data });
   return buildNextPayload({
     slug,
     data: entry.data,
     history,
+    externalLookup: lookup,
     limit,
     includeGated,
     now

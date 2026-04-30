@@ -314,10 +314,12 @@ curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/brief
 curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/why
 curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/execute
 curl http://localhost:4400/api/projects/<slug>/tasks/<taskId>/verify
+curl "http://localhost:4400/api/projects/<slug>/tasks/<taskId>/handoff?from=<id>&to=<id>"
 
 # Project-level context
 curl "http://localhost:4400/api/projects/<slug>/decisions?limit=20"
 curl http://localhost:4400/api/projects/<slug>/blockers
+curl "http://localhost:4400/api/projects/<slug>/hygiene?staleAfterRevs=10"
 curl "http://localhost:4400/api/projects/<slug>/changed?fromRev=<rev>&limit=20"
 curl "http://localhost:4400/api/projects/<slug>/history?limit=50"
 
@@ -487,6 +489,8 @@ For task pickup, prefer the atomic claim flow over hand-built status patches:
 - `npx llm-tracker why <slug> <task-id>`
 - `GET /api/projects/:slug/decisions`
 - `npx llm-tracker decisions <slug>`
+- `GET /api/projects/:slug/hygiene`
+- `npx llm-tracker hygiene <slug>`
 - `GET /api/projects/:slug/tasks/:taskId/execute`
 - `npx llm-tracker execute <slug> <task-id>`
 - `POST /api/projects/:slug/start`
@@ -494,6 +498,8 @@ For task pickup, prefer the atomic claim flow over hand-built status patches:
 - `npx llm-tracker start <slug> <task-id> --assignee <model>` (`LLM_TRACKER_ASSIGNEE` may supply the assignee)
 - `GET /api/projects/:slug/tasks/:taskId/verify`
 - `npx llm-tracker verify <slug> <task-id>`
+- `GET /api/projects/:slug/tasks/:taskId/handoff?from=<id>&to=<id>`
+- `npx llm-tracker handoff <slug> <task-id> [--from ID] [--to ID]`
 - `POST /api/projects/:slug/pick`
 - `npx llm-tracker pick <slug> [task-id] --assignee <model>`
 

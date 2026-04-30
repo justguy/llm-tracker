@@ -85,7 +85,7 @@ When the tracker file lives inside a repo, tracker writes update the repo-visibl
 - **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
-- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
+- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
 - MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
 - If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
 - If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
@@ -194,7 +194,7 @@ Tasks are ordered by array index. Hub owns the order.
 | `status`         | enum (§5)                                      |    ✓    | `not_started` \| `in_progress` \| `complete` \| `deferred` |
 | `outcome`        | string \| null                                 |          | Optional first-class marker for a bounded slice that landed. Canonical value: `partial_slice_landed`. |
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓    | Both values must exist in `meta`.                     |
-| `dependencies`   | array of task IDs                              |          | Drives block state (§6).                              |
+| `dependencies`   | array of task IDs                              |          | Drives block state (§6). Each entry is `<taskId>` (in this project) or `<otherSlug>:<taskId>` (cross-project — the hub treats incomplete or missing external tasks as blockers; missing slug + taskId resolves to "blocking" so broken refs do not silently unblock work). |
 | `assignee`       | string \| null                                 |          | Your model ID when starting or claiming.              |
 | `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. Bare URLs are invalid. |
 | `references`     | array of strings \| null                       |          | Preferred additive source list. Use the same `path:line` or `path:line-line` format. Bare URLs are invalid. |
@@ -207,6 +207,7 @@ Tasks are ordered by array index. Hub owns the order.
 | `expected_changes` | array of strings \| null                     |          | Optional modules, files, or artifacts expected to change. |
 | `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
 | `approval_required_for` | array of strings \| null                |          | Optional approval categories that make the task less ready than peers. |
+| `repos`          | object \| null                                 |          | Optional cross-repo scope: `{ primary, secondary[], allowed_paths{repo: paths[]}, approval_required_for[] }`. Per-repo approvals add `repo:<id>` entries to `decision_required` and gate the task as `decision_gated`. |
 | `context`        | object (freeform)                              |          | Shallow-merged per key on patch. Set a key to `null` in the patch to delete it. Direct file edits do **not** bypass the merge — see §4.3b. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
@@ -330,6 +331,7 @@ When backfilling older tasks, write only author-owned metadata:
 - `expected_changes`
 - `allowed_paths`
 - `approval_required_for`
+- `repos` (cross-repo scope: `primary`, `secondary[]`, `allowed_paths{repo: paths[]}`, `approval_required_for[]`)
 
 Do **not** write derived fields:
 
@@ -387,6 +389,7 @@ For bounded active tasks, do not stop at retrieval-only fields if the execution 
 - `expected_changes`
 - `allowed_paths`
 - `approval_required_for`
+- `repos` when the task spans more than one repo
 
 If a patch only adds `references[]`, `effort`, `related`, and `comment`, treat it as **retrieval-only enrichment**. Do not describe it as a complete migration batch for that task.
 
@@ -486,7 +489,7 @@ The hub derives actionability separately from lifecycle `status`:
 | Value             | Meaning                                                                 |
 | ----------------- | ----------------------------------------------------------------------- |
 | `executable`      | Open task with no unresolved task blockers and no approval gate.        |
-| `blocked_by_task` | Open task blocked by one or more incomplete dependency tasks.           |
+| `blocked_by_task` | Open task blocked by one or more incomplete dependency tasks (intra-project or external `slug:taskId`). |
 | `decision_gated`  | Open task whose `approval_required_for` entries require a decision.     |
 | `parked`          | Not directly actionable, such as deferred tasks or aggregate rows.      |
 
@@ -521,7 +524,7 @@ The shortlist is deterministic and capped at 5 tasks:
 
 Use this instead of scanning the whole tracker just to choose work.
 
-If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
+If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
 
 Daemon rule:
 
@@ -587,9 +590,11 @@ Related deterministic reads:
 - `GET /api/projects/<slug>/decisions?limit=20` for the current project's recent decision notes
 - `GET /api/projects/<slug>/tasks/<taskId>/execute` for one deterministic execution pack: readiness, guardrails, expected changes, references, and snippets
 - `GET /api/projects/<slug>/tasks/<taskId>/verify` for one deterministic verification pack: explicit checks plus real evidence sources from tracker state, history, references, and snippets
+- `GET /api/projects/<slug>/tasks/<taskId>/handoff` for a deterministic handoff pack combining brief, why, execution contract, recent decisions, and a ready-to-paste markdown `handoffPrompt` for the next agent
 - `GET /api/projects/<slug>/search?q=<query>` for semantic local-model search when the question is feature-shaped rather than task-id-shaped
 - `GET /api/projects/<slug>/fuzzy-search?q=<query>` for deterministic fuzzy lexical fallback when you want approximate string matching without embeddings
 - `GET /api/projects/<slug>/blockers` for structural blockers and what is blocking them
+- `GET /api/projects/<slug>/hygiene?staleAfterRevs=<n>` for board-cleanup findings: empty swimlanes (with a `removable` flag), orphaned priorities, stale `in_progress` tasks, and blocked or decision-gated tasks missing narrative
 - `GET /api/projects/<slug>/changed?fromRev=<n>&limit=20` for changed tasks since a rev, without replaying raw history yourself
 - `GET /api/projects/<slug>/history?limit=50` for the append-only revision log with structured rollback/undo/redo metadata
 - `POST /api/projects/<slug>/pick` to atomically claim work once you know what to do next
@@ -700,7 +705,7 @@ llm-tracker execute <slug> <taskId>
 The pack includes:
 
 - current task state and readiness
-- explicit execution contract fields: `definition_of_done`, `constraints`, `expected_changes`, `allowed_paths`
+- explicit execution contract fields: `definition_of_done`, `constraints`, `expected_changes`, `allowed_paths`, and `repos`
 - approvals that still gate the task
 - roadmap, execution-report, and architecture traceability derived from `context`
 - references and cached snippets
@@ -722,7 +727,7 @@ llm-tracker verify <slug> <taskId>
 
 The pack includes:
 
-- explicit verification checks derived from `definition_of_done`, `expected_changes`, `allowed_paths`, and dependency state
+- explicit verification checks derived from `definition_of_done`, `expected_changes`, `allowed_paths`, repo-specific allowed paths/approvals, and dependency state
 - real evidence sources only: task state, traceability, recent history, references, and extracted snippets
 - no guessed git diff or semantic inference
 
@@ -1067,7 +1072,9 @@ Error shape:
 | `llm-tracker decisions <slug> [--json] [--limit N]`       | Recent project decision notes derived from task comments.                     |    **yes**   |
 | `llm-tracker execute <slug> <taskId> [--json]`            | Deterministic execution pack with readiness, guardrails, and reading list.    |    **yes**   |
 | `llm-tracker verify <slug> <taskId> [--json]`             | Deterministic verification checklist with tracker-backed evidence.             |    **yes**   |
+| `llm-tracker handoff <slug> <taskId> [--from ID] [--to ID] [--json] [--prompt-only]` | Handoff pack with brief, why, contract, recent decisions, and a pre-rendered `handoffPrompt`. |    **yes**   |
 | `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
+| `llm-tracker hygiene <slug> [--json] [--stale-after-revs N]` | Board hygiene findings: empty swimlanes, orphaned priorities, stale `in_progress`, and unexplained blocks. |    **yes**   |
 | `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
 | `llm-tracker search <slug> <query> [--json] [--limit N]` | Semantic local-model search for feature-oriented questions.                  |    **yes**   |
 | `llm-tracker fuzzy-search <slug> <query> [--json] [--limit N]` | Deterministic fuzzy lexical search.                                      |    **yes**   |

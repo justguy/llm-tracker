@@ -1,3 +1,4 @@
+import { buildWorkspaceLookup } from "./cross-project-deps.js";
 import { readHistory } from "./snapshots.js";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
@@ -14,27 +15,58 @@ function sortBlocking(a, b) {
   return a.id.localeCompare(b.id);
 }
 
-export function buildBlockersPayload({ slug, data, history = [], now = new Date().toISOString() }) {
-  const context = buildProjectTaskContext({ data, history });
+export function buildBlockersPayload({
+  slug,
+  data,
+  history = [],
+  externalLookup = null,
+  now = new Date().toISOString()
+}) {
+  const context = buildProjectTaskContext({ data, history, externalLookup });
   const summaries = (data?.tasks || [])
     .filter((task) => task.status === "not_started" || task.status === "in_progress")
     .map((task) => summarizeTask(task, context));
 
   const byId = new Map(summaries.map((task) => [task.id, task]));
+  const externalById = new Map();
+  for (const summary of summaries) {
+    for (const ext of summary.external_dependencies || []) {
+      externalById.set(ext.raw, ext);
+    }
+  }
+
   const blocked = summaries
     .filter((task) => task.blocking_on.length > 0)
     .map((task) => ({
       ...task,
       blocking_task_details: task.blocking_on
-        .map((depId) => byId.get(depId))
+        .map((depId) => {
+          const local = byId.get(depId);
+          if (local) {
+            return {
+              id: local.id,
+              title: local.title,
+              status: local.status,
+              priorityId: local.priorityId,
+              swimlaneId: local.swimlaneId,
+              external: false
+            };
+          }
+          const external = externalById.get(depId);
+          if (external) {
+            return {
+              id: external.raw,
+              project: external.slug,
+              taskId: external.taskId,
+              title: external.title,
+              status: external.status,
+              exists: external.exists,
+              external: true
+            };
+          }
+          return null;
+        })
         .filter(Boolean)
-        .map((dep) => ({
-          id: dep.id,
-          title: dep.title,
-          status: dep.status,
-          priorityId: dep.priorityId,
-          swimlaneId: dep.swimlaneId
-        }))
     }))
     .sort(sortBlocked);
 
@@ -55,12 +87,29 @@ export function buildBlockersPayload({ slug, data, history = [], now = new Date(
   const blocking = Array.from(reverse.entries())
     .map(([taskId, blockedTasks]) => {
       const task = byId.get(taskId);
-      if (!task) return null;
-      return {
-        ...task,
-        blockedCount: blockedTasks.length,
-        blocks: blockedTasks.sort((a, b) => a.id.localeCompare(b.id))
-      };
+      if (task) {
+        return {
+          ...task,
+          blockedCount: blockedTasks.length,
+          blocks: blockedTasks.sort((a, b) => a.id.localeCompare(b.id))
+        };
+      }
+      const external = externalById.get(taskId);
+      if (external) {
+        return {
+          id: external.raw,
+          project: external.slug,
+          taskId: external.taskId,
+          title: external.title,
+          status: external.status,
+          exists: external.exists,
+          external: true,
+          priorityWeight: 0,
+          blockedCount: blockedTasks.length,
+          blocks: blockedTasks.sort((a, b) => a.id.localeCompare(b.id))
+        };
+      }
+      return null;
     })
     .filter(Boolean)
     .sort(sortBlocking);
@@ -74,13 +123,17 @@ export function buildBlockersPayload({ slug, data, history = [], now = new Date(
   };
 }
 
-export function getBlockersPayload({ workspace, slug, entry, now }) {
+export function getBlockersPayload({ workspace, slug, entry, externalLookup, now }) {
   if (!entry?.data) return null;
   const history = readHistory(workspace, slug);
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: entry.data });
   return buildBlockersPayload({
     slug,
     data: entry.data,
     history,
+    externalLookup: lookup,
     now
   });
 }

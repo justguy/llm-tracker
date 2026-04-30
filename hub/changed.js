@@ -1,4 +1,5 @@
 import { readHistory } from "./snapshots.js";
+import { buildWorkspaceLookup } from "./cross-project-deps.js";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
 function parseChangeKind(key) {
@@ -80,11 +81,12 @@ export function buildChangedPayload({
   slug,
   data,
   history = [],
+  externalLookup = null,
   fromRev = 0,
   limit = 20,
   now = new Date().toISOString()
 }) {
-  const context = buildProjectTaskContext({ data, history });
+  const context = buildProjectTaskContext({ data, history, externalLookup });
   const { taskChanges, metaChanges, orderChangedRevs } = collectChanges(history, fromRev);
 
   const changed = Array.from(taskChanges.values())
@@ -112,6 +114,8 @@ export function buildChangedPayload({
           decision_reason: null,
           not_actionable_reason: "Task was removed.",
           requires_approval: [],
+          repos: null,
+          external_dependencies: [],
           traceability: {},
           dependenciesResolved: false,
           references: [],
@@ -143,13 +147,25 @@ export function buildChangedPayload({
   };
 }
 
-export function getChangedPayload({ workspace, slug, entry, fromRev = 0, limit = 20, now }) {
+export function getChangedPayload({
+  workspace,
+  slug,
+  entry,
+  externalLookup,
+  fromRev = 0,
+  limit = 20,
+  now
+}) {
   if (!entry?.data) return null;
   const history = readHistory(workspace, slug);
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: entry.data });
   return buildChangedPayload({
     slug,
     data: entry.data,
     history,
+    externalLookup: lookup,
     fromRev,
     limit,
     now

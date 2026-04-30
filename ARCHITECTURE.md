@@ -36,6 +36,9 @@ hub/project-loader.js    Direct workspace project/help loader for read-only surf
 hub/task-metadata.js     Shared normalized task summary helpers used by deterministic retrieval
 hub/blockers.js          Structural blocker payload builder
 hub/changed.js           Changed-task payload builder from append-only history
+hub/cross-project-deps.js Parser + workspace/store lookups for cross-project dependency references
+hub/handoff.js           Handoff payload builder (brief + why + contract + decisions + ready-to-paste prompt)
+hub/hygiene.js           Board hygiene payload builder (empty lanes, orphan priorities, stale tasks, unexplained blocks)
 hub/pick.js              Atomic pick/claim selection + response shaping
 hub/references.js        Shared reference + effort normalization helpers
 hub/next.js              Deterministic next-task ranking + shortlist payload builder
@@ -120,7 +123,7 @@ Ordered by array index. Hub owns the order.
 | `goal`           | string                                         |          | Short description under the title.                    |
 | `status`         | `not_started`\|`in_progress`\|`complete`\|`deferred` |  ✓   | See §Status vocabulary.                               |
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓     | Both values must exist in `meta`.                     |
-| `dependencies`   | array of task ids                              |          | Drives **block state** (§Block state).                |
+| `dependencies`   | array of task ids                              |          | Drives **block state** (§Block state). Each entry is either `<taskId>` (in this project) or `<otherSlug>:<taskId>` (cross-project, see §Cross-project dependencies). |
 | `assignee`       | string \| null                                 |          | LLM's model id when started or claimed.               |
 | `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. |
 | `references`     | array of strings \| null                       |          | Preferred additive source list. Each entry uses the same `path:line` or `path:line-line` format. |
@@ -133,6 +136,7 @@ Ordered by array index. Hub owns the order.
 | `expected_changes` | array of strings \| null                     |          | Optional hint about files, modules, or artifacts likely to change. |
 | `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
 | `approval_required_for` | array of strings \| null                |          | Optional approval categories; produces `decision_gated` actionability. |
+| `repos`          | object \| null                                 |          | Optional cross-repo scope: `{ primary, secondary[], allowed_paths{repo: paths[]}, approval_required_for[] }`. Per-repo approvals contribute to `decision_gated` actionability prefixed as `repo:<id>`. See §Cross-repo task modeling. |
 | `context`        | object (freeform)                              |          | Tags, files touched, notes — shallow-merged on patch. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
@@ -161,6 +165,51 @@ Derived fields such as `actionability`, `actionable`, `blocked_by`, `decision_re
 - Every `task.dependencies[]` entry must reference an existing `task.id`.
 - Every `task.parent_id`, when present, must reference an existing `task.id`; parent chains cannot contain cycles.
 - Every `task.id` must be unique.
+- Every key of `task.repos.allowed_paths` must be the `task.repos.primary` repo or appear in `task.repos.secondary[]`.
+- Every entry in `task.repos.approval_required_for` must be the primary or appear in `secondary[]`.
+- `task.repos.secondary` must not include the primary repo id.
+
+### Cross-project dependencies
+
+`task.dependencies[]` accepts both intra-project ids and cross-project references. The cross-project syntax is `<otherSlug>:<taskId>`. Example:
+
+```json
+{
+  "id": "t10",
+  "dependencies": ["t3", "platform:t42"]
+}
+```
+
+- `t3` resolves within the same project (existing behavior).
+- `platform:t42` resolves the task `t42` inside the `platform` project from the same workspace.
+- The validator only checks that the syntax parses; the cross-project slug + task id are resolved at read time. Missing external tasks are still treated as blocking (the agent should notice the broken reference rather than have it silently unblock).
+- Hub HTTP routes resolve external lookups against the in-memory Store (no extra disk reads). MCP read tools resolve them by listing other tracker JSON files in the same workspace.
+- Each task summary includes an `external_dependencies` array with `{ raw, slug, taskId, exists, status, title, blocking }`. The blockers, brief, why, execute, verify, and handoff packs all surface this; the handoff prompt renders an `## External dependencies` section.
+- Backwards compatible: bare task-id deps continue to behave exactly as before. No cross-project writes — only reads for readiness checks.
+
+### Cross-repo task modeling
+
+Tasks that span more than one repo declare `task.repos` so agents and humans
+can scope edits and trigger approvals deterministically.
+
+```json
+{
+  "repos": {
+    "primary": "core",
+    "secondary": ["docs"],
+    "allowed_paths": {
+      "core": ["src/", "test/"],
+      "docs": ["docs/agents/"]
+    },
+    "approval_required_for": ["docs"]
+  }
+}
+```
+
+- `primary` is the canonical repo for the task. `secondary[]` lists additional repos the task may touch.
+- `allowed_paths{repo: paths[]}` is a per-repo path scope. It is independent from the task-level `allowed_paths` (which still applies to the primary repo by convention).
+- Each entry in `approval_required_for` produces a `decision_gated` actionability prefixed as `repo:<id>` in `decision_required`. That value flows through `summarizeTask`, `next`, `brief`, `why`, `execute`, `verify`, and `handoff`, and shows up in the rendered `handoffPrompt` under `## Cross-repo scope`.
+- The execute pack adds `executionPlan` steps for `primary_repo`, `secondary_repos`, `repo_allowed_paths`, and `repo_approval`.
 
 Violations → hub writes `<slug>.errors.json` and keeps the prior valid state live.
 
@@ -254,6 +303,8 @@ Approval requirements produce `decision_gated`; those rows are hidden by default
 - `tracker_execute`
 - `tracker_verify`
 - `tracker_blockers`
+- `tracker_handoff`
+- `tracker_hygiene`
 - `tracker_changed`
 - `tracker_history`
 - `tracker_patch`
@@ -279,6 +330,7 @@ Prompts:
 - `tracker_task_context`
 - `tracker_execute_task`
 - `tracker_verify_task`
+- `tracker_handoff_task`
 - `tracker_patch_write`
 
 Design rule:
@@ -296,9 +348,11 @@ Design rule:
 - `GET /api/projects/:slug/decisions?limit=20` returns recent decision notes derived from task comments in deterministic order.
 - `GET /api/projects/:slug/tasks/:taskId/execute` returns the action pack: readiness, explicit contract fields, references, snippets, and recent task history.
 - `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources.
+- `GET /api/projects/:slug/tasks/:taskId/handoff?from=<id>&to=<id>` returns a deterministic handoff pack: brief, why, execution contract, recent decisions, recent task history, and a pre-rendered markdown `handoffPrompt` for the next agent.
 - `GET /api/projects/:slug/search?q=<query>` runs semantic local-model search through `@huggingface/transformers` + `Xenova/all-MiniLM-L6-v2`.
 - `GET /api/projects/:slug/fuzzy-search?q=<query>` runs deterministic fuzzy lexical matching without embeddings.
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
+- `GET /api/projects/:slug/hygiene?staleAfterRevs=N` returns board hygiene findings: empty swimlanes (with a `removable` flag), orphaned priorities, `in_progress` tasks not touched in the last N revs (default 10), and blocked or decision-gated tasks missing narrative.
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
 - `GET /api/projects/:slug/history?fromRev=N&limit=50` returns the append-only revision log window, including delete/restore/rollback/undo/redo metadata.
 - `POST /api/projects/:slug/start` and `POST /api/projects/:slug/tasks/:taskId/start` atomically start an explicit task under the hub lock, requiring `taskId` and `assignee` and accepting optional `scratchpad`.
@@ -454,8 +508,10 @@ On success, the response is authoritative immediately: `{ok, rev, updatedAt, fil
 | `/api/projects/:slug/tasks/:taskId/why`             | GET    | Focused task-rationale pack.                              |
 | `/api/projects/:slug/tasks/:taskId/execute`         | GET    | Focused execution pack.                                   |
 | `/api/projects/:slug/tasks/:taskId/verify`          | GET    | Focused verification pack.                                |
+| `/api/projects/:slug/tasks/:taskId/handoff`         | GET    | Handoff pack with a ready-to-paste markdown `handoffPrompt`. |
 | `/api/projects/:slug/decisions`                     | GET    | Recent decision notes from task comments.                 |
 | `/api/projects/:slug/blockers`                      | GET    | Structural blockers: blocked tasks plus their blockers.    |
+| `/api/projects/:slug/hygiene`                       | GET    | Board hygiene findings: empty lanes, orphaned priorities, stale `in_progress`, unexplained blocks. |
 | `/api/projects/:slug/changed`                       | GET    | Changed tasks since `fromRev`, grouped by task.            |
 | `/api/projects/:slug/history`                       | GET    | Recent revision-log window with delete/restore/rollback/undo/redo metadata. |
 | `/api/projects/:slug/start`                         | POST   | Atomic explicit task start with required task id and assignee. |

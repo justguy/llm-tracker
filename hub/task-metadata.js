@@ -1,4 +1,5 @@
 import { normalizeEffort, normalizeTaskReferences } from "./references.js";
+import { parseDependencyRef } from "./cross-project-deps.js";
 
 const KNOWN_PRIORITY_WEIGHTS = {
   p0: 100,
@@ -44,9 +45,68 @@ export function taskBlockerReason(task) {
     : null;
 }
 
+function approvalsFromRepos(task) {
+  const list = task?.repos?.approval_required_for;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((value) => typeof value === "string" && value.trim())
+    .map((repo) => `repo:${repo.trim()}`);
+}
+
 export function taskRequiresApproval(task) {
-  if (!Array.isArray(task?.approval_required_for)) return [];
-  return task.approval_required_for.filter((value) => typeof value === "string" && value.trim());
+  const out = [];
+  const seen = new Set();
+  const push = (value) => {
+    if (!seen.has(value)) {
+      seen.add(value);
+      out.push(value);
+    }
+  };
+
+  if (Array.isArray(task?.approval_required_for)) {
+    for (const value of task.approval_required_for) {
+      if (typeof value === "string" && value.trim()) push(value.trim());
+    }
+  }
+  for (const value of approvalsFromRepos(task)) {
+    push(value);
+  }
+  return out;
+}
+
+export function taskRepos(task) {
+  const repos = task?.repos;
+  if (!repos || typeof repos !== "object") return null;
+
+  const primary = typeof repos.primary === "string" && repos.primary.trim() ? repos.primary.trim() : null;
+  const secondary = Array.isArray(repos.secondary)
+    ? repos.secondary.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
+    : [];
+  const allowedPathsRaw = repos.allowed_paths && typeof repos.allowed_paths === "object" ? repos.allowed_paths : null;
+  const allowedPaths = {};
+  if (allowedPathsRaw) {
+    for (const [repo, paths] of Object.entries(allowedPathsRaw)) {
+      if (!Array.isArray(paths)) continue;
+      const cleaned = paths.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim());
+      if (cleaned.length > 0) allowedPaths[repo] = cleaned;
+    }
+  }
+  const approvalRequiredFor = Array.isArray(repos.approval_required_for)
+    ? repos.approval_required_for
+        .filter((value) => typeof value === "string" && value.trim())
+        .map((value) => value.trim())
+    : [];
+
+  if (!primary && secondary.length === 0 && Object.keys(allowedPaths).length === 0 && approvalRequiredFor.length === 0) {
+    return null;
+  }
+
+  return {
+    primary,
+    secondary,
+    allowed_paths: allowedPaths,
+    approval_required_for: approvalRequiredFor
+  };
 }
 
 export function taskTags(task) {
@@ -108,10 +168,44 @@ export function isAggregateTask(task, projectContext = {}) {
 
 export function blockingDependencies(task, context) {
   const byId = context?.byId instanceof Map ? context.byId : context instanceof Map ? context : new Map();
+  const externalLookup =
+    typeof context?.externalLookup === "function" ? context.externalLookup : null;
+
   return (task?.dependencies || []).filter((dep) => {
-    const depTask = byId.get(dep);
+    const ref = parseDependencyRef(dep);
+    if (!ref) return false;
+    if (ref.kind === "external") {
+      if (!externalLookup) return true; // unknown external dep is treated as blocking
+      const resolved = externalLookup(ref.slug, ref.taskId);
+      // Treat missing external tasks as blocking too — agents/humans should
+      // notice the broken reference rather than have it silently unblock.
+      if (!resolved || !resolved.exists) return true;
+      return resolved.status !== "complete";
+    }
+    const depTask = byId.get(ref.taskId);
     return depTask && depTask.status !== "complete" && !isAggregateTask(depTask, context);
   });
+}
+
+export function externalDependencyDetails(task, context) {
+  const externalLookup =
+    typeof context?.externalLookup === "function" ? context.externalLookup : null;
+  const out = [];
+  for (const dep of task?.dependencies || []) {
+    const ref = parseDependencyRef(dep);
+    if (!ref || ref.kind !== "external") continue;
+    const resolved = externalLookup ? externalLookup(ref.slug, ref.taskId) : null;
+    out.push({
+      raw: ref.raw,
+      slug: ref.slug,
+      taskId: ref.taskId,
+      exists: resolved?.exists === true,
+      status: resolved?.status ?? null,
+      title: resolved?.title ?? null,
+      blocking: !resolved || !resolved.exists || resolved.status !== "complete"
+    });
+  }
+  return out;
 }
 
 export function deriveActionability(task, context) {
@@ -163,7 +257,7 @@ export function deriveActionability(task, context) {
   };
 }
 
-export function buildProjectTaskContext({ data, history = [] }) {
+export function buildProjectTaskContext({ data, history = [], externalLookup = null }) {
   const tasks = data?.tasks || [];
   return {
     byId: new Map(tasks.map((task) => [task.id, task])),
@@ -174,7 +268,9 @@ export function buildProjectTaskContext({ data, history = [] }) {
     ),
     currentRev: data?.meta?.rev ?? null,
     priorities: data?.meta?.priorities || [],
-    touchMap: buildTaskTouchMap(history)
+    touchMap: buildTaskTouchMap(history),
+    externalLookup: typeof externalLookup === "function" ? externalLookup : null,
+    slug: data?.meta?.slug || null
   };
 }
 
@@ -214,6 +310,8 @@ export function summarizeTask(task, context) {
     decision_reason: actionability.decision_reason,
     not_actionable_reason: actionability.not_actionable_reason,
     requires_approval: taskRequiresApproval(task),
+    repos: taskRepos(task),
+    external_dependencies: externalDependencyDetails(task, context),
     traceability: taskTraceability(task),
     dependenciesResolved,
     references: normalizeTaskReferences(task),

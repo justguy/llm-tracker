@@ -55,11 +55,12 @@ export function resolvePickSelection({
   slug,
   data,
   history = [],
+  externalLookup = null,
   taskId,
   assignee = null,
   force = false
 }) {
-  const context = buildProjectTaskContext({ data, history });
+  const context = buildProjectTaskContext({ data, history, externalLookup });
 
   if (taskId) {
     const task = context.byId.get(taskId);
@@ -75,7 +76,7 @@ export function resolvePickSelection({
     };
   }
 
-  const next = buildNextPayload({ slug, data, history, limit: 5 });
+  const next = buildNextPayload({ slug, data, history, externalLookup, limit: 5 });
   let firstConflict = null;
   for (const candidate of next.next) {
     if (!candidate.ready) continue;
@@ -105,13 +106,14 @@ export function buildPickedPayload({
   slug,
   data,
   history = [],
+  externalLookup = null,
   taskId,
   autoSelected = false,
   selectedBecause = null,
   noop = false,
   now = new Date().toISOString()
 }) {
-  const context = buildProjectTaskContext({ data, history });
+  const context = buildProjectTaskContext({ data, history, externalLookup });
   const task = context.byId.get(taskId);
   if (!task) return null;
 

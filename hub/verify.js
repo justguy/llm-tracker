@@ -5,7 +5,8 @@ function verificationContract(task) {
     definition_of_done: task.definition_of_done || [],
     constraints: task.constraints || [],
     expected_changes: task.expected_changes || [],
-    allowed_paths: task.allowed_paths || []
+    allowed_paths: task.allowed_paths || [],
+    repos: task.repos || null
   };
 }
 
@@ -49,6 +50,26 @@ function buildChecks(task, dependencies = []) {
     });
   }
 
+  for (const [repo, paths] of Object.entries(task.repos?.allowed_paths || {})) {
+    for (const allowedPath of paths || []) {
+      checks.push({
+        kind: "repo_allowed_path",
+        text: `${repo}: ${allowedPath}`,
+        status: "constraint",
+        evidenceFrom: ["taskContract"]
+      });
+    }
+  }
+
+  for (const repo of task.repos?.approval_required_for || []) {
+    checks.push({
+      kind: "repo_approval",
+      text: `Approval required before editing ${repo}`,
+      status: task.decision_required?.includes(`repo:${repo}`) ? "open" : "needs_manual_confirmation",
+      evidenceFrom: ["taskContract", "taskState"]
+    });
+  }
+
   for (const dependency of dependencies) {
     checks.push({
       kind: "dependency_state",
@@ -74,6 +95,7 @@ export function buildVerifyPayload({
   slug,
   data,
   history = [],
+  externalLookup = null,
   taskId,
   references = null,
   snippets = [],
@@ -83,6 +105,7 @@ export function buildVerifyPayload({
     slug,
     data,
     history,
+    externalLookup,
     taskId,
     references,
     snippets,
@@ -119,8 +142,8 @@ export function buildVerifyPayload({
   };
 }
 
-export function getVerifyPayload({ workspace, slug, entry, taskId, now }) {
-  const result = getBriefPayload({ workspace, slug, entry, taskId, now });
+export function getVerifyPayload({ workspace, slug, entry, externalLookup, taskId, now }) {
+  const result = getBriefPayload({ workspace, slug, entry, externalLookup, taskId, now });
   if (!result.ok) return result;
 
   const dependencyState = dependencyEvidence(result.payload.dependencies);

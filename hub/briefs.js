@@ -1,3 +1,4 @@
+import { buildWorkspaceLookup } from "./cross-project-deps.js";
 import { readHistory } from "./snapshots.js";
 import { normalizeTaskReferences } from "./references.js";
 import { loadReferenceSnippets, SNIPPET_MAX_BYTES, SNIPPET_MAX_COUNT } from "./snippets.js";
@@ -32,6 +33,8 @@ function summarizeTaskForBrief(task, context) {
     decision_reason: summary.decision_reason,
     not_actionable_reason: summary.not_actionable_reason,
     requires_approval: summary.requires_approval,
+    repos: summary.repos,
+    external_dependencies: summary.external_dependencies,
     traceability: summary.traceability,
     references: summary.references,
     comment: summary.comment,
@@ -150,12 +153,13 @@ export function buildBriefPayload({
   slug,
   data,
   history = [],
+  externalLookup = null,
   taskId,
   references = null,
   snippets = [],
   now = new Date().toISOString()
 }) {
-  const context = buildProjectTaskContext({ data, history });
+  const context = buildProjectTaskContext({ data, history, externalLookup });
   const task = context.byId.get(taskId);
   if (!task) return null;
 
@@ -203,13 +207,16 @@ export function buildBriefPayload({
   };
 }
 
-export function getBriefPayload({ workspace, slug, entry, taskId, now }) {
+export function getBriefPayload({ workspace, slug, entry, externalLookup, taskId, now }) {
   if (!entry?.data) {
     return { ok: false, status: 404, message: "not found" };
   }
 
+  const lookup =
+    externalLookup ||
+    buildWorkspaceLookup(workspace, { selfSlug: slug, selfData: entry.data });
   const history = readHistory(workspace, slug);
-  const context = buildProjectTaskContext({ data: entry.data, history });
+  const context = buildProjectTaskContext({ data: entry.data, history, externalLookup: lookup });
   const task = context.byId.get(taskId);
   if (!task) {
     return { ok: false, status: 404, message: "task not found" };
@@ -230,6 +237,7 @@ export function getBriefPayload({ workspace, slug, entry, taskId, now }) {
       slug,
       data: entry.data,
       history,
+      externalLookup: lookup,
       taskId,
       references,
       snippets,
