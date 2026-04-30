@@ -164,7 +164,7 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - for linked trackers, task state, assignee, blocker notes, scratchpad, timestamps, and rev all write through to the repo-visible JSON so branch checkouts and rollbacks carry tracker state with code
 - legacy linked-tracker overlays in `.runtime/overlays/<slug>.json` are not project truth and are cleared on ingest/write
 - durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
-- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
+- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 **Landing gate.** For linked repo-local trackers, patch the tracker **before** you commit or push the matching code, and include the tracker JSON diff in the same commit. Patching after a commit/push leaves the working tree dirty; patching after a squash-merge dirties `main`. Because the repo JSON is the only project truth, status notes and assignment changes are branch state too. See the agent contract at `/help` for the full rule.
 
@@ -262,6 +262,7 @@ npx llm-tracker blockers <slug>        # structural blockers and what they are w
 npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
 npx llm-tracker search <slug> <query>  # semantic local-model search (requires hub)
 npx llm-tracker fuzzy-search <slug> <query>  # deterministic fuzzy lexical search (requires hub)
+npx llm-tracker start <slug> <task-id> --assignee codex  # explicit start; assignee required unless env is set
 npx llm-tracker pick <slug> [task-id] --assignee codex  # atomic claim, defaults to top ready task
 npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + alternatives
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
@@ -332,7 +333,12 @@ deterministic lexical fallback.
 Use HTTP writes when you want to avoid touching the workspace filesystem.
 
 ```bash
-# Atomic claim / pick
+# Explicit task start
+curl -X POST http://localhost:4400/api/projects/<slug>/start \
+  -H "Content-Type: application/json" \
+  -d '{"taskId":"<task-id>","assignee":"codex","scratchpad":"starting <task-id>"}'
+
+# Atomic claim / pick; omit taskId to claim the top ready task
 curl -X POST http://localhost:4400/api/projects/<slug>/pick \
   -H "Content-Type: application/json" \
   -d '{"taskId":"<task-id>","assignee":"codex"}'
@@ -388,7 +394,8 @@ Patch payloads stay small. Typical shape:
 - Read `/help` first.
 - Use `next`, `brief`, `why`, `execute`, and `verify` instead of rereading the whole tracker.
 - Use `patch` for status/content updates.
-- Use `pick` when you want an atomic claim instead of hand-rolling status changes.
+- Use `start` when you know the exact task and want to atomically set `status: in_progress`, assignee, and optional scratchpad.
+- Use `pick` when you want an atomic claim instead of hand-rolling status changes, especially when the hub should select the top ready task.
 - Keep writes small and frequent.
 
 ### Agent Interfaces
@@ -399,7 +406,7 @@ Use the workspace contract first, then the narrowest interface that fits:
 
 - read `GET /help` or `tracker_help` first for the active workspace contract
 - use `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_search`, and `tracker_fuzzy_search` for focused reads
-- use `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
+- use `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
 
 Register the server in your client config instead of launching it manually:
 
@@ -428,7 +435,7 @@ If you want the hub to keep running without a dedicated shell, use `npx llm-trac
 
 Existing workspaces do not need migration work. The `.runtime/` directory is created on demand the first time daemon mode is used.
 
-Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `pick`, `since`, `rollback`, `link`, and `reload` keep working against a background hub started on a non-default port.
+Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `start`, `pick`, `since`, `rollback`, `link`, and `reload` keep working against a background hub started on a non-default port.
 
 Daemon state is **workspace-scoped**. `npx llm-tracker daemon stop --path <dir>` only affects the daemon for that workspace. In the recommended shared-daemon topology, that means one daemon for the central workspace and linked repo-local project files underneath it.
 
@@ -477,6 +484,9 @@ For task pickup, prefer the atomic claim flow over hand-built status patches:
 - `npx llm-tracker decisions <slug>`
 - `GET /api/projects/:slug/tasks/:taskId/execute`
 - `npx llm-tracker execute <slug> <task-id>`
+- `POST /api/projects/:slug/start`
+- `POST /api/projects/:slug/tasks/:taskId/start`
+- `npx llm-tracker start <slug> <task-id> --assignee <model>` (`LLM_TRACKER_ASSIGNEE` may supply the assignee)
 - `GET /api/projects/:slug/tasks/:taskId/verify`
 - `npx llm-tracker verify <slug> <task-id>`
 - `POST /api/projects/:slug/pick`

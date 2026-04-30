@@ -83,6 +83,93 @@ test("oversized meta.scratchpad in patch is rejected at the route layer", async 
   }
 });
 
+test("oversized scratchpad in start request is rejected at the route layer", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const big = "x".repeat(6000);
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: "t1", assignee: "codex", scratchpad: big })
+    });
+    assert.equal(res.status, 413);
+    const body = await res.json();
+    assert.equal(body.type, "field.too.large");
+    assert.equal(body.field, "meta.scratchpad");
+    assert.equal(body.max, 5000);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("HTTP start endpoint starts an explicit task atomically", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/tasks/t1/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignee: "codex", scratchpad: "codex started t1" })
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.startedTaskId, "t1");
+    assert.equal(body.action, "start");
+    assert.equal(body.task.status, "in_progress");
+    assert.equal(body.task.assignee, "codex");
+
+    const after = JSON.parse(readFileSync(join(workspace, "trackers", "test-project.json"), "utf-8"));
+    assert.equal(after.meta.scratchpad, "codex started t1");
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("HTTP start endpoint requires an assignee", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(
+    join(workspace, "trackers", "test-project.json"),
+    JSON.stringify(validProject(), null, 2)
+  );
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: "t1" })
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /assignee/);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("stale expectedRev in HTTP patch is rejected with 409", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();

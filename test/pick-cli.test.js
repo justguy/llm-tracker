@@ -85,3 +85,45 @@ test("llm-tracker pick claims the top ready task atomically", async () => {
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test("llm-tracker start starts an explicit task with scratchpad", async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    await waitForProject(port, "test-project");
+
+    const result = runCli([
+      "start",
+      "test-project",
+      "t1",
+      "--path",
+      workspace,
+      "--assignee",
+      "codex",
+      "--scratchpad",
+      "codex started t1",
+      "--json"
+    ]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.startedTaskId, "t1");
+    assert.equal(payload.action, "start");
+    assert.equal(payload.task.status, "in_progress");
+    assert.equal(payload.task.assignee, "codex");
+
+    const after = JSON.parse(readFileSync(join(workspace, "trackers", "test-project.json"), "utf-8"));
+    const t1 = after.tasks.find((task) => task.id === "t1");
+    assert.equal(t1.status, "in_progress");
+    assert.equal(t1.assignee, "codex");
+    assert.equal(after.meta.scratchpad, "codex started t1");
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

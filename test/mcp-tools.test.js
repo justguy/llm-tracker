@@ -27,12 +27,15 @@ test("tracker_patch is exposed across MCP tools, runtime metadata, and prompts",
   try {
     const tools = createTools(workspace);
     assert.ok(tools.has("tracker_patch"));
+    assert.ok(tools.has("tracker_start"));
 
     const runtime = workspaceRuntimePayload(workspace);
     assert.ok(runtime.daemonRule.writeTools.includes("tracker_patch"));
+    assert.ok(runtime.daemonRule.writeTools.includes("tracker_start"));
 
     const startHere = getPrompt(workspace, "tracker_start_here");
     assert.match(startHere.messages[0].content.text, /tracker_patch/);
+    assert.match(startHere.messages[0].content.text, /tracker_start/);
     assert.match(startHere.messages[0].content.text, /swimlaneOps/);
 
     const patchWrite = getPrompt(workspace, "tracker_patch_write", { slug: "test-project" });
@@ -109,6 +112,27 @@ test("tracker_patch validates required MCP arguments before attempting hub I/O",
     const missingPatch = await tool.handler({ slug: "test-project" });
     assert.equal(missingPatch.isError, true);
     assert.match(missingPatch.content[0].text, /requires a JSON object patch/i);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_start validates required MCP arguments before attempting hub I/O", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-start-validate-");
+  try {
+    const tool = createTools(workspace).get("tracker_start");
+
+    const missingSlug = await tool.handler({ taskId: "t1" });
+    assert.equal(missingSlug.isError, true);
+    assert.match(missingSlug.content[0].text, /requires a project slug/i);
+
+    const missingTask = await tool.handler({ slug: "test-project" });
+    assert.equal(missingTask.isError, true);
+    assert.match(missingTask.content[0].text, /requires a task id/i);
+
+    const missingAssignee = await tool.handler({ slug: "test-project", taskId: "t1" });
+    assert.equal(missingAssignee.isError, true);
+    assert.match(missingAssignee.content[0].text, /requires an assignee/i);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

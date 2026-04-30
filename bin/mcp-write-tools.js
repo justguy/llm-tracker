@@ -159,7 +159,7 @@ function createPickToolDefinition() {
       properties: {
         slug: { type: "string", description: "Project slug" },
         taskId: { type: "string", description: "Optional explicit task id" },
-        assignee: { type: "string", description: "Optional assignee id" },
+        assignee: { type: "string", description: "Assignee id required for the started task" },
         force: { type: "boolean", description: "Override blocked or assignee conflicts" },
         comment: { type: "string", description: "Optional task note to write with the claim" }
       },
@@ -181,6 +181,44 @@ function createPickToolDefinition() {
 
       return {
         path: `/api/projects/${slug}/pick`,
+        body
+      };
+    }
+  };
+}
+
+function createStartToolDefinition() {
+  return {
+    name: "tracker_start",
+    description:
+      "Atomically start an explicit task through the running hub: sets status=in_progress, assignee, and optional scratchpad.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Project slug" },
+        taskId: { type: "string", description: "Explicit task id to start" },
+        assignee: { type: "string", description: "Optional assignee id" },
+        force: { type: "boolean", description: "Override blocked or assignee conflicts" },
+        comment: { type: "string", description: "Optional task note to write while starting" },
+        scratchpad: { type: "string", description: "Optional project scratchpad update" }
+      },
+      required: ["slug", "taskId", "assignee"]
+    },
+    prepareRequest(args = {}) {
+      const slug = nonEmptyString(args.slug);
+      const taskId = nonEmptyString(args.taskId);
+      const assignee = nonEmptyString(args.assignee);
+      if (!slug) return { error: "tracker_start requires a project slug." };
+      if (!taskId) return { error: "tracker_start requires a task id." };
+      if (!assignee) return { error: "tracker_start requires an assignee." };
+
+      const body = { taskId, assignee };
+      if (args.force === true) body.force = true;
+      if (args.comment !== undefined) body.comment = args.comment;
+      if (args.scratchpad !== undefined) body.scratchpad = args.scratchpad;
+
+      return {
+        path: `/api/projects/${slug}/start`,
         body
       };
     }
@@ -213,6 +251,7 @@ function createSlugWriteTool(name, description, pathSuffix) {
 export function createWriteTools(workspace, portFlag) {
   return [
     createHubWriteTool(workspace, portFlag, createPatchToolDefinition()),
+    createHubWriteTool(workspace, portFlag, createStartToolDefinition()),
     createHubWriteTool(workspace, portFlag, createPickToolDefinition()),
     createHubWriteTool(
       workspace,

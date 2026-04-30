@@ -54,7 +54,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - if that repo-local tracker JSON is versioned in the project, expect successful patch writes that change durable fields to update that repo-visible JSON file in place
 - for linked trackers, the repo-local tracker JSON is the only project truth; task state, assignee, blocker notes, scratchpad, timestamps, and rev write through to that repo-visible JSON
 - legacy linked-tracker overlays in `<shared-workspace>/.runtime/overlays/<slug>.json` are not project truth and are cleared on ingest/write
-- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
+- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 ### Landing gate — order tracker writes before the commit
 
@@ -85,8 +85,8 @@ When the tracker file lives inside a repo, tracker writes update the repo-visibl
 - **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
-- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
-- MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
+- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
+- MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
 - If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
 - If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
@@ -126,7 +126,7 @@ If any is "no" or "unsure," ask the human before proceeding.
 **What you update as work progresses:**
 
 - `status` — `not_started` → `in_progress` when you start, → `complete` when shipped, → `deferred` when parked
-- `assignee` — your model ID when you claim a task
+- `assignee` — your model ID when you start or claim a task
 - `kind` — optional `task` or `group`; `group` marks a container row in tree view
 - `parent_id` — optional task ID for tree grouping; this is containment, not a blocker
 - `dependencies` — task IDs this one blocks on; drives the derived **block state** (§5) and any dependency graph view
@@ -195,7 +195,7 @@ Tasks are ordered by array index. Hub owns the order.
 | `outcome`        | string \| null                                 |          | Optional first-class marker for a bounded slice that landed. Canonical value: `partial_slice_landed`. |
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓    | Both values must exist in `meta`.                     |
 | `dependencies`   | array of task IDs                              |          | Drives block state (§6).                              |
-| `assignee`       | string \| null                                 |          | Your model ID when claiming.                          |
+| `assignee`       | string \| null                                 |          | Your model ID when starting or claiming.              |
 | `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. Bare URLs are invalid. |
 | `references`     | array of strings \| null                       |          | Preferred additive source list. Use the same `path:line` or `path:line-line` format. Bare URLs are invalid. |
 | `effort`         | `xs`\|`s`\|`m`\|`l`\|`xl`\|null                |          | Optional sizing hint for ranking and planning.        |
@@ -481,12 +481,12 @@ The shortlist is deterministic and capped at 5 tasks:
 
 Use this instead of scanning the whole tracker just to choose work.
 
-If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
+If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
 
 Daemon rule:
 
 - MCP reads do **not** require a running daemon and include `workspace`, `port`, `file`, `registrationFile`, and `topology` on project-specific payloads.
-- MCP writes (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
+- MCP writes (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
 
 Helpful MCP resources:
 
@@ -578,7 +578,7 @@ The brief pack is deterministic and capped:
 - up to 5 extracted snippets, capped to 8 KB combined text
 - up to 3 recent history entries for that task
 
-Use this before broad repo reads. The intended flow is `/help` → `next` → `brief`/`why` → `execute` → `pick` → `verify`.
+Use this before broad repo reads. The intended flow is `/help` → `next` → `brief`/`why` → `execute` → `start` for an explicit task or `pick` for hub-selected work → `verify`.
 
 ### 6.2b Answering fuzzy feature questions
 
@@ -833,7 +833,33 @@ Structural patch example:
 3. If you need to justify the task before touching it, call `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
 4. If you are about to implement, call `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 5. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
-6. Claim it atomically:
+6. Start the explicit task atomically when you know the task id and want to set status, assignee, and optional scratchpad together:
+
+```bash
+curl -X POST http://localhost:<PORT>/api/projects/<slug>/start \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/<slug>-start.json
+```
+
+Example body:
+
+```json
+{
+  "assignee": "codex",
+  "taskId": "t-001",
+  "scratchpad": "starting t-001"
+}
+```
+
+Shell shortcut:
+
+```bash
+llm-tracker start <slug> <taskId> --assignee codex
+```
+
+`--assignee` is required unless `LLM_TRACKER_ASSIGNEE` is set.
+
+7. Use `pick` when you want the hub to claim the current top ready task, or when you need the older claim alias:
 
 ```bash
 curl -X POST http://localhost:<PORT>/api/projects/<slug>/pick \
@@ -850,7 +876,7 @@ Example body:
 }
 ```
 
-If you omit `taskId`, the hub claims the current top ready task from the deterministic `next` ranking.
+If you omit `taskId` from `pick`, the hub claims the current top ready task from the deterministic `next` ranking.
 
 Shell shortcut:
 
@@ -860,10 +886,10 @@ llm-tracker pick <slug> [<taskId>] --assignee codex
 
 `llm-tracker claim ...` and `POST /api/projects/<slug>/claim` are aliases.
 
-7. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
-8. Before sign-off, call `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
-9. On completion: patch `status: "complete"`.
-10. On blocker: patch `status: "not_started"` + `blocker_reason: "<one sentence>"`, and post to `meta.scratchpad`.
+8. Do the work. Send patches freely as you go — status updates, context notes, files_touched.
+9. Before sign-off, call `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
+10. On completion: patch `status: "complete"`.
+11. On blocker: patch `status: "not_started"` + `blocker_reason: "<one sentence>"`, and post to `meta.scratchpad`.
 
 ---
 
@@ -1001,6 +1027,7 @@ Error shape:
 | `llm-tracker search <slug> <query> [--json] [--limit N]` | Semantic local-model search for feature-oriented questions.                  |    **yes**   |
 | `llm-tracker fuzzy-search <slug> <query> [--json] [--limit N]` | Deterministic fuzzy lexical search.                                      |    **yes**   |
 | `llm-tracker reload [<slug>] [--json]`                    | Reload one or all tracker files from disk into the running hub.               |    **yes**   |
+| `llm-tracker start <slug> <taskId> --assignee ID [--scratchpad TEXT] [--force] [--json]` | Atomically start an explicit task; `LLM_TRACKER_ASSIGNEE` may supply the assignee. |    **yes**   |
 | `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
 | `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |

@@ -1168,7 +1168,7 @@ export class Store {
     });
   }
 
-  async pickTask(slug, { taskId, assignee = null, force = false, comment } = {}) {
+  async pickTask(slug, { taskId, assignee = null, force = false, comment, scratchpad } = {}) {
     return this.withLock(slug, async () => {
       const current = this.projects.get(slug);
       if (!current || !current.data) {
@@ -1205,6 +1205,7 @@ export class Store {
         target.blocker_reason = null;
       }
       if (comment !== undefined) target.comment = comment;
+      if (scratchpad !== undefined) newState.meta.scratchpad = scratchpad;
 
       const { ok, errors } = validateProject(newState);
       if (!ok) return { ok: false, status: 400, message: errors.join("; ") };
@@ -1264,6 +1265,25 @@ export class Store {
         })
       };
     });
+  }
+
+  async startTask(slug, { taskId, assignee = null, force = false, comment, scratchpad } = {}) {
+    if (!taskId) {
+      return { ok: false, status: 400, message: "taskId is required to start a task" };
+    }
+    if (!assignee) {
+      return { ok: false, status: 400, message: "assignee is required to start a task" };
+    }
+    const result = await this.pickTask(slug, { taskId, assignee, force, comment, scratchpad });
+    if (!result.ok) return result;
+    return {
+      ...result,
+      payload: {
+        ...result.payload,
+        startedTaskId: result.payload?.pickedTaskId || taskId,
+        action: "start"
+      }
+    };
   }
 
   async rollback(slug, toRev) {

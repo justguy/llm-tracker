@@ -28,6 +28,7 @@ export const READ_TOOL_NAMES = [
 
 export const WRITE_TOOL_NAMES = [
   "tracker_patch",
+  "tracker_start",
   "tracker_pick",
   "tracker_undo",
   "tracker_redo",

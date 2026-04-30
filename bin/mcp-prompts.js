@@ -113,7 +113,7 @@ export function getPrompt(workspace, name, args = {}) {
           `3. MCP read tools do not require the daemon. MCP write tools ${WRITE_TOOL_NAMES.map((tool) => `\`${tool}\``).join(", ")} do require the hub or daemon.`,
           `4. If the hub is unavailable, file-mode patches go in \`${join(workspace, "patches")}\` as \`${patchExample}\`. Rejections create a sibling \`.errors.json\` file.`,
           "5. Structural board edits belong in `swimlaneOps` and `taskOps`; stale writes can use `expectedRev`, and structural failures may return `repair` with a retry shape.",
-          "6. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_pick` and `tracker_patch`, and finally `tracker_verify`."
+          "6. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_start` for an explicit task start or `tracker_pick` for top-task claim, then `tracker_patch`, and finally `tracker_verify`."
         ].join("\n")
       );
     case "tracker_pick_next":
@@ -123,7 +123,7 @@ export function getPrompt(workspace, name, args = {}) {
           `Use \`tracker_project_status\` for \`${slug}\` if you need a quick progress snapshot.`,
           `Call \`tracker_next\` with \`${slug}\` to get the ranked shortlist.`,
           "Inspect the top recommendation and alternatives before choosing work.",
-          `If the task should be claimed and the hub is reachable, call \`tracker_pick\` for \`${slug}\`.`,
+          `If the task should be explicitly started and the hub is reachable, call \`tracker_start\` for \`${slug}\`; use \`tracker_pick\` only when you want the hub to choose the top ready task.`,
           `If the hub is not reachable, do not pretend the claim succeeded. Use a patch file in \`${patchExample}\` instead.`
         ].join("\n")
       );
@@ -153,7 +153,7 @@ export function getPrompt(workspace, name, args = {}) {
         `Prepare to execute ${slug}/${taskId} with deterministic guardrails.`,
         [
           `Call \`tracker_execute\` with slug \`${slug}\` and task id \`${taskId}\`.`,
-          `If you have not claimed the task yet and the hub is reachable, use \`tracker_pick\` first.`,
+          `If you have not started the task yet and the hub is reachable, use \`tracker_start\` first.`,
           "Use the execution pack's readiness, constraints, expected changes, and references to plan edits.",
           `After editing, use \`tracker_verify\` for \`${slug}\` / \`${taskId}\` and \`tracker_changed\` to confirm the resulting tracker state.`
         ].join("\n")

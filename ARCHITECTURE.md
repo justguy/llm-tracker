@@ -11,7 +11,7 @@ bin/llm-tracker.js       CLI entrypoint: init | run | daemon | mcp | status | bl
 bin/mcp-server.js        Stdio MCP server wiring for the deterministic `tracker_*` MCP surface
 bin/mcp-tools.js         MCP tool registry composer
 bin/mcp-read-tools.js    Workspace-file-backed deterministic MCP read tools
-bin/mcp-write-tools.js   Hub-backed MCP write tools (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`)
+bin/mcp-write-tools.js   Hub-backed MCP write tools (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`)
 bin/mcp-utils.js         Shared MCP result formatting, workspace loads, and hub-mutation helpers
 bin/mcp-resources.js     MCP resource registry and readers
 bin/mcp-prompts.js       Thin MCP workflow prompts that point back to deterministic tools
@@ -22,6 +22,7 @@ bin/commands/blockers.js `llm-tracker blockers` formatter + HTTP client wrapper
 bin/commands/changed.js  `llm-tracker changed` formatter + HTTP client wrapper
 bin/commands/search.js   `llm-tracker search` semantic-search formatter + HTTP client wrapper
 bin/commands/fuzzy.js    `llm-tracker fuzzy` / `fuzzy-search` lexical-search formatter + HTTP client wrapper
+bin/commands/start.js    `llm-tracker start` formatter + HTTP client wrapper
 bin/commands/pick.js     `llm-tracker pick` / `claim` formatter + HTTP client wrapper
 bin/commands/next.js     `llm-tracker next` formatter + HTTP client wrapper
 hub/server.js            Express + WebSocket + chokidar wiring + local auth/origin guards + vendor routes
@@ -120,7 +121,7 @@ Ordered by array index. Hub owns the order.
 | `status`         | `not_started`\|`in_progress`\|`complete`\|`deferred` |  ✓   | See §Status vocabulary.                               |
 | `placement`      | `{swimlaneId, priorityId}`                     |    ✓     | Both values must exist in `meta`.                     |
 | `dependencies`   | array of task ids                              |          | Drives **block state** (§Block state).                |
-| `assignee`       | string \| null                                 |          | LLM's model id when claimed.                          |
+| `assignee`       | string \| null                                 |          | LLM's model id when started or claimed.               |
 | `reference`      | string \| null                                 |          | Legacy single source location as `path/to/file.ext:line` or `…:line-line`. |
 | `references`     | array of strings \| null                       |          | Preferred additive source list. Each entry uses the same `path:line` or `path:line-line` format. |
 | `effort`         | `xs`\|`s`\|`m`\|`l`\|`xl`\|null                |          | Optional sizing hint for deterministic ranking and agent planning. |
@@ -239,6 +240,7 @@ Approval requirements are treated as a penalty, not a hard exclusion, so near-re
 - `tracker_changed`
 - `tracker_history`
 - `tracker_patch`
+- `tracker_start`
 - `tracker_pick`
 - `tracker_undo`
 - `tracker_redo`
@@ -267,7 +269,7 @@ Design rule:
 - read tools load the workspace files directly and call the same deterministic payload builders as HTTP/CLI
 - resources are preloadable read-only views over the same workspace-file state, including daemon and patch metadata
 - prompts are workflow hints only; they must point back to the deterministic tools/resources instead of re-implementing ranking or execution logic
-- write tools (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
+- write tools (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) go through the running hub so locking, revisioning, and live reconciliation stay authoritative
 - `/help`, CLI, and MCP must stay in sync when agent-facing behavior changes
 
 ### Companion surfaces
@@ -282,6 +284,7 @@ Design rule:
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
 - `GET /api/projects/:slug/history?fromRev=N&limit=50` returns the append-only revision log window, including delete/restore/rollback/undo/redo metadata.
+- `POST /api/projects/:slug/start` and `POST /api/projects/:slug/tasks/:taskId/start` atomically start an explicit task under the hub lock, requiring `taskId` and `assignee` and accepting optional `scratchpad`.
 - `POST /api/projects/:slug/pick` atomically claims a task under the hub lock. If `taskId` is omitted, the hub selects the top ready task from the deterministic `next` ranking. `POST /api/projects/:slug/claim` is an alias.
 - `POST /api/projects/:slug/restore` re-registers a deleted project from the latest snapshot (or an explicit rev) as a fresh audited rev.
 - `POST /api/projects/:slug/undo` restores the previous effective project state under the hub lock.
@@ -438,6 +441,8 @@ On success, the response is authoritative immediately: `{ok, rev, updatedAt, fil
 | `/api/projects/:slug/blockers`                      | GET    | Structural blockers: blocked tasks plus their blockers.    |
 | `/api/projects/:slug/changed`                       | GET    | Changed tasks since `fromRev`, grouped by task.            |
 | `/api/projects/:slug/history`                       | GET    | Recent revision-log window with delete/restore/rollback/undo/redo metadata. |
+| `/api/projects/:slug/start`                         | POST   | Atomic explicit task start with required task id and assignee. |
+| `/api/projects/:slug/tasks/:taskId/start`           | POST   | Atomic explicit task start with task id in the route.      |
 | `/api/projects/:slug/pick`                          | POST   | Atomic task claim. Defaults to the top ready task.         |
 | `/api/projects/:slug/claim`                         | POST   | Alias for `/pick`.                                         |
 | `/api/projects/:slug/restore`                       | POST   | Restore a deleted project from snapshots as a fresh rev.   |
@@ -522,7 +527,7 @@ Daemon mode is explicit:
 
 Daemon runtime files live under `<workspace>/.runtime/`. Existing workspaces do not need manual migration; the directory is created lazily on first daemon start.
 
-Hub-backed CLI commands (`brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `reload`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
+Hub-backed CLI commands (`brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `reload`, `start`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
 
 Daemon lifecycle is workspace-scoped. `llm-tracker daemon stop --path <dir>` only targets the daemon registered for that workspace.
 

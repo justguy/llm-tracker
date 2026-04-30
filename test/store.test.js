@@ -613,6 +613,71 @@ test("pickTask auto-selects the top ready task and updates status atomically", a
   }
 });
 
+test("startTask starts an explicit task and updates scratchpad atomically", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.startTask("test-project", {
+      taskId: "t1",
+      assignee: "codex",
+      scratchpad: "codex started t1"
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.noop, false);
+    assert.equal(res.payload.startedTaskId, "t1");
+    assert.equal(res.payload.action, "start");
+
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    const t1 = after.tasks.find((task) => task.id === "t1");
+    assert.equal(t1.status, "in_progress");
+    assert.equal(t1.assignee, "codex");
+    assert.equal(after.meta.scratchpad, "codex started t1");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("startTask requires an explicit task id", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.startTask("test-project", { assignee: "codex" });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.match(res.message, /taskId/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("startTask requires an assignee", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.startTask("test-project", { taskId: "t1" });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 400);
+    assert.match(res.message, /assignee/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("pickTask rejects blocked tasks without force", async () => {
   const ws = setupWorkspace();
   try {

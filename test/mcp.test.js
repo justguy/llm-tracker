@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -187,6 +187,7 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_redo",
       "tracker_reload",
       "tracker_search",
+      "tracker_start",
       "tracker_undo",
       "tracker_verify",
       "tracker_why"
@@ -435,6 +436,47 @@ test("tracker_pick goes through the running hub from MCP", async () => {
       assert.equal(payload.pickedTaskId, "t1");
       assert.equal(payload.task.assignee, "codex-mcp");
       assert.equal(payload.task.status, "in_progress");
+    } finally {
+      await client.close();
+    }
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_start goes through the running hub from MCP", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-start-");
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
+  const port = await findFreePort();
+
+  try {
+    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const client = startMcp(workspace);
+    try {
+      await client.initialize();
+
+      const startedTask = await client.request("tools/call", {
+        name: "tracker_start",
+        arguments: {
+          slug: "test-project",
+          taskId: "t1",
+          assignee: "codex-mcp",
+          scratchpad: "mcp started t1"
+        }
+      });
+
+      assert.notEqual(startedTask.result.isError, true);
+      const payload = JSON.parse(startedTask.result.content[0].text);
+      assert.equal(payload.startedTaskId, "t1");
+      assert.equal(payload.action, "start");
+      assert.equal(payload.task.assignee, "codex-mcp");
+      assert.equal(payload.task.status, "in_progress");
+
+      const after = JSON.parse(readFileSync(join(workspace, "trackers", "test-project.json"), "utf-8"));
+      assert.equal(after.meta.scratchpad, "mcp started t1");
     } finally {
       await client.close();
     }

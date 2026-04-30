@@ -79,7 +79,7 @@ function patchTaskEntries(patch) {
 // validation so hallucinated payloads are dropped cheaply.
 function checkPatchSize(body) {
   if (!body || typeof body !== "object") return null;
-  const scratchpad = body?.meta?.scratchpad;
+  const scratchpad = body?.meta?.scratchpad ?? body?.scratchpad;
   if (typeof scratchpad === "string" && scratchpad.length > MAX_SCRATCHPAD_LEN) {
     return {
       field: "meta.scratchpad",
@@ -627,6 +627,38 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       ...target
     });
   });
+
+  const startHandler = async (req, res) => {
+    const body = req.body || {};
+    const result = await store.startTask(req.params.slug, {
+      taskId: req.params.taskId || body.taskId,
+      assignee: typeof body.assignee === "string" && body.assignee.trim() ? body.assignee : null,
+      force: body.force === true,
+      comment: body.comment,
+      scratchpad: body.scratchpad
+    });
+    if (!result.ok) {
+      return res.status(result.status || 400).json({
+        error: result.message,
+        ...targetFor(req.params.slug)
+      });
+    }
+    const entry = store.get(req.params.slug);
+    if (result.noop !== true && entry) {
+      broadcast({
+        type: "UPDATE",
+        slug: req.params.slug,
+        project: projectFor(req.params.slug, entry)
+      });
+    }
+    res.json({
+      ...result.payload,
+      noop: result.noop === true,
+      ...targetFor(req.params.slug, entry)
+    });
+  };
+  app.post("/api/projects/:slug/start", rejectOversizedMutableFields, startHandler);
+  app.post("/api/projects/:slug/tasks/:taskId/start", rejectOversizedMutableFields, startHandler);
 
   app.post("/api/projects/:slug/swimlane-collapse", async (req, res) => {
     const { swimlaneId, collapsed } = req.body || {};

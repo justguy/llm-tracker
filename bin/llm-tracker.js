@@ -15,6 +15,7 @@ import { cmdPick } from "./commands/pick.js";
 import { cmdReload } from "./commands/reload.js";
 import { cmdRepairLinkedOverlays } from "./commands/repair-linked-overlays.js";
 import { cmdSearch } from "./commands/search.js";
+import { cmdStart } from "./commands/start.js";
 import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
 import { DEFAULT_PORT, httpRequest, resolvePort, resolveWorkspace } from "./workspace-client.js";
@@ -590,6 +591,7 @@ async function main() {
   if (cmd === "search") return cmdSearch(args, { resolveWorkspace, httpRequest });
   if (cmd === "fuzzy" || cmd === "fuzzy-search") return cmdFuzzy(args, { resolveWorkspace, httpRequest });
   if (cmd === "reload") return cmdReload(args, { resolveWorkspace, httpRequest });
+  if (cmd === "start") return cmdStart(args, { resolveWorkspace, httpRequest });
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
   if (cmd === "next") return cmdNext(args, { resolveWorkspace, httpRequest });
   if (cmd === "rollback") return cmdRollback(args);
@@ -624,6 +626,7 @@ Usage:
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
   llm-tracker search <slug> <query> [--json] [--limit N] Semantic task search with local embeddings (requires hub)
   llm-tracker fuzzy|fuzzy-search <slug> <query> [--json] [--limit N]  Fuzzy lexical task search (requires hub)
+  llm-tracker start <slug> <taskId> --assignee ID [--scratchpad TEXT] Start an explicit task atomically (requires hub)
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)
   llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
@@ -637,7 +640,7 @@ Usage:
 Env:
   LLM_TRACKER_HOME    Workspace folder (overrides default)
   LLM_TRACKER_PORT    Port (overrides settings.json and default)
-  LLM_TRACKER_ASSIGNEE Default assignee for pick / claim
+  LLM_TRACKER_ASSIGNEE Default assignee for start / pick / claim; required for start if --assignee is omitted
 
 Port priority (first match wins):
   1. --port flag
