@@ -1686,10 +1686,17 @@ body {
 }
 
 .lane-desc {
+  display: -webkit-box;
   font-size: 10.5px;
   color: var(--muted);
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   line-height: 1.4;
+  max-height: 2.8em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 

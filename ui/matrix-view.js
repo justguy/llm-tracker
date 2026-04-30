@@ -286,7 +286,7 @@ export function Matrix({
             onClick=${() => onMoveLane && onMoveLane(lane.id, "down")}
           >[DOWN]</button>
         </div>
-        ${lane.description ? html`<div class="lane-desc">${lane.description}</div>` : null}
+        ${lane.description ? html`<div class="lane-desc" title=${lane.description}>${lane.description}</div>` : null}
         <div class="lane-stats">
           <span>${per.total} tasks</span>
           <span class="active">- ${active} active</span>
