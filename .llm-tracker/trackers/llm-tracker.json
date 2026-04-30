@@ -45,9 +45,9 @@
         "label": "P3 / Later"
       }
     ],
-    "scratchpad": "t12 complete: structural patch op guidance is already landed; syncing tracker truth before the next task.",
-    "rev": 67,
-    "updatedAt": "2026-04-30T03:11:13.206Z"
+    "scratchpad": "t13 complete: ownership/tooling gap is already covered by structural ops, docs, actionability, execute/verify, and tests; hygiene helpers stay in t18.",
+    "rev": 69,
+    "updatedAt": "2026-04-30T03:21:15.504Z"
   },
   "tasks": [
     {
@@ -356,12 +356,12 @@
       "id": "t13",
       "title": "Close tooling gaps around hub-owned structure vs agent-owned content",
       "goal": "Audit and fill the routine maintenance operations that still fall through the current ownership split, so the contract is actionable instead of partially manual.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p2"
       },
-      "comment": "The ownership line is sensible, but the tooling around it is still incomplete for everyday board maintenance.",
+      "comment": "Closed based on existing structural ops, repair/no-op diagnostics, docs, actionability, and execute/verify coverage; lane hygiene remains separate under t18.",
       "context": {
         "tags": [
           "github-issue",
@@ -370,9 +370,26 @@
         ],
         "github_issue_number": 26,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/26",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "notes": "Audit confirmed t13 is already satisfied by hub-backed structural operations (swimlaneOps/taskOps), repair payloads, ownership docs in README and /help template, actionability, and execute/verify packs. Avoided adding overlapping lane-hygiene work; t18 remains the owning task for maintenance discovery helpers.",
+        "files_touched": [
+          "hub/store.js",
+          "README.md",
+          "workspace-template/README.md",
+          "hub/task-metadata.js",
+          "hub/execute.js",
+          "hub/verify.js",
+          "test/store.test.js",
+          "test/field-limits.test.js",
+          "test/versioning.test.js",
+          "test/mcp-tools.test.js",
+          "test/execute.test.js",
+          "test/verify.test.js"
+        ]
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [],
