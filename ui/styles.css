@@ -1640,6 +1640,8 @@ body {
   position: sticky;
   left: 0;
   z-index: 4;
+  max-width: var(--lane-col-width);
+  overflow: hidden;
   background: var(--panel);
   border-right: 1px solid var(--rule);
   border-bottom: 1px solid var(--lane-divider);
@@ -1651,9 +1653,13 @@ body {
 }
 
 .lane-cell-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
 }
 
 .lane-order-actions {
@@ -1701,15 +1707,23 @@ body {
 
 
 .lane-label-text {
-  display: block;
+  display: -webkit-box;
+  flex: 1;
+  line-height: 1.25;
+  max-height: 2.5em;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
+  overflow-wrap: anywhere;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .lane-label .card-copy-btn {
   display: inline-flex;
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
   margin-left: 4px;
@@ -1725,14 +1739,19 @@ body {
 
 
 .lane-cell .lane-label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  flex: 1;
   gap: 6px;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--white);
   letter-spacing: 0.04em;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   text-transform: uppercase;
+  width: 100%;
 }
 .lane-cell .lane-stats {
   display: flex;
@@ -3475,9 +3494,11 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 }
 
 .lane-row__title {
+  flex: 1;
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
