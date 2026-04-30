@@ -88,7 +88,7 @@ When the tracker file lives inside a repo, tracker writes update the repo-visibl
 - **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
 - MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
 - If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
-- If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
+- If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, `tracker_handoff_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
 - **On failure**, read `<slug>.errors.json` (file mode) or the JSON response body (HTTP mode). Both are structured `{error, type, hint}` with a precise path pointer.
@@ -589,7 +589,7 @@ Related deterministic reads:
 - `GET /api/projects/<slug>/tasks/<taskId>/why` for one capped rationale pack: why the task exists now, what it blocks or unblocks, and recent task history
 - `GET /api/projects/<slug>/decisions?limit=20` for the current project's recent decision notes
 - `GET /api/projects/<slug>/tasks/<taskId>/execute` for one deterministic execution pack: readiness, guardrails, expected changes, references, and snippets
-- `GET /api/projects/<slug>/tasks/<taskId>/verify` for one deterministic verification pack: explicit checks plus real evidence sources from tracker state, history, references, and snippets
+- `GET /api/projects/<slug>/tasks/<taskId>/verify` for one deterministic verification pack: explicit checks plus real evidence sources from tracker state, history, references, snippets, and repo-specific allowed path / approval checks when `task.repos` is present
 - `GET /api/projects/<slug>/tasks/<taskId>/handoff` for a deterministic handoff pack combining brief, why, execution contract, recent decisions, and a ready-to-paste markdown `handoffPrompt` for the next agent
 - `GET /api/projects/<slug>/search?q=<query>` for semantic local-model search when the question is feature-shaped rather than task-id-shaped
 - `GET /api/projects/<slug>/fuzzy-search?q=<query>` for deterministic fuzzy lexical fallback when you want approximate string matching without embeddings

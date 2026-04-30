@@ -182,7 +182,7 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 - It serves the workspace `README.md`
 - For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
 - Agents should read `/help` before using write paths or task-intelligence endpoints
-- Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, `decisions` to recall prior decisions, and `execute` / `verify` to close the work loop before broad file reads
+- Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, `decisions` to recall prior decisions, `handoff` to transfer context, `hygiene` to audit board cleanup issues, and `execute` / `verify` to close the work loop before broad file reads
 - If you change agent-facing behavior, update the workspace template so `/help` stays accurate
 
 ---
@@ -412,7 +412,7 @@ This project ships a stdio MCP server via `llm-tracker mcp`.
 Use the workspace contract first, then the narrowest interface that fits:
 
 - read `GET /help` or `tracker_help` first for the active workspace contract
-- use `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_search`, and `tracker_fuzzy_search` for focused reads
+- use `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_hygiene`, `tracker_search`, and `tracker_fuzzy_search` for focused reads
 - use `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
 
 Register the server in your client config instead of launching it manually:
@@ -442,7 +442,7 @@ If you want the hub to keep running without a dedicated shell, use `npx llm-trac
 
 Existing workspaces do not need migration work. The `.runtime/` directory is created on demand the first time daemon mode is used.
 
-Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `start`, `pick`, `since`, `rollback`, `link`, and `reload` keep working against a background hub started on a non-default port.
+Hub-backed CLI commands reuse the active daemon port from `.runtime/daemon.json` when you omit `--port`, so `brief`, `why`, `decisions`, `execute`, `verify`, `handoff`, `next`, `blockers`, `hygiene`, `changed`, `start`, `pick`, `since`, `rollback`, `link`, and `reload` keep working against a background hub started on a non-default port.
 
 Daemon state is **workspace-scoped**. `npx llm-tracker daemon stop --path <dir>` only affects the daemon for that workspace. In the recommended shared-daemon topology, that means one daemon for the central workspace and linked repo-local project files underneath it.
 
@@ -515,6 +515,10 @@ Legacy compatibility: if an older patch or tracker file still uses `status: "par
 `outcome` is separate from `status`: use `partial_slice_landed` when a bounded slice shipped but the task remains open. Progress % still keys only off the four status values above.
 
 `actionability` is also separate from `status`: the hub derives `executable`, `blocked_by_task`, `decision_gated`, or `parked` from dependencies, approval requirements, aggregate rows, and lifecycle state. `next` ranks executable work by default; `includeGated=true` / `--include-gated` adds decision-gated rows for diagnostics.
+
+Dependencies may point at local task ids or cross-project refs like `<otherSlug>:<taskId>`. Incomplete or missing external tasks remain blockers, and packs expose them as `external_dependencies`.
+
+Cross-repo tasks can declare `repos` with `primary`, `secondary[]`, per-repo `allowed_paths`, and per-repo `approval_required_for`. Repo approvals surface as `repo:<id>` decision gates, execute adds repo-specific plan steps, and verify adds repo-specific allowed-path and approval checks.
 
 Traceability is derived from optional author-owned `context` keys so tracker rows can point back to planning truth without schema churn: `context.roadmap_section`, `context.roadmap_reference`, `context.execution_report`, `context.execution_report_reference`, `context.architecture_truth_doc`, and `context.architecture_reference`. Brief, why, execute, verify, search, changed, and next payloads expose these as `traceability`.
 

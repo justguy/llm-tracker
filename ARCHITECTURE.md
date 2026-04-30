@@ -210,6 +210,7 @@ can scope edits and trigger approvals deterministically.
 - `allowed_paths{repo: paths[]}` is a per-repo path scope. It is independent from the task-level `allowed_paths` (which still applies to the primary repo by convention).
 - Each entry in `approval_required_for` produces a `decision_gated` actionability prefixed as `repo:<id>` in `decision_required`. That value flows through `summarizeTask`, `next`, `brief`, `why`, `execute`, `verify`, and `handoff`, and shows up in the rendered `handoffPrompt` under `## Cross-repo scope`.
 - The execute pack adds `executionPlan` steps for `primary_repo`, `secondary_repos`, `repo_allowed_paths`, and `repo_approval`.
+- The verify pack includes `repos` in `verificationContract` and emits `repo_allowed_path` / `repo_approval` checks so sign-off retains the same cross-repo guardrails as execution.
 
 Violations → hub writes `<slug>.errors.json` and keeps the prior valid state live.
 
@@ -347,7 +348,7 @@ Design rule:
 - `GET /api/projects/:slug/tasks/:taskId/why` returns a capped rationale pack: why the task matters now, what blocks it, what it unblocks, and recent task history.
 - `GET /api/projects/:slug/decisions?limit=20` returns recent decision notes derived from task comments in deterministic order.
 - `GET /api/projects/:slug/tasks/:taskId/execute` returns the action pack: readiness, explicit contract fields, references, snippets, and recent task history.
-- `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources.
+- `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources, including repo-specific allowed-path and approval checks when `task.repos` is present.
 - `GET /api/projects/:slug/tasks/:taskId/handoff?from=<id>&to=<id>` returns a deterministic handoff pack: brief, why, execution contract, recent decisions, recent task history, and a pre-rendered markdown `handoffPrompt` for the next agent.
 - `GET /api/projects/:slug/search?q=<query>` runs semantic local-model search through `@huggingface/transformers` + `Xenova/all-MiniLM-L6-v2`.
 - `GET /api/projects/:slug/fuzzy-search?q=<query>` runs deterministic fuzzy lexical matching without embeddings.
@@ -600,7 +601,7 @@ Daemon mode is explicit:
 
 Daemon runtime files live under `<workspace>/.runtime/`. Existing workspaces do not need manual migration; the directory is created lazily on first daemon start.
 
-Hub-backed CLI commands (`brief`, `why`, `decisions`, `execute`, `verify`, `next`, `blockers`, `changed`, `reload`, `start`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
+Hub-backed CLI commands (`brief`, `why`, `decisions`, `execute`, `verify`, `handoff`, `next`, `blockers`, `hygiene`, `changed`, `reload`, `start`, `pick`, `since`, `rollback`, `link`) automatically reuse the recorded daemon port when no explicit `--port`, env override, or settings value is present.
 
 Daemon lifecycle is workspace-scoped. `llm-tracker daemon stop --path <dir>` only targets the daemon registered for that workspace.
 
