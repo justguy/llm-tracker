@@ -18,7 +18,7 @@
         "id": "improvements",
         "label": "Improvements",
         "description": "Follow-up API and board-maintenance improvements to document as GitHub issues.",
-        "collapsed": true
+        "collapsed": false
       },
       {
         "id": "redesign",
@@ -45,9 +45,9 @@
         "label": "P3 / Later"
       }
     ],
-    "scratchpad": "t11 complete: noop patch responses include noopReason; rejected swimlane removal and already-current values are covered by tests. Full suite passes 250/250 with loopback allowed.",
-    "rev": 37,
-    "updatedAt": "2026-04-29T22:04:28.651Z"
+    "scratchpad": "t12 complete: structural patch op guidance is already landed; syncing tracker truth before the next task.",
+    "rev": 67,
+    "updatedAt": "2026-04-30T03:11:13.206Z"
   },
   "tasks": [
     {
@@ -178,7 +178,7 @@
         "swimlaneId": "improvements",
         "priorityId": "p0"
       },
-      "comment": "Structural edits should be first-class patch operations, not raw array replacement semantics or full-file writes.",
+      "comment": "Completed structural patch ops: swimlaneOps add/update/move/remove and taskOps move/archive/split/merge are implemented, documented, and covered by focused tests.",
       "context": {
         "tags": [
           "github-issue",
@@ -190,17 +190,21 @@
         "github_issue_number": 21,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/21",
         "github_issue_repo": "justguy/llm-tracker",
-        "notes": "Added first-class structural patch ops in Store.applyPatch: swimlaneOps add/update/move/remove and taskOps move/archive/split/merge. Added defensive validation for malformed op arrays, stale mixed structural/full-field payloads, invalid targetIndex, and tombstoned split ids. Updated MCP patch schema text and /help docs. Verification: node --test test/store.test.js test/mcp-tools.test.js; npm test (261/261).",
+        "notes": "Audit on 2026-04-29 found t8 stale in_progress. Evidence: structural op implementation in hub/store.js, docs in README/workspace-template, MCP guidance, and focused structural tests passing.",
         "files_touched": [
           "hub/store.js",
-          "test/store.test.js",
-          "bin/mcp-write-tools.js",
           "README.md",
-          "workspace-template/README.md"
+          "workspace-template/README.md",
+          "bin/mcp-write-tools.js",
+          "bin/mcp-prompts.js",
+          "test/store.test.js",
+          "test/versioning.test.js",
+          "test/mcp-tools.test.js"
         ]
       },
       "effort": "l",
-      "assignee": "codex"
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [
@@ -214,7 +218,7 @@
         "swimlaneId": "improvements",
         "priorityId": "p1"
       },
-      "comment": "Removing a swimlane should offer a concrete retarget path rather than noop or implicit keep-existing behavior.",
+      "comment": "Existing structural validation already fails loudly for stranded/invalid structural edits and returns repair payloads for swimlane reassignment.",
       "context": {
         "tags": [
           "github-issue",
@@ -225,22 +229,19 @@
         "github_issue_number": 22,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/22",
         "github_issue_repo": "justguy/llm-tracker",
-        "notes": "Added explicit repair payloads for structural edits that would strand tasks. swimlaneOps.remove now returns repair.type, affectedTaskIds, validSwimlaneIds, moveTasksTo, and a ready retry swimlaneOps shape when reassignTo is missing or invalid. Repair now propagates through Store, HTTP patch responses, file-patch .errors.json bodies, and MCP direct structured errors. Verification: node --test test/store.test.js test/mcp-tools.test.js test/error-payload.test.js; node --test test/field-limits.test.js; npm test (264/264).",
+        "notes": "Audit on 2026-04-29 found t9 stale not_started. Stranded swimlane removal returns moveTasksTo/affectedTaskIds/swimlaneOps repair; invalid structural move/split states fail schema validation.",
         "files_touched": [
           "hub/store.js",
-          "hub/error-payload.js",
           "hub/server.js",
           "bin/mcp-write-tools.js",
           "test/store.test.js",
-          "test/mcp-tools.test.js",
-          "test/error-payload.test.js",
           "test/field-limits.test.js",
-          "README.md",
-          "workspace-template/README.md"
+          "test/mcp-tools.test.js"
         ]
       },
       "effort": "m",
-      "assignee": "codex"
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [
@@ -254,7 +255,7 @@
         "swimlaneId": "improvements",
         "priorityId": "p1"
       },
-      "comment": "Structural maintenance should be as authoritative as task patches and claims.",
+      "comment": "Structural patch ops now have explicit broadcast coverage in daemon tests; Store coverage already proves rev, updatedAt, snapshot, and history behavior.",
       "context": {
         "tags": [
           "github-issue",
@@ -264,13 +265,17 @@
         "github_issue_number": 23,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/23",
         "github_issue_repo": "justguy/llm-tracker",
-        "notes": "Confirmed structural ops already mutate through Store.applyPatch and added regression coverage proving effective swimlaneOps/taskOps bump rev, stamp updatedAt, persist snapshots, and append history with changed structural fields. Verification: node --test test/versioning.test.js.",
+        "notes": "Completed on 2026-04-29. Evidence: applyPatch structural path stamps rev/history/snapshot, HTTP patch route broadcasts non-noop UPDATE, and daemon test now asserts structural HTTP patches broadcast the new rev.",
         "files_touched": [
+          "test/daemon.test.js",
+          "hub/store.js",
+          "hub/server.js",
           "test/versioning.test.js"
         ]
       },
       "effort": "m",
-      "assignee": "codex"
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [],
@@ -305,7 +310,8 @@
         "notes": "Patch no-ops now return noopReason; attempted swimlane removal warns to use swimlaneOps.remove or structural replacement."
       },
       "effort": "s",
-      "assignee": "codex"
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [
@@ -320,7 +326,7 @@
         "swimlaneId": "improvements",
         "priorityId": "p2"
       },
-      "comment": "Keep README.md, workspace-template/README.md, MCP prompts, and agent guidance aligned with the structural patch contract.",
+      "comment": "Structural patch contract is documented in README, /help template, MCP prompt guidance, and MCP tests.",
       "context": {
         "tags": [
           "github-issue",
@@ -331,17 +337,17 @@
         "github_issue_number": 25,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/25",
         "github_issue_repo": "justguy/llm-tracker",
-        "notes": "Structural patch contract is now documented in README, /help, MCP tool schema text, and MCP prompts. Prompt guidance covers swimlaneOps, taskOps, expectedRev, repair retry shapes, and file-patch fallback behavior. Verification: node --test test/mcp-tools.test.js.",
+        "notes": "Existing branch evidence shows structural patch guidance documented across README.md, workspace-template/README.md, bin/mcp-prompts.js, and test/mcp-tools.test.js. Verified current files mention swimlaneOps/taskOps/expectedRev/repair guidance where agents consume it.",
         "files_touched": [
           "README.md",
           "workspace-template/README.md",
-          "bin/mcp-write-tools.js",
           "bin/mcp-prompts.js",
           "test/mcp-tools.test.js"
         ]
       },
       "effort": "s",
-      "assignee": "codex"
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [
@@ -402,7 +408,7 @@
         "swimlaneId": "improvements",
         "priorityId": "p1"
       },
-      "comment": "Topology is still too easy to get wrong; effective target data should be unavoidable in the contract.",
+      "comment": "Effective target metadata now reaches HTTP project reads/writes, bulk reload/history edge routes, MCP reads/resources/direct writes, and status JSON.",
       "context": {
         "tags": [
           "github-issue",
@@ -413,18 +419,28 @@
         "github_issue_number": 28,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/28",
         "github_issue_repo": "justguy/llm-tracker",
-        "notes": "Added unavoidable effective-target metadata to HTTP project reads, project lists, websocket snapshots/broadcasts, intelligence read payloads, and write responses: workspace, port, effective file, registrationFile, and topology (shared-workspace or repo-linked). Updated README and /help wording. Verification so far: node --test test/security.test.js test/watcher-scope.test.js.",
+        "notes": "Completed on 2026-04-30. Added shared targetMetadata helper, top-level registrationFile on project reads, preserved linked target metadata on delete, added metadata to MCP history/resources/read payloads and status JSON, and updated docs. Focused target suite passed 38/38; serial full suite passed with node --test --test-concurrency=1.",
         "files_touched": [
+          "hub/target-metadata.js",
           "hub/server.js",
-          "hub/routes/intelligence.js",
+          "hub/status.js",
+          "bin/mcp-utils.js",
+          "bin/mcp-write-tools.js",
+          "bin/mcp-context-data.js",
+          "bin/mcp-read-tools.js",
+          "bin/mcp-resources.js",
+          "README.md",
+          "workspace-template/README.md",
           "test/security.test.js",
           "test/watcher-scope.test.js",
-          "README.md",
-          "workspace-template/README.md"
+          "test/mcp-tools.test.js",
+          "test/mcp.test.js",
+          "test/status.test.js"
         ]
       },
       "effort": "m",
-      "assignee": "codex"
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [],
@@ -436,18 +452,17 @@
         "swimlaneId": "improvements",
         "priorityId": "p0"
       },
-      "comment": "Write responses should distinguish stale-write conflicts from accepted merges.",
+      "comment": "Implemented optimistic concurrency for patch writes: top-level expectedRev is checked under Store.applyPatch's lock before merge and stale writes return structured conflict details.",
       "context": {
         "tags": [
-          "github-issue",
-          "concurrency",
-          "writes",
-          "rev"
+          "optimistic-concurrency",
+          "patch-api",
+          "mcp",
+          "file-patches"
         ],
         "github_issue_number": 29,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/29",
         "github_issue_repo": "justguy/llm-tracker",
-        "notes": "Synced repo-local tracker truth for work already landed in 0890efb: patch writes support expectedRev, stale writes return 409 conflict with expectedRev/currentRev/hint, MCP hub/direct and file-patch errors preserve structured conflict payloads. Verification from implementation slice: npm test passed 257/257 before t8/t9 additions; current suite later passed 264/264.",
         "files_touched": [
           "hub/store.js",
           "hub/server.js",
@@ -460,22 +475,25 @@
           "test/mcp.test.js",
           "README.md",
           "workspace-template/README.md"
-        ]
+        ],
+        "notes": "expectedRev accepts current rev, rejects stale/non-integer values, leaves stale writes unchanged, and propagates expectedRev/currentRev through HTTP, MCP direct, MCP hub, and file patch .errors.json.",
+        "proof": "node --test test/store.test.js test/mcp-tools.test.js test/merge.test.js -> pass; node --test test/field-limits.test.js -> 7/7 pass with loopback; node --test test/mcp.test.js -> 11/11 pass with loopback; npm test -> 257/257 pass with loopback."
       },
       "effort": "m",
-      "assignee": "codex"
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [],
       "id": "t17",
       "title": "Add a real tracker_start task flow",
       "goal": "Provide a first-class start-task operation that atomically sets `status: in_progress`, assignee, and an optional scratchpad update without manual multi-step patching.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p1"
       },
-      "comment": "Claim, start, and handoff should feel like one workflow instead of several loosely-coupled writes.",
+      "comment": "Shipped first-class tracker_start across store, HTTP routes, CLI, MCP tools/prompts/resources, docs, and focused/full test coverage.",
       "context": {
         "tags": [
           "github-issue",
@@ -485,9 +503,29 @@
         ],
         "github_issue_number": 30,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/30",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "files_touched": [
+          "hub/store.js",
+          "hub/server.js",
+          "bin/commands/start.js",
+          "bin/llm-tracker.js",
+          "bin/mcp-write-tools.js",
+          "bin/mcp-context-data.js",
+          "bin/mcp-prompts.js",
+          "test/store.test.js",
+          "test/field-limits.test.js",
+          "test/pick-cli.test.js",
+          "test/mcp-tools.test.js",
+          "test/mcp.test.js",
+          "README.md",
+          "workspace-template/README.md",
+          "ARCHITECTURE.md"
+        ],
+        "notes": "Focused t17 suite passed: node --test test/store.test.js test/field-limits.test.js test/pick-cli.test.js test/mcp-tools.test.js test/mcp.test.js. Full serial suite passed: node --test --test-concurrency=1."
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [],
@@ -591,7 +629,8 @@
       },
       "effort": "s",
       "assignee": "claude-opus-4-7",
-      "blocker_reason": null
+      "blocker_reason": null,
+      "outcome": null
     },
     {
       "dependencies": [
@@ -615,9 +654,12 @@
           "redesign",
           "top-bar",
           "ia"
-        ]
+        ],
+        "notes": "Top bar rebuilt at 52px. Agent + history clusters wire existing onOpenIntel/onUndo/onRedo handlers via the Bracket primitive. ⌘K input and overflow dropdown are stubs for t24/t33. Project ^ dropdown stub awaits t32. Theme toggle preserved in the ⋯ stub. Outside-click hook added above Header. FILTER/FUZZY removed from header per spec. Commit 2f7e7e7."
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -626,7 +668,7 @@
       "id": "t23",
       "title": "Build hero strip: 94% headline, status grid, Recommended Next callout",
       "goal": "Implement the 3-column hero (grid 1.1fr / 1.2fr / 340px): project name + big 94% + segmented progress, 2x3 status tile grid, and the green Recommended Next callout with [PICK] and [READ] buttons.",
-      "status": "in_progress",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p0"
@@ -640,10 +682,16 @@
           "redesign",
           "hero",
           "next"
+        ],
+        "notes": "Closed the remaining t23 proof gap by extracting HeroStripView/loadNextRecommendation and adding focused hero-strip tests for render states plus PICK/READ wiring. Verified with node --test test/ui-hero-strip.test.js test/ui-intelligence.test.js test/next.test.js test/pick.test.js.",
+        "files_touched": [
+          "ui/app.js",
+          "test/ui-hero-strip.test.js"
         ]
       },
       "effort": "m",
-      "assignee": "claude-sonnet-4-6"
+      "assignee": "codex",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -652,7 +700,7 @@
       "id": "t24",
       "title": "Ship slash-K command palette: projects, tasks, actions",
       "goal": "Single global palette that lists projects (/api/projects), fuzzy filters tasks (/fuzzy-search) with a semantic mode (/search), and runs retired header actions (collapse all, next, blockers, changed, decisions, undo, redo, settings, toggle theme, help).",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p1"
@@ -666,9 +714,12 @@
           "redesign",
           "palette",
           "ia"
-        ]
+        ],
+        "notes": "New ui/palette.js (242 lines). Modes: COMMAND default, FUZZY ~ prefix (/fuzzy-search), SEMANTIC ? prefix (/search). Both endpoints return { matches: [...] }. 13 static actions + dynamic 'Switch project' rows. Navigate-to-task = onToggleCollapse(..., false) + onOpenTaskDrawer. Cmd+K / Ctrl+K toggles global. Commit ce44d80."
       },
-      "effort": "l"
+      "effort": "l",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -678,7 +729,7 @@
       "id": "t25",
       "title": "Rework task card into 3-tier layout with bracket action row",
       "goal": "Render cards as id + title / summary (4-line clamp) / status pill + assignee + tags, with a 3px status border-left as the only decorative color, and a bracket action row ([READ][WHY][EXEC][VERIFY]) under a dashed divider.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p1"
@@ -692,10 +743,11 @@
           "redesign",
           "card"
         ],
-        "notes": "Card function reworked in ui/app.js with three tiers (id+title / summary clamp / meta row) plus the bracket action row and preserved drag/delete/comment behaviors."
+        "notes": "Card function reworked at ui/app.js:355. Three tiers (id+title / summary 4-line clamp / meta row) with 3px status border-left and bracket action row. Drag/drop + click-to-open (onOpenTask) + CommentBadge + DeleteBtn all preserved. Tier 3 absorbs readiness/deps/approval/rev/outcome/effort/refs/tags/fuzzy-score as meta chips. Commit cdcb3e0."
       },
       "effort": "m",
-      "assignee": "claude-sonnet-4-6"
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -719,10 +771,11 @@
           "redesign",
           "scratchpad"
         ],
-        "notes": "ScratchpadRow replaced the old block with a 36px NOTE row, inline expand/edit controls, and cmd+enter save via PATCH meta.scratchpad."
+        "notes": "ScratchpadRow replaces ScratchpadBlock. 36px single-line with [EXPAND] and [EDIT] soft brackets. cmd+enter saves via onSaveScratchpad (existing PATCH /api/projects/:slug/patch with { meta: { scratchpad } }). Escape cancels. Timestamp is relativeTime(meta.updatedAt); approx since updatedAt bumps on any patch. Commit f70480d."
       },
       "effort": "s",
-      "assignee": "claude-sonnet-4-6"
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -731,7 +784,7 @@
       "id": "t27",
       "title": "Replace task modal with inline task drawer",
       "goal": "Expand the task card in place to render the brief pack (goal, dependencies, references, snippets, recent history) instead of opening the current overlay modal; keep the board visible as context. [WHY]/[EXEC]/[VERIFY] content shapes land in t35.",
-      "status": "in_progress",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p1"
@@ -746,21 +799,11 @@
           "drawer",
           "brief"
         ],
-        "files_touched": [
-          "ui/app.js",
-          "ui/task-drawer.js",
-          "ui/modals/intelligence.js",
-          "ui/modals/intelligence-shared.js",
-          "ui/modals/task-intelligence-view.js",
-          "ui/modals/project-intelligence-view.js",
-          "test/ui-intelligence.test.js",
-          "ui/styles.css"
-        ],
-        "notes": "Task detail now expands inline under the active card instead of opening the task modal. The drawer reuses TaskIntelligenceView, fetches the brief pack directly, and keeps WHY/EXEC/VERIFY as visible t35 placeholders while focused tests and node --check pass."
+        "notes": "Inline drawer landed across two commits (a8450c7 + 7842d9a). New ui/task-drawer.js (249 lines) with fetchBrief helper, BriefContent (GOAL/DEPS/REFS/SNIPPETS/HISTORY), TaskInlineDrawer, and [READ]/[WHY]/[EXEC]/[VERIFY] tab row. Morph layout (Option A): drawer sibling after Card in Fragment, cell grows naturally. Card root click now toggles drawer instead of opening modal. WHY/EXEC/VERIFY still route to the existing modal until t35. Modal file refactored into intelligence-shared + task-intelligence-view + project-intelligence-view components."
       },
       "effort": "l",
-      "assignee": "codex",
-      "outcome": "partial_slice_landed"
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -784,15 +827,11 @@
           "redesign",
           "swimlanes"
         ],
-        "files_touched": [
-          "ui/app.js",
-          "ui/styles.css"
-        ],
-        "notes": "Synced repo-local tracker truth for work already landed in d40cae5: collapsed swimlane rows render as a 44px strip with lane title, optional LIVE badge, counts, inline progress, percentage, hover/focus accent, and bracket move controls. Existing files_touched retained: ui/app.js and ui/styles.css."
+        "notes": "Collapsed lane row rebuilt inside Matrix (rows map, ui/app.js:614+). 44px, 240px/1fr grid. Progress bar shows done + in_progress segments. Hover reveals [^][v] soft brackets wired to existing onMoveLane (POST /api/projects/:slug/swimlane-move). No LIVE dot (data model has no live field). Commit d40cae5."
       },
       "effort": "s",
-      "assignee": "codex",
-      "outcome": "partial_slice_landed"
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -806,7 +845,7 @@
       "id": "t29",
       "title": "Polish surfaces against Variant C dark reference",
       "goal": "With light and dark tokens already established in t21, do a surface-by-surface polish pass: apply Variant C's subtle stream pattern where called out (focus card bg, agent cluster), confirm amber encodes meaning (status, agent identity) rather than emphasis, and close any parity gaps flagged during t22-t28.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p2"
@@ -819,9 +858,12 @@
         "tags": [
           "redesign",
           "dark-theme"
-        ]
+        ],
+        "notes": "Dark polish landed: -167 net lines in styles.css. Added theme-aware tokens --backdrop, --shadow-panel, --shadow-lift, --shadow-popover, --shadow-palette, --shadow-dropdown, --ok-border, --ok-border-btn, --ok-border-disabled. Retuned ~30 surfaces where amber was decorative (brand, dropdown, modal, scratchpad, banner, badge.status-in_progress, card-subfact.warn, etc.). Pruned dead rules: .lane-collapsed* + old .card-footer/.card-subfacts/.card-intel-actions/.card-context. Subtle dark-only dot-grid on .card__drawer-header. Commit bdb5992."
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -842,7 +884,7 @@
       "id": "t30",
       "title": "Accessibility, keyboard, and theme-parity sweep",
       "goal": "Re-verify AA contrast on light AND dark (ink-2 on bg at 14.5px), ensure bracket buttons have >=24x24 hit targets, confirm j/k/gg/n/p/slash-K shortcuts still work, and walk every surface in both themes to catch parity regressions.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p3"
@@ -856,9 +898,12 @@
           "redesign",
           "a11y",
           "keyboard"
-        ]
+        ],
+        "notes": "A11y + keyboard + theme parity sweep complete. Dark ink-2/bg 7.98:1; light ink-2/bg 7.10:1; light amber focus on bg 4.87:1. Focus rings added on 9 interactive surfaces. Shortcuts wired: slash (palette EXACT), n (next), p (pick), Enter (menus). Gaps logged: j/k board focus nav + g g chord. ARIA added on top-bar, menus, card, drawer, palette. Only 1 hex (#fff -> var(--paper)) found and fixed. Commit 4dcc83c."
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -885,7 +930,8 @@
         "notes": "Bracket primitive added at ui/app.js:181 + styles at ui/styles.css:2398-2450. Variants: default / active / soft / tone=ok|warn|block. Tone modifiers compose with active via compound rules. Callers pass inner text only (label=\"NEXT\" renders [NEXT]). Commit 1b67216."
       },
       "effort": "s",
-      "assignee": "claude-sonnet-4-6"
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -894,7 +940,7 @@
       "id": "t32",
       "title": "Add project-name dropdown: overview + quick-switch",
       "goal": "Attach a down-caret dropdown to the top-bar project name that lists all workspace projects (GET /api/projects), supports quick-switch, and absorbs the retired [OVERVIEW] button; pin-to-open behavior preserved from the current overview drawer.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p1"
@@ -909,9 +955,12 @@
           "redesign",
           "top-bar",
           "overview"
-        ]
+        ],
+        "notes": "Project ^ dropdown renders below name button. Rows from in-memory projects dict; active marked with accent left border + --accent-soft + dot. Footer opens overview drawer. Reuses setActive/setActiveSlug. Escape + outside-click close. Commit 11e9c5a."
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -920,7 +969,7 @@
       "id": "t33",
       "title": "Wire overflow menu for retired header actions",
       "goal": "Render the overflow dot menu in the top bar as the home for DELETE, SETTINGS, HELP, comments toggle, and PIN per the IA table in section 05; each entry invokes an existing endpoint or keyboard shortcut.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p2"
@@ -934,9 +983,12 @@
           "redesign",
           "top-bar",
           "overflow"
-        ]
+        ],
+        "notes": "Four groups of entries with dividers. 8/10 wired (collapse-all/expand-all + history/overview/settings/help/delete + theme toggle). Pin and comments-toggle are stubs (no existing handlers). Collapse-all iterates POST /swimlane-collapse per lane. Destructive Delete rendered in --block. Commit d428604."
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -945,7 +997,7 @@
       "id": "t34",
       "title": "Polish drag-and-drop visuals for task cards",
       "goal": "Keep existing POST /move semantics; add the 1px lift shadow on the dragged card and a dashed target-cell highlight in the destination in both themes; verify keyboard-move and drag route through the same action.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p2"
@@ -960,9 +1012,12 @@
           "redesign",
           "dnd",
           "card"
-        ]
+        ],
+        "notes": "Card dragging now lifts via box-shadow + slight scale instead of opacity-ghosting. Drop target renamed from drop-target to lane-cell--drag-over with dashed --ink-3 inset. Origin cell dims to 0.6 via new originLaneId/originPriorityId in dragState. No keyboard-move flow exists. No backend change. Commit 80d29f4."
       },
-      "effort": "s"
+      "effort": "s",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
     },
     {
       "dependencies": [
@@ -971,7 +1026,7 @@
       "id": "t35",
       "title": "Render WHY / EXEC / VERIFY content shapes in the task drawer",
       "goal": "Each bracket action unfolds its own section inside the inline drawer: WHY = intent + decision history (/why), EXEC = execution pack (/execute), VERIFY = verification pack (/verify). All three render in light and dark.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "redesign",
         "priorityId": "p1"
@@ -988,9 +1043,109 @@
           "why",
           "exec",
           "verify"
-        ]
+        ],
+        "notes": "Drawer mode state drives WhyContent / ExecContent / VerifyContent. Generic fetchPack + per-(taskId,mode) cache + AbortController. Retry via retryKey counter. Drawer no longer opens TaskIntelligenceModal; modal still reachable via Card's action-row brackets. Endpoint shapes documented. Commit 42da807."
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "claude-sonnet-4-6",
+      "outcome": null
+    },
+    {
+      "dependencies": [],
+      "id": "t36",
+      "title": "Add a first-class actionability layer separate from task status",
+      "goal": "Introduce a derived actionability model (executable | blocked_by_task | decision_gated | parked) with blocked_by, decision_required, and decision_reason fields surfaced in brief/next/status, so status can stay lifecycle-only and `lt next` only ranks work an agent can actually act on.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "improvements",
+        "priorityId": "p1"
+      },
+      "comment": "Shipped derived actionability across tracker surfaces, docs, UI copy, and tests.",
+      "context": {
+        "tags": [
+          "github-issue",
+          "actionability",
+          "next",
+          "brief",
+          "status"
+        ],
+        "github_issue_number": 34,
+        "github_issue_url": "https://github.com/justguy/llm-tracker/issues/34",
+        "github_issue_repo": "justguy/llm-tracker",
+        "files_touched": [
+          "ARCHITECTURE.md",
+          "README.md",
+          "bin/commands/brief.js",
+          "bin/commands/execute.js",
+          "bin/commands/next.js",
+          "bin/commands/shared.js",
+          "bin/commands/why.js",
+          "bin/llm-tracker.js",
+          "bin/mcp-context-data.js",
+          "bin/mcp-prompts.js",
+          "bin/mcp-read-tools.js",
+          "hub/briefs.js",
+          "hub/changed.js",
+          "hub/execute.js",
+          "hub/next.js",
+          "hub/pick.js",
+          "hub/progress.js",
+          "hub/routes/intelligence.js",
+          "hub/search.js",
+          "hub/status.js",
+          "hub/task-metadata.js",
+          "hub/verify.js",
+          "hub/why.js",
+          "test/briefs.test.js",
+          "test/execute.test.js",
+          "test/mcp.test.js",
+          "test/next-cli.test.js",
+          "test/next.test.js",
+          "test/pick.test.js",
+          "test/progress.test.js",
+          "test/status.test.js",
+          "test/ui-hero-strip.test.js",
+          "test/verify.test.js",
+          "test/why.test.js",
+          "ui/hero-strip.js",
+          "ui/lib/hero-strip.js",
+          "workspace-template/README.md"
+        ],
+        "notes": "Derived actionability separates executable, blocked_by_task, decision_gated, and parked from lifecycle status. Groups and parent containers are parked, aggregate dependencies do not block executable leaves, and next/pick default to executable work. Verification: full node --test --test-concurrency=1 passed; focused actionability/MCP/CLI suites passed; git diff --check passed."
+      },
+      "effort": "l",
+      "assignee": "codex",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [],
+      "id": "t37",
+      "title": "Cross-project dependencies / blockers",
+      "goal": "Let a task in one project declare a blocker on a task in a different project, so agents and humans see cross-project waits without rereading every tracker. Today dependencies[] only resolves within the same slug.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "product",
+        "priorityId": "p2"
+      },
+      "context": {
+        "tags": [
+          "schema",
+          "dependencies",
+          "workflow"
+        ],
+        "notes": "Shape to decide: extend `dependencies[]` to accept `<slug>#<taskId>`, or add `external_dependencies[]`. Needs thinking about /next ranking, /blockers output, and UI badge. Use case: Project Phalanx runs or linked trackers waiting on a task in project-phalanx dev."
+      },
+      "definition_of_done": [
+        "Schema accepts cross-project references with a documented syntax",
+        "/blockers surfaces cross-project waits",
+        "/next de-prioritizes tasks waiting on incomplete external deps",
+        "UI renders the external dep clearly (slug badge)",
+        "Agent contract in /help documents the new shape"
+      ],
+      "constraints": [
+        "Backwards compatible with existing dependencies[] values",
+        "No cross-project writes — only reads for readiness checks"
+      ]
     }
   ]
 }
