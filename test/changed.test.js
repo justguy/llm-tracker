@@ -8,6 +8,11 @@ test("buildChangedPayload summarizes task changes since a rev", () => {
   project.meta.rev = 6;
   project.tasks[0].status = "complete";
   project.tasks[0].comment = "Finished";
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    roadmap_section: "Changed task roadmap",
+    roadmap_reference: "docs/ROADMAP.md:80-90"
+  };
 
   const payload = buildChangedPayload({
     slug: "test-project",
@@ -27,6 +32,7 @@ test("buildChangedPayload summarizes task changes since a rev", () => {
   assert.equal(payload.changed[1].id, "t1");
   assert.ok(payload.changed[1].changeKinds.includes("status"));
   assert.ok(payload.changed[1].changedKeys.includes("comment"));
+  assert.equal(payload.changed[1].traceability.roadmap.section, "Changed task roadmap");
   assert.deepEqual(payload.metaChanges, [{ key: "scratchpad", lastChangedRev: 4 }]);
   assert.deepEqual(payload.orderChangedRevs, [5]);
 });

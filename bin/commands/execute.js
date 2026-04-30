@@ -1,4 +1,4 @@
-import { ensureHubResponse } from "./shared.js";
+import { ensureHubResponse, formatTraceability } from "./shared.js";
 
 function formatTask(task) {
   const lines = [];
@@ -7,6 +7,7 @@ function formatTask(task) {
   lines.push(`     ${task.title}`);
   if (task.goal) lines.push(`     goal: ${task.goal}`);
   if (task.comment) lines.push(`     note: ${task.comment}`);
+  lines.push(...formatTraceability(task.traceability));
   lines.push(`     Actionability: ${actionability}`);
   if (task.blocked_by?.length > 0) lines.push(`     Blocked By: ${task.blocked_by.join(", ")}`);
   if (task.decision_required?.length > 0) lines.push(`     Decision Needed: ${task.decision_required.join(", ")}`);

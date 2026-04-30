@@ -68,6 +68,10 @@ test("llm-tracker verify renders the deterministic verify pack from the hub", as
   project.tasks[0].reference = "docs/guide.md:1-2";
   project.tasks[0].definition_of_done = ["Guide text reviewed"];
   project.tasks[0].expected_changes = ["docs/guide.md"];
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    architecture_reference: "ARCHITECTURE.md:40-55"
+  };
   writeFileSync(join(workspace, "docs", "guide.md"), "line one\nline two\n");
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(project, null, 2));
 
@@ -79,6 +83,8 @@ test("llm-tracker verify renders the deterministic verify pack from the hub", as
 
     const verify = runCli(["verify", "test-project", "t1", "--path", workspace]);
     assert.equal(verify.status, 0, verify.stderr || verify.stdout);
+    assert.match(verify.stdout, /TRACEABILITY/);
+    assert.match(verify.stdout, /Architecture: ARCHITECTURE\.md:40-55/);
     assert.match(verify.stdout, /CHECKS/);
     assert.match(verify.stdout, /REFERENCES/);
   } finally {

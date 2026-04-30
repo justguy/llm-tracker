@@ -380,7 +380,11 @@ Patch payloads stay small. Typical shape:
     "t-001": {
       "status": "complete",
       "context": {
-        "notes": "shipped"
+        "notes": "shipped",
+        "roadmap_section": "Roadmap section 04",
+        "roadmap_reference": "docs/ROADMAP.md:40-52",
+        "execution_report_reference": "docs/reports/EXECUTION.md:1-20",
+        "architecture_reference": "ARCHITECTURE.md:200-220"
       }
     }
   },
@@ -505,6 +509,8 @@ Legacy compatibility: if an older patch or tracker file still uses `status: "par
 `outcome` is separate from `status`: use `partial_slice_landed` when a bounded slice shipped but the task remains open. Progress % still keys only off the four status values above.
 
 `actionability` is also separate from `status`: the hub derives `executable`, `blocked_by_task`, `decision_gated`, or `parked` from dependencies, approval requirements, aggregate rows, and lifecycle state. `next` ranks executable work by default; `includeGated=true` / `--include-gated` adds decision-gated rows for diagnostics.
+
+Traceability is derived from optional author-owned `context` keys so tracker rows can point back to planning truth without schema churn: `context.roadmap_section`, `context.roadmap_reference`, `context.execution_report`, `context.execution_report_reference`, `context.architecture_truth_doc`, and `context.architecture_reference`. Brief, why, execute, verify, search, changed, and next payloads expose these as `traceability`.
 
 ### Semantic search stack
 

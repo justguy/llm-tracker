@@ -54,6 +54,41 @@ export function taskTags(task) {
   return task.context.tags.filter((value) => typeof value === "string" && value.trim());
 }
 
+function cleanString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function traceabilityEntry(values) {
+  const entry = {};
+  for (const [key, value] of Object.entries(values)) {
+    const clean = cleanString(value);
+    if (clean) entry[key] = clean;
+  }
+  return Object.keys(entry).length > 0 ? entry : null;
+}
+
+export function taskTraceability(task) {
+  const context = task?.context || {};
+  const traceability = {};
+  const roadmap = traceabilityEntry({
+    section: context.roadmap_section || context.roadmapSection || context.roadmap,
+    reference: context.roadmap_reference || context.roadmapReference
+  });
+  const executionReport = traceabilityEntry({
+    title: context.execution_report || context.executionReport,
+    reference: context.execution_report_reference || context.executionReportReference
+  });
+  const architecture = traceabilityEntry({
+    title: context.architecture_truth_doc || context.architectureTruthDoc || context.architecture_doc,
+    reference: context.architecture_reference || context.architectureReference
+  });
+
+  if (roadmap) traceability.roadmap = roadmap;
+  if (executionReport) traceability.execution_report = executionReport;
+  if (architecture) traceability.architecture = architecture;
+  return traceability;
+}
+
 export function isAggregateTask(task, projectContext = {}) {
   const taskContext = task?.context || {};
   const tags = taskTags(task);
@@ -179,6 +214,7 @@ export function summarizeTask(task, context) {
     decision_reason: actionability.decision_reason,
     not_actionable_reason: actionability.not_actionable_reason,
     requires_approval: taskRequiresApproval(task),
+    traceability: taskTraceability(task),
     dependenciesResolved,
     references: normalizeTaskReferences(task),
     comment: taskComment(task),

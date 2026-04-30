@@ -1,7 +1,9 @@
-import { ensureHubResponse } from "./shared.js";
+import { ensureHubResponse, formatTraceability } from "./shared.js";
 
 function formatTask(task) {
-  return `  ${task.id}  ${task.status}\n     ${task.title}`;
+  const lines = [`  ${task.id}  ${task.status}`, `     ${task.title}`];
+  lines.push(...formatTraceability(task.traceability));
+  return lines.join("\n");
 }
 
 function formatCheck(check, index) {
@@ -44,6 +46,12 @@ export async function cmdVerify(args, { resolveWorkspace, httpRequest }) {
 
   console.log(`  ${body.project}  task ${body.taskId}  rev ${body.rev ?? "?"}  generated ${body.generatedAt}`);
   console.log(formatTask(body.task));
+
+  const evidenceTraceability = formatTraceability(body.evidenceSources?.traceability);
+  if (evidenceTraceability.length > 0) {
+    console.log("  TRACEABILITY");
+    console.log(evidenceTraceability.join("\n"));
+  }
 
   if (body.checks?.length > 0) {
     console.log("  CHECKS");

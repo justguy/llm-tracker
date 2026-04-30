@@ -98,8 +98,25 @@ function taskTags(task) {
   return task.context.tags.filter((value) => typeof value === "string" && value.trim());
 }
 
+function traceabilityText(traceability = {}) {
+  return Object.values(traceability)
+    .flatMap((entry) => Object.values(entry || {}))
+    .filter((value) => typeof value === "string" && value.trim())
+    .join(" ");
+}
+
 function buildSearchDocument(task) {
   const context = task?.context || {};
+  const traceabilityValues = [
+    context.roadmap_section,
+    context.roadmap_reference,
+    context.roadmap,
+    context.execution_report,
+    context.execution_report_reference,
+    context.architecture_truth_doc,
+    context.architecture_doc,
+    context.architecture_reference
+  ];
   return [
     task?.id || "",
     task?.title || "",
@@ -109,6 +126,13 @@ function buildSearchDocument(task) {
     task?.blocker_reason || "",
     context.notes || "",
     context.source_title || "",
+    ...traceabilityValues,
+    context.roadmapSection || "",
+    context.roadmapReference || "",
+    context.executionReport || "",
+    context.executionReportReference || "",
+    context.architectureTruthDoc || "",
+    context.architectureReference || "",
     taskTags(task).join(" ")
   ]
     .map((value) => (typeof value === "string" ? value.trim() : ""))
@@ -217,6 +241,7 @@ function summarizeResult(task, summary, score, extras = {}) {
     decision_required: summary.decision_required,
     decision_reason: summary.decision_reason,
     not_actionable_reason: summary.not_actionable_reason,
+    traceability: summary.traceability,
     references: summary.references,
     comment: summary.comment,
     excerpt: taskExcerpt(task),
@@ -565,6 +590,7 @@ function fuzzyTaskMatch(task, summary, query) {
   consider("comment", task.comment || "");
   consider("notes", task.context?.notes || "");
   consider("source", task.context?.source_title || "");
+  consider("traceability", traceabilityText(summary.traceability));
   for (const tag of taskTags(task)) consider("tag", tag);
 
   const combinedScore = fuzzyFieldScore(query, buildSearchDocument(task));

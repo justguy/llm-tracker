@@ -9,6 +9,13 @@ test("buildWhyPayload explains why a task matters, what it unblocks, and recent 
   project.tasks[0].goal = "Ship the first live task pack";
   project.tasks[0].comment = "Needed before downstream automation can run";
   project.tasks[0].reference = "hub/store.js:1-20";
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    roadmap_section: "Execution roadmap section",
+    roadmap_reference: "docs/ROADMAP.md:10-20",
+    architecture_truth_doc: "Tracker architecture",
+    architecture_reference: "ARCHITECTURE.md:100-120"
+  };
   project.tasks.push({
     id: "t4",
     title: "Task 4",
@@ -36,6 +43,8 @@ test("buildWhyPayload explains why a task matters, what it unblocks, and recent 
   assert.equal(payload.task.id, "t1");
   assert.equal(payload.task.actionability, "executable");
   assert.ok(payload.why.some((reason) => reason.kind === "decision_note"));
+  assert.ok(payload.why.some((reason) => reason.kind === "roadmap" && reason.text.includes("Execution roadmap")));
+  assert.ok(payload.why.some((reason) => reason.kind === "architecture" && reason.text.includes("ARCHITECTURE.md")));
   assert.ok(payload.why.some((reason) => reason.kind === "unblocks" && reason.text.includes("t2")));
   assert.ok(payload.why.some((reason) => reason.kind === "unblocks" && reason.text.includes("t4")));
   assert.equal(payload.references[0].selectedBecause, "explicit task reference");

@@ -45,9 +45,9 @@
         "label": "P3 / Later"
       }
     ],
-    "scratchpad": "t13 complete: ownership/tooling gap is already covered by structural ops, docs, actionability, execute/verify, and tests; hygiene helpers stay in t18.",
-    "rev": 69,
-    "updatedAt": "2026-04-30T03:21:15.504Z"
+    "scratchpad": "t14 complete: roadmap/execution/architecture traceability is documented, surfaced in payloads and CLI output, and covered by tests.",
+    "rev": 71,
+    "updatedAt": "2026-04-30T03:44:36.516Z"
   },
   "tasks": [
     {
@@ -396,12 +396,12 @@
       "id": "t14",
       "title": "Make roadmap linkage explicit to reduce doc/tracker drift",
       "goal": "Give every task a clear roadmap home and expose roadmap section, execution report, and architecture truth doc linkage when relevant so tracker truth stays aligned with planning docs.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "improvements",
         "priorityId": "p2"
       },
-      "comment": "Live tracker truth and roadmap/docs truth still drift too easily; linkage should be first-class rather than implicit.",
+      "comment": "Shipped explicit roadmap/execution-report/architecture traceability keys through task summaries, packs, search/changed, CLI text output, docs, and tests.",
       "context": {
         "tags": [
           "github-issue",
@@ -411,9 +411,42 @@
         ],
         "github_issue_number": 27,
         "github_issue_url": "https://github.com/justguy/llm-tracker/issues/27",
-        "github_issue_repo": "justguy/llm-tracker"
+        "github_issue_repo": "justguy/llm-tracker",
+        "files_touched": [
+          "README.md",
+          "workspace-template/README.md",
+          "MIGRATING.md",
+          "bin/commands/brief.js",
+          "bin/commands/changed.js",
+          "bin/commands/execute.js",
+          "bin/commands/next.js",
+          "bin/commands/shared.js",
+          "bin/commands/verify.js",
+          "bin/commands/why.js",
+          "hub/briefs.js",
+          "hub/changed.js",
+          "hub/execute.js",
+          "hub/search.js",
+          "hub/task-metadata.js",
+          "hub/verify.js",
+          "hub/why.js",
+          "test/brief-cli.test.js",
+          "test/briefs.test.js",
+          "test/changed.test.js",
+          "test/execute-cli.test.js",
+          "test/execute.test.js",
+          "test/next-cli.test.js",
+          "test/search.test.js",
+          "test/task-intel-cli.test.js",
+          "test/verify-cli.test.js",
+          "test/verify.test.js",
+          "test/why.test.js"
+        ],
+        "notes": "Traceability is now derived from optional context keys (roadmap_section/reference, execution_report/reference, architecture_truth_doc/reference), exposed in next/brief/why/execute/verify/search/changed payloads, rendered in relevant CLI output, documented in README, /help template, and MIGRATING.md, and covered by focused plus full Node test suites."
       },
-      "effort": "m"
+      "effort": "m",
+      "assignee": "codex",
+      "blocker_reason": null
     },
     {
       "dependencies": [],

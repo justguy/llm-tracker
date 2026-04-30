@@ -111,6 +111,7 @@ export function buildVerifyPayload({
       },
       dependencyState,
       references: brief.references,
+      traceability: brief.task.traceability || {},
       snippets: brief.snippets,
       recentHistory: brief.recentHistory
     },
@@ -145,6 +146,7 @@ export function getVerifyPayload({ workspace, slug, entry, taskId, now }) {
         },
         dependencyState,
         references: result.payload.references,
+        traceability: result.payload.task.traceability || {},
         snippets: result.payload.snippets,
         recentHistory: result.payload.recentHistory
       },

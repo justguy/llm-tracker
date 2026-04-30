@@ -32,6 +32,7 @@ function summarizeTaskForBrief(task, context) {
     decision_reason: summary.decision_reason,
     not_actionable_reason: summary.not_actionable_reason,
     requires_approval: summary.requires_approval,
+    traceability: summary.traceability,
     references: summary.references,
     comment: summary.comment,
     lastTouchedRev: summary.lastTouchedRev,

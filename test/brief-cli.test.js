@@ -67,6 +67,10 @@ test("llm-tracker brief renders a focused task pack from the hub", async () => {
   project.meta.rev = 3;
   project.tasks[0].reference = "docs/guide.md:1-2";
   project.tasks[0].comment = "Read the brief pack instead of the repo";
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    roadmap_section: "Brief CLI roadmap"
+  };
   writeFileSync(join(workspace, "docs", "guide.md"), "line one\nline two\nline three\n");
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(project, null, 2));
   writeFileSync(
@@ -89,6 +93,7 @@ test("llm-tracker brief renders a focused task pack from the hub", async () => {
     assert.equal(brief.status, 0, brief.stderr || brief.stdout);
     assert.match(brief.stdout, /SNIPPETS/);
     assert.match(brief.stdout, /docs\/guide\.md:1-2/);
+    assert.match(brief.stdout, /Roadmap: Brief CLI roadmap/);
     assert.match(brief.stdout, /line one/);
     assert.match(brief.stdout, /HISTORY/);
   } finally {

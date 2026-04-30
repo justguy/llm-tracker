@@ -6,7 +6,8 @@ function executionContract(task) {
     constraints: task.constraints || [],
     expected_changes: task.expected_changes || [],
     allowed_paths: task.allowed_paths || [],
-    approval_required_for: task.requires_approval || []
+    approval_required_for: task.requires_approval || [],
+    traceability: task.traceability || {}
   };
 }
 

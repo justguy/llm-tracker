@@ -69,6 +69,10 @@ test("llm-tracker execute renders the deterministic execution pack from the hub"
   project.tasks[0].constraints = ["Keep wording stable"];
   project.tasks[0].expected_changes = ["docs/guide.md"];
   project.tasks[0].allowed_paths = ["docs/guide.md"];
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    execution_report_reference: "docs/reports/EXECUTE.md:1-20"
+  };
   writeFileSync(join(workspace, "docs", "guide.md"), "line one\nline two\n");
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(project, null, 2));
 
@@ -81,6 +85,7 @@ test("llm-tracker execute renders the deterministic execution pack from the hub"
     const execute = runCli(["execute", "test-project", "t1", "--path", workspace]);
     assert.equal(execute.status, 0, execute.stderr || execute.stdout);
     assert.match(execute.stdout, /EXECUTION PLAN/);
+    assert.match(execute.stdout, /Execution Report: docs\/reports\/EXECUTE\.md:1-20/);
     assert.match(execute.stdout, /DONE WHEN/);
     assert.match(execute.stdout, /EXPECTED CHANGES/);
   } finally {

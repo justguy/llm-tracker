@@ -11,6 +11,11 @@ test("buildVerifyPayload derives evidence sources and deterministic checks", () 
   project.tasks[0].definition_of_done = ["Payload includes real evidence sources"];
   project.tasks[0].expected_changes = ["hub/verify.js"];
   project.tasks[0].allowed_paths = ["hub/verify.js"];
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    architecture_truth_doc: "Verification architecture",
+    architecture_reference: "ARCHITECTURE.md:300-330"
+  };
 
   const payload = buildVerifyPayload({
     slug: "test-project",
@@ -36,6 +41,8 @@ test("buildVerifyPayload derives evidence sources and deterministic checks", () 
   assert.equal(payload.packType, "verify");
   assert.equal(payload.evidenceSources.taskState.actionability, "parked");
   assert.equal(payload.evidenceSources.taskState.selectedBecause, "current task state");
+  assert.equal(payload.evidenceSources.traceability.architecture.title, "Verification architecture");
+  assert.equal(payload.evidenceSources.traceability.architecture.reference, "ARCHITECTURE.md:300-330");
   assert.equal(payload.evidenceSources.references[0].selectedBecause, "explicit task reference");
   assert.ok(payload.checks.some((check) => check.kind === "definition_of_done"));
   assert.ok(payload.checks.some((check) => check.kind === "expected_change"));

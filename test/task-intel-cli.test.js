@@ -65,6 +65,10 @@ test("llm-tracker blockers and changed render deterministic task intelligence", 
   const port = await findFreePort();
   const project = validProject();
   project.tasks[1].comment = "Waiting on task 1";
+  project.tasks[1].context = {
+    ...project.tasks[1].context,
+    roadmap_section: "Changed CLI roadmap"
+  };
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(project, null, 2));
   writeFileSync(
     join(workspace, ".history", "test-project.jsonl"),
@@ -91,6 +95,7 @@ test("llm-tracker blockers and changed render deterministic task intelligence", 
     assert.match(changed.stdout, /changed since rev 0/);
     assert.match(changed.stdout, /t2/);
     assert.match(changed.stdout, /comment/);
+    assert.match(changed.stdout, /Roadmap: Changed CLI roadmap/);
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

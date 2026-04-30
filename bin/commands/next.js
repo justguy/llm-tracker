@@ -1,4 +1,4 @@
-import { ensureHubResponse, parseLimit } from "./shared.js";
+import { ensureHubResponse, formatTraceability, parseLimit } from "./shared.js";
 
 function formatTask(task, index) {
   const lines = [];
@@ -14,6 +14,7 @@ function formatTask(task, index) {
   if (extras.length > 0) lines.push(`     ${extras.join(" · ")}`);
 
   if (task.reason?.length > 0) lines.push(`     why: ${task.reason.join("; ")}`);
+  lines.push(...formatTraceability(task.traceability));
   if (task.blocked_by?.length > 0) lines.push(`     blocked by: ${task.blocked_by.join(", ")}`);
   if (task.decision_required?.length > 0) lines.push(`     decision needed: ${task.decision_required.join(", ")}`);
   if (task.not_actionable_reason) lines.push(`     why not actionable: ${task.not_actionable_reason}`);

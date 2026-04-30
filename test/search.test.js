@@ -78,6 +78,11 @@ test("buildFuzzySearchPayload returns approximate lexical matches", () => {
   project.tasks[0].goal = "Validate the approval manifest before execution.";
   project.tasks[0].comment = "Needed before shipping the approval flow.";
   project.tasks[0].references = ["src/manifest.js:1-20"];
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    roadmap_section: "Approval roadmap",
+    architecture_reference: "ARCHITECTURE.md:400-420"
+  };
   project.tasks[1].context = {
     tags: ["background-daemon", "runtime"],
     notes: "Needs daemon runtime cleanup before restart."
@@ -103,6 +108,16 @@ test("buildFuzzySearchPayload returns approximate lexical matches", () => {
   });
   assert.equal(tagPayload.matches[0].id, "t2");
   assert.ok(tagPayload.matches[0].matchedOn.includes("tag") || tagPayload.matches[0].matchedOn.includes("notes"));
+
+  const traceabilityPayload = buildFuzzySearchPayload({
+    slug: "test-project",
+    data: project,
+    query: "approval roadmap",
+    limit: 5
+  });
+  assert.equal(traceabilityPayload.matches[0].id, "t1");
+  assert.ok(traceabilityPayload.matches[0].matchedOn.includes("traceability"));
+  assert.equal(traceabilityPayload.matches[0].traceability.roadmap.section, "Approval roadmap");
 });
 
 test("buildSearchPayload falls back to fuzzy matches on unexpected semantic runtime errors", async () => {

@@ -31,6 +31,7 @@ function summarizeTaskForWhy(task, context) {
     decision_reason: summary.decision_reason,
     not_actionable_reason: summary.not_actionable_reason,
     requires_approval: summary.requires_approval,
+    traceability: summary.traceability,
     comment: summary.comment,
     lastTouchedRev: summary.lastTouchedRev,
     dependencies: stringArray(task.dependencies),
@@ -93,6 +94,29 @@ function buildWhyReasons(task, summary, downstreamIds) {
     reasons.push({
       kind: "priority",
       text: `${summary.priorityId || "p?"} priority in ${summary.swimlaneId || "unknown swimlane"}`
+    });
+  }
+
+  const traceability = summary.traceability || {};
+  if (traceability.roadmap) {
+    const details = [traceability.roadmap.section, traceability.roadmap.reference].filter(Boolean).join(" · ");
+    reasons.push({
+      kind: "roadmap",
+      text: `Roadmap home: ${details}`
+    });
+  }
+  if (traceability.execution_report) {
+    const details = [traceability.execution_report.title, traceability.execution_report.reference].filter(Boolean).join(" · ");
+    reasons.push({
+      kind: "execution_report",
+      text: `Execution report linkage: ${details}`
+    });
+  }
+  if (traceability.architecture) {
+    const details = [traceability.architecture.title, traceability.architecture.reference].filter(Boolean).join(" · ");
+    reasons.push({
+      kind: "architecture",
+      text: `Architecture truth linkage: ${details}`
     });
   }
 

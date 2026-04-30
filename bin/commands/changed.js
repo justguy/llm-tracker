@@ -1,4 +1,4 @@
-import { ensureHubResponse, parseLimit } from "./shared.js";
+import { ensureHubResponse, formatTraceability, parseLimit } from "./shared.js";
 
 function formatChangedTask(task, index) {
   const lines = [];
@@ -9,6 +9,7 @@ function formatChangedTask(task, index) {
   if (task.changeKinds?.length > 0) lines.push(`     kinds: ${task.changeKinds.join(", ")}`);
   if (task.changedKeys?.length > 0) lines.push(`     keys: ${task.changedKeys.join(", ")}`);
   if (task.comment) lines.push(`     note: ${task.comment}`);
+  lines.push(...formatTraceability(task.traceability));
   if (task.references?.length > 0) lines.push(`     refs: ${task.references.join(" | ")}`);
   return lines.join("\n");
 }

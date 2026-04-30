@@ -88,6 +88,13 @@ That is valid. The new system will still derive:
 - `blocked_kind`
 - `blocking_on`
 - `requires_approval`
+- `actionability`
+- `actionable`
+- `blocked_by`
+- `decision_required`
+- `decision_reason`
+- `not_actionable_reason`
+- `traceability`
 - `lastTouchedRev`
 
 ### Phase 3: Backfill Only High-Value Tasks
@@ -116,6 +123,12 @@ For active-task migration work, evaluate the **full 1.0.0 author-owned field set
 - `context.tags`
 - `context.notes`
 - `context.files_touched`
+- `context.roadmap_section`
+- `context.roadmap_reference`
+- `context.execution_report`
+- `context.execution_report_reference`
+- `context.architecture_truth_doc`
+- `context.architecture_reference`
 
 #### Planning and execution
 
@@ -148,6 +161,13 @@ Do **not** churn operational fields as part of a metadata pass unless the curren
 - `blocked_kind`
 - `blocking_on`
 - `requires_approval`
+- `actionability`
+- `actionable`
+- `blocked_by`
+- `decision_required`
+- `decision_reason`
+- `not_actionable_reason`
+- `traceability`
 - `lastTouchedRev`
 - `updatedAt`
 - `rev`
@@ -229,6 +249,12 @@ For each bounded active task in this batch, inspect every author-owned field fam
 - `context.tags`
 - `context.notes`
 - `context.files_touched`
+- `context.roadmap_section`
+- `context.roadmap_reference`
+- `context.execution_report`
+- `context.execution_report_reference`
+- `context.architecture_truth_doc`
+- `context.architecture_reference`
 - `blocker_reason` when currently blocked
 - `definition_of_done`
 - `constraints`
@@ -305,6 +331,13 @@ Do not write these derived or hub-owned fields:
 - blocked_kind
 - blocking_on
 - requires_approval
+- actionability
+- actionable
+- blocked_by
+- decision_required
+- decision_reason
+- not_actionable_reason
+- traceability
 - lastTouchedRev
 - updatedAt
 - rev
@@ -323,7 +356,7 @@ Rules:
 - Backfill bounded active tasks before broad roadmap/container rows.
 - If a patch only adds `references[]`, `effort`, `related`, or `comment`, describe it as retrieval-only enrichment, not as a complete migration batch.
 - For bounded active tasks, include `definition_of_done`, `constraints`, `expected_changes`, `allowed_paths`, and `approval_required_for` whenever they can be grounded from actual evidence.
-- Also consider `goal`, `context.tags`, `context.notes`, `context.files_touched`, and `blocker_reason` whenever those are materially incomplete and evidence exists.
+- Also consider `goal`, `context.tags`, `context.notes`, `context.files_touched`, traceability context keys, and `blocker_reason` whenever those are materially incomplete and evidence exists.
 - Verify with next/brief/execute/verify/search after each batch.
 - Stop after verification unless the human explicitly asked you to commit or refresh a PR.
 
@@ -331,11 +364,12 @@ Suggested order per task:
 1. references[]
 2. effort
 3. comment
-4. definition_of_done
-5. constraints
-6. expected_changes
-7. allowed_paths
-8. approval_required_for
+4. traceability context keys
+5. definition_of_done
+6. constraints
+7. expected_changes
+8. allowed_paths
+9. approval_required_for
 ```
 
 ## Example Patch
@@ -350,6 +384,11 @@ Suggested order per task:
       ],
       "effort": "m",
       "comment": "Needed before the operator can trust parallel branch routing.",
+      "context": {
+        "roadmap_section": "Parallel execution roadmap",
+        "roadmap_reference": "docs/ROADMAP.md:40-52",
+        "architecture_reference": "ARCHITECTURE.md:200-220"
+      },
       "definition_of_done": [
         "parallel route flow works end to end",
         "tests cover branch and variant selection"

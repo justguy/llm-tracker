@@ -112,6 +112,7 @@ export function buildChangedPayload({
           decision_reason: null,
           not_actionable_reason: "Task was removed.",
           requires_approval: [],
+          traceability: {},
           dependenciesResolved: false,
           references: [],
           comment: null,

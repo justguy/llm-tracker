@@ -15,6 +15,19 @@ export function ensureHubResponse(status, body, label) {
   }
 }
 
+export function formatTraceability(traceability = {}, prefix = "     ") {
+  const lines = [];
+  const formatEntry = (label, entry) => {
+    if (!entry || typeof entry !== "object") return;
+    const details = [entry.section, entry.title, entry.reference].filter(Boolean).join(" · ");
+    if (details) lines.push(`${prefix}${label}: ${details}`);
+  };
+  formatEntry("Roadmap", traceability.roadmap);
+  formatEntry("Execution Report", traceability.execution_report);
+  formatEntry("Architecture", traceability.architecture);
+  return lines;
+}
+
 function formatQueryMatch(match, index, { includeAssignee = false, includeMatchedOn = false } = {}) {
   const lines = [];
   const readiness = match.actionability || (match.ready ? "executable" : match.blocked_kind || "not_actionable");
@@ -33,6 +46,7 @@ function formatQueryMatch(match, index, { includeAssignee = false, includeMatche
   if (extras.length > 0) lines.push(`     ${extras.join(" · ")}`);
 
   if (match.excerpt) lines.push(`     excerpt: ${match.excerpt}`);
+  lines.push(...formatTraceability(match.traceability));
   if (match.blocked_by?.length > 0) lines.push(`     blocked by: ${match.blocked_by.join(", ")}`);
   if (match.decision_required?.length > 0) lines.push(`     decision needed: ${match.decision_required.join(", ")}`);
   if (match.references?.length > 0) lines.push(`     refs: ${match.references.join(" | ")}`);

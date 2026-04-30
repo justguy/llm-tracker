@@ -211,6 +211,15 @@ Tasks are ordered by array index. Hub owns the order.
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
 
+Traceability keys are optional author-owned `context` fields. When present, the hub derives a `traceability` block in `next`, `brief`, `why`, `execute`, `verify`, `search`, and `changed` payloads:
+
+- `context.roadmap_section`
+- `context.roadmap_reference`
+- `context.execution_report`
+- `context.execution_report_reference`
+- `context.architecture_truth_doc`
+- `context.architecture_reference`
+
 Task tree rules:
 
 - `parent_id` means "belongs under this larger piece"; it does **not** block execution.
@@ -309,6 +318,12 @@ When backfilling older tasks, write only author-owned metadata:
 - `context.tags`
 - `context.notes`
 - `context.files_touched`
+- `context.roadmap_section`
+- `context.roadmap_reference`
+- `context.execution_report`
+- `context.execution_report_reference`
+- `context.architecture_truth_doc`
+- `context.architecture_reference`
 - `blocker_reason`
 - `definition_of_done`
 - `constraints`
@@ -328,6 +343,7 @@ Do **not** write derived fields:
 - `decision_required`
 - `decision_reason`
 - `not_actionable_reason`
+- `traceability`
 - `lastTouchedRev`
 - `updatedAt`
 - `rev`
@@ -498,7 +514,7 @@ The shortlist is deterministic and capped at 5 tasks:
 
 - item 1 is the current executable recommendation
 - items 2-5 are ranked executable alternatives
-- each task includes `actionability`, `blocked_by`, `decision_required`, `decision_reason`, legacy compatibility fields (`ready`, `blocked_kind`, `blocking_on`, `requires_approval`), normalized `references`, optional `effort`, freshness (`lastTouchedRev`), and `reason[]`
+- each task includes `actionability`, `blocked_by`, `decision_required`, `decision_reason`, `traceability`, legacy compatibility fields (`ready`, `blocked_kind`, `blocking_on`, `requires_approval`), normalized `references`, optional `effort`, freshness (`lastTouchedRev`), and `reason[]`
 - `decision_gated`, `blocked_by_task`, and `parked` rows are hidden from default ranking; `includeGated=true` / `--include-gated` adds decision-gated rows after executable work
 - bounded executable tasks rank ahead of aggregate roadmap/container rows when both are otherwise actionable
 - active bounded work ranks ahead of starting a fresh bounded task
@@ -686,6 +702,7 @@ The pack includes:
 - current task state and readiness
 - explicit execution contract fields: `definition_of_done`, `constraints`, `expected_changes`, `allowed_paths`
 - approvals that still gate the task
+- roadmap, execution-report, and architecture traceability derived from `context`
 - references and cached snippets
 - recent task history
 
@@ -706,7 +723,7 @@ llm-tracker verify <slug> <taskId>
 The pack includes:
 
 - explicit verification checks derived from `definition_of_done`, `expected_changes`, `allowed_paths`, and dependency state
-- real evidence sources only: task state, recent history, references, and extracted snippets
+- real evidence sources only: task state, traceability, recent history, references, and extracted snippets
 - no guessed git diff or semantic inference
 
 ---
@@ -994,6 +1011,9 @@ For per-task diagnostics, use `context`. Suggested keys (none required):
 - `context.tags: string[]` — pills on the card
 - `context.files_touched: string[]` — grey sub-pills
 - `context.notes: string` — one-liner under the goal
+- `context.roadmap_section` / `context.roadmap_reference` — planning home for the task
+- `context.execution_report` / `context.execution_report_reference` — report or shipped-slice link when relevant
+- `context.architecture_truth_doc` / `context.architecture_reference` — architecture source of truth when relevant
 
 Additional keys render as `key: value` rows automatically.
 

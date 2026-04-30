@@ -14,6 +14,11 @@ test("buildExecutePayload augments brief context with execution contract and pla
   project.tasks[0].expected_changes = ["hub/execute.js", "bin/commands/execute.js"];
   project.tasks[0].allowed_paths = ["hub/execute.js", "bin/commands/execute.js"];
   project.tasks[0].approval_required_for = ["new dependencies"];
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    roadmap_section: "Execution packs roadmap",
+    execution_report_reference: "docs/reports/EXECUTE.md:1-30"
+  };
 
   const payload = buildExecutePayload({
     slug: "test-project",
@@ -40,6 +45,8 @@ test("buildExecutePayload augments brief context with execution contract and pla
   assert.equal(payload.readiness.actionability, "decision_gated");
   assert.deepEqual(payload.readiness.decision_required, ["new dependencies"]);
   assert.equal(payload.executionContract.definition_of_done[0], "CLI and HTTP output match");
+  assert.equal(payload.executionContract.traceability.roadmap.section, "Execution packs roadmap");
+  assert.equal(payload.executionContract.traceability.execution_report.reference, "docs/reports/EXECUTE.md:1-30");
   assert.ok(payload.executionPlan.some((item) => item.kind === "decision_required"));
   assert.ok(payload.executionPlan.some((item) => item.kind === "expected_change"));
   assert.ok(payload.executionPlan.some((item) => item.kind === "approval"));

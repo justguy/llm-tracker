@@ -66,6 +66,10 @@ test("llm-tracker next renders ranked tasks from the hub", async () => {
   const project = validProject();
   project.tasks[0].reference = "hub/store.js:1-20";
   project.tasks[0].comment = "Top ready task";
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    roadmap_section: "Next CLI roadmap"
+  };
   project.tasks.push({
     id: "t4",
     title: "Decision gated task",
@@ -89,6 +93,7 @@ test("llm-tracker next renders ranked tasks from the hub", async () => {
     assert.match(next.stdout, /t1/);
     assert.match(next.stdout, /executable/);
     assert.match(next.stdout, /explicit references available/);
+    assert.match(next.stdout, /Roadmap: Next CLI roadmap/);
     assert.doesNotMatch(next.stdout, /t4/);
 
     const includeGated = runCli(["next", "test-project", "--path", workspace, "--include-gated"]);

@@ -11,6 +11,14 @@ test("buildBriefPayload caps snippets and history within deterministic budgets",
   project.meta.rev = 12;
   project.tasks[0].goal = "Focus the work on one deterministic pack";
   project.tasks[0].related = ["t2"];
+  project.tasks[0].context = {
+    ...project.tasks[0].context,
+    roadmap_section: "Roadmap section 04",
+    roadmap_reference: "docs/ROADMAP.md:40-52",
+    execution_report: "Execution report 2026-04-16",
+    execution_report_reference: "docs/reports/EXECUTION.md:1-20",
+    architecture_reference: "ARCHITECTURE.md:200-220"
+  };
 
   const references = Array.from({ length: 6 }, (_, index) => ({
     value: `src/file${index}.js:1-1`,
@@ -47,6 +55,12 @@ test("buildBriefPayload caps snippets and history within deterministic budgets",
   assert.equal(payload.task.id, "t1");
   assert.equal(payload.task.actionability, "executable");
   assert.deepEqual(payload.task.blocked_by, []);
+  assert.deepEqual(payload.task.traceability.roadmap, {
+    section: "Roadmap section 04",
+    reference: "docs/ROADMAP.md:40-52"
+  });
+  assert.equal(payload.task.traceability.execution_report.title, "Execution report 2026-04-16");
+  assert.equal(payload.task.traceability.architecture.reference, "ARCHITECTURE.md:200-220");
   assert.equal(payload.relatedTasks[0].id, "t2");
   assert.equal(payload.snippets.length, 4);
   assert.equal(payload.truncation.snippets.applied, true);
