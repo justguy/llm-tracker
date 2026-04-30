@@ -66,6 +66,14 @@ test("llm-tracker next renders ranked tasks from the hub", async () => {
   const project = validProject();
   project.tasks[0].reference = "hub/store.js:1-20";
   project.tasks[0].comment = "Top ready task";
+  project.tasks.push({
+    id: "t4",
+    title: "Decision gated task",
+    status: "not_started",
+    placement: { swimlaneId: "ops", priorityId: "p0" },
+    dependencies: [],
+    approval_required_for: ["product"]
+  });
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(project, null, 2));
 
   try {
@@ -79,8 +87,14 @@ test("llm-tracker next renders ranked tasks from the hub", async () => {
     assert.equal(next.status, 0, next.stderr || next.stdout);
     assert.match(next.stdout, /test-project/);
     assert.match(next.stdout, /t1/);
-    assert.match(next.stdout, /ready/);
+    assert.match(next.stdout, /executable/);
     assert.match(next.stdout, /explicit references available/);
+    assert.doesNotMatch(next.stdout, /t4/);
+
+    const includeGated = runCli(["next", "test-project", "--path", workspace, "--include-gated"]);
+    assert.equal(includeGated.status, 0, includeGated.stderr || includeGated.stdout);
+    assert.match(includeGated.stdout, /t4/);
+    assert.match(includeGated.stdout, /decision_gated/);
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

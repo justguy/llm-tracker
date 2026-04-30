@@ -132,12 +132,14 @@ Ordered by array index. Hub owns the order.
 | `constraints`    | array of strings \| null                       |          | Optional execution guardrails.                        |
 | `expected_changes` | array of strings \| null                     |          | Optional hint about files, modules, or artifacts likely to change. |
 | `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
-| `approval_required_for` | array of strings \| null                |          | Optional approval categories; ranking penalizes these relative to equally-ready work. |
+| `approval_required_for` | array of strings \| null                |          | Optional approval categories; produces `decision_gated` actionability. |
 | `context`        | object (freeform)                              |          | Tags, files touched, notes — shallow-merged on patch. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
 
 New writers should prefer `references[]`. Legacy `reference` remains valid for backward compatibility and is normalized alongside `references[]` in ranked `next` responses.
+
+Derived fields such as `actionability`, `actionable`, `blocked_by`, `decision_required`, `decision_reason`, `not_actionable_reason`, `ready`, `blocked_kind`, `blocking_on`, `requires_approval`, and `lastTouchedRev` are payload fields, not persisted schema.
 
 ### Task tree semantics
 
@@ -198,17 +200,32 @@ Any dependency graph view uses the same `dependencies[]` relationships. It is di
 
 ---
 
+## Actionability (derived)
+
+Computed centrally in `hub/task-metadata.js` and exposed by `next`, `brief`, `why`, `execute`, `verify`, `search`, `changed`, and status/resource payloads.
+
+| Value             | Definition                                                            |
+| ----------------- | --------------------------------------------------------------------- |
+| `executable`      | Open task with no unresolved task blockers and no approval gate.      |
+| `blocked_by_task` | Open task blocked by incomplete dependency tasks.                     |
+| `decision_gated`  | Open task whose `approval_required_for` entries require a decision.   |
+| `parked`          | Not directly actionable, including deferred tasks and aggregate rows. |
+
+The actionability layer leaves lifecycle `status` unchanged. Compatibility fields (`ready`, `blocked_kind`, `blocking_on`, `requires_approval`) remain in payloads for older clients.
+
+---
+
 ## Deterministic next-task ranking
 
-`GET /api/projects/:slug/next?limit=5` returns a shortlist for agent decision-making in one call.
+`GET /api/projects/:slug/next?limit=5` returns a shortlist for agent decision-making in one call. `includeGated=true` adds decision-gated rows after executable work for diagnostic review.
 
 - Response size is capped at 5 tasks.
-- The first item is the current recommendation; the rest are ranked alternatives.
-- Each item includes readiness, dependency blockers, approval requirements, normalized references, optional effort, freshness (`lastTouchedRev`), and a `reason[]` array explaining the rank.
+- The first item is the current executable recommendation; the rest are ranked executable alternatives.
+- Each item includes `actionability`, `blocked_by`, `decision_required`, `decision_reason`, legacy readiness fields, normalized references, optional effort, freshness (`lastTouchedRev`), and a `reason[]` array explaining the rank.
 
 Ranking currently favors:
 
-1. Ready work over blocked work
+1. Executable work over decision-gated, task-blocked, or parked work
 2. Bounded executable tasks over aggregate roadmap/container rows
 3. Active bounded work over starting a fresh bounded task
 4. Higher priority lanes (`p0` > `p1` > `p2` > `p3`)
@@ -216,9 +233,9 @@ Ranking currently favors:
 6. Smaller effort where priority is otherwise tied
 7. Recently touched tasks as a weak freshness signal
 
-Aggregate/container rows are detected structurally from roadmap/subtask metadata. They remain in the shortlist as an honest fallback when no finer-grained executable task exists, but they do not block bounded child tasks and they do not outrank them.
+Aggregate/container rows are detected structurally from roadmap/subtask metadata. They are `parked`, do not block bounded child tasks, and do not appear in default `next` ranking.
 
-Approval requirements are treated as a penalty, not a hard exclusion, so near-ready work still appears in the shortlist.
+Approval requirements produce `decision_gated`; those rows are hidden by default and included only through `includeGated=true` / `--include-gated`.
 
 ## MCP layer
 
@@ -285,7 +302,7 @@ Design rule:
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.
 - `GET /api/projects/:slug/history?fromRev=N&limit=50` returns the append-only revision log window, including delete/restore/rollback/undo/redo metadata.
 - `POST /api/projects/:slug/start` and `POST /api/projects/:slug/tasks/:taskId/start` atomically start an explicit task under the hub lock, requiring `taskId` and `assignee` and accepting optional `scratchpad`.
-- `POST /api/projects/:slug/pick` atomically claims a task under the hub lock. If `taskId` is omitted, the hub selects the top ready task from the deterministic `next` ranking. `POST /api/projects/:slug/claim` is an alias.
+- `POST /api/projects/:slug/pick` atomically claims a task under the hub lock. If `taskId` is omitted, the hub selects the top executable task from the deterministic `next` ranking. `POST /api/projects/:slug/claim` is an alias.
 - `POST /api/projects/:slug/restore` re-registers a deleted project from the latest snapshot (or an explicit rev) as a fresh audited rev.
 - `POST /api/projects/:slug/undo` restores the previous effective project state under the hub lock.
 - `POST /api/projects/:slug/redo` reapplies the most recent undo under the hub lock.
@@ -430,7 +447,7 @@ On success, the response is authoritative immediately: `{ok, rev, updatedAt, fil
 | `/api/projects/:slug`                               | GET    | Full project state plus effective tracker `file` path.     |
 | `/api/projects/:slug`                               | PUT    | Create or replace a project (full body).                   |
 | `/api/projects/:slug`                               | DELETE | Remove the tracker file and append a `delete` history event. |
-| `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 tasks for agent pickup.  |
+| `/api/projects/:slug/next`                          | GET    | Ranked shortlist of the next 1-5 executable tasks; `includeGated=true` includes decision-gated rows. |
 | `/api/projects/:slug/search`                        | GET    | Semantic local-model task search for feature questions.    |
 | `/api/projects/:slug/fuzzy-search`                  | GET    | Deterministic fuzzy lexical task search.                   |
 | `/api/projects/:slug/tasks/:taskId/brief`           | GET    | Focused task-context brief pack.                          |
@@ -443,7 +460,7 @@ On success, the response is authoritative immediately: `{ok, rev, updatedAt, fil
 | `/api/projects/:slug/history`                       | GET    | Recent revision-log window with delete/restore/rollback/undo/redo metadata. |
 | `/api/projects/:slug/start`                         | POST   | Atomic explicit task start with required task id and assignee. |
 | `/api/projects/:slug/tasks/:taskId/start`           | POST   | Atomic explicit task start with task id in the route.      |
-| `/api/projects/:slug/pick`                          | POST   | Atomic task claim. Defaults to the top ready task.         |
+| `/api/projects/:slug/pick`                          | POST   | Atomic task claim. Defaults to the top executable task.    |
 | `/api/projects/:slug/claim`                         | POST   | Alias for `/pick`.                                         |
 | `/api/projects/:slug/restore`                       | POST   | Restore a deleted project from snapshots as a fresh rev.   |
 | `/api/projects/:slug/undo`                          | POST   | Restore the previous effective project state.              |

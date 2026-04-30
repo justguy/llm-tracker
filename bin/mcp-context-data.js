@@ -83,6 +83,7 @@ export function summarizeProject(entry, workspace = null) {
     total: entry.derived?.total ?? 0,
     pct: entry.derived?.pct ?? 0,
     counts: entry.derived?.counts || {},
+    actionability: entry.derived?.actionability || {},
     blockedCount: Object.keys(entry.derived?.blocked || {}).length
   };
 }
@@ -112,6 +113,7 @@ export function projectStatusPayload(workspace, entry) {
       total: entry.derived?.total ?? 0,
       pct: entry.derived?.pct ?? 0,
       counts: entry.derived?.counts || {},
+      actionability: entry.derived?.actionability || {},
       blocked: entry.derived?.blocked || {},
       perSwimlane: entry.derived?.perSwimlane || {},
       scratchpad: entry.data?.meta?.scratchpad || "",

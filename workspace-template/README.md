@@ -76,7 +76,7 @@ When the tracker file lives inside a repo, tracker writes update the repo-visibl
 - **Hub enforces** — task array order, task existence (no accidental deletion), human UI state (`meta.swimlanes[i].collapsed`), version stamps (`updatedAt`, `rev`).
 - **You write freely** — `status`, `assignee`, `dependencies`, `kind`, `parent_id`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **Patch-mode new tasks must start open** — when you append a brand-new task through Mode A or Mode B, use `not_started` or `in_progress`, not `complete` or `deferred`.
-- **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
+- **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker. `next` ranks executable work by default; use `includeGated=true` / `--include-gated` only when you need to inspect decision-gated rows.
 - **When you need to confirm linked topology**, `GET /api/projects/<slug>` includes `workspace`, `port`, `file`, `registrationFile`, and `topology`. `file` is the effective tracker JSON path the hub will write.
 - **When the human asks a feature-shaped or fuzzy question**, prefer `GET /api/projects/<slug>/search?q=...` for semantic search or `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic lexical matching before rereading the full tracker.
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
@@ -322,6 +322,12 @@ Do **not** write derived fields:
 - `blocked_kind`
 - `blocking_on`
 - `requires_approval`
+- `actionability`
+- `actionable`
+- `blocked_by`
+- `decision_required`
+- `decision_reason`
+- `not_actionable_reason`
 - `lastTouchedRev`
 - `updatedAt`
 - `rev`
@@ -457,25 +463,43 @@ The dependency graph view uses these same `dependencies[]` blocker edges. It is 
 
 ---
 
+## 6.0a Actionability (derived)
+
+The hub derives actionability separately from lifecycle `status`:
+
+| Value             | Meaning                                                                 |
+| ----------------- | ----------------------------------------------------------------------- |
+| `executable`      | Open task with no unresolved task blockers and no approval gate.        |
+| `blocked_by_task` | Open task blocked by one or more incomplete dependency tasks.           |
+| `decision_gated`  | Open task whose `approval_required_for` entries require a decision.     |
+| `parked`          | Not directly actionable, such as deferred tasks or aggregate rows.      |
+
+Derived packs may expose `actionability`, `actionable`, `blocked_by`, `decision_required`, `decision_reason`, and `not_actionable_reason`. Agents do not write those fields.
+
+---
+
 ## 6.1 Getting the next task in one call
 
 When the human asks "what's next?" or you need to pick work, call:
 
 ```bash
 curl http://localhost:<PORT>/api/projects/<slug>/next?limit=5
+curl "http://localhost:<PORT>/api/projects/<slug>/next?limit=5&includeGated=true"
 ```
 
 or, if shell access is available:
 
 ```bash
 llm-tracker next <slug>
+llm-tracker next <slug> --include-gated
 ```
 
 The shortlist is deterministic and capped at 5 tasks:
 
-- item 1 is the current recommendation
-- items 2-5 are ranked alternatives
-- each task includes `ready`, `blocked_kind`, `blocking_on`, `requires_approval`, normalized `references`, optional `effort`, freshness (`lastTouchedRev`), and `reason[]`
+- item 1 is the current executable recommendation
+- items 2-5 are ranked executable alternatives
+- each task includes `actionability`, `blocked_by`, `decision_required`, `decision_reason`, legacy compatibility fields (`ready`, `blocked_kind`, `blocking_on`, `requires_approval`), normalized `references`, optional `effort`, freshness (`lastTouchedRev`), and `reason[]`
+- `decision_gated`, `blocked_by_task`, and `parked` rows are hidden from default ranking; `includeGated=true` / `--include-gated` adds decision-gated rows after executable work
 - bounded executable tasks rank ahead of aggregate roadmap/container rows when both are otherwise actionable
 - active bounded work ranks ahead of starting a fresh bounded task
 
@@ -573,6 +597,7 @@ llm-tracker brief <slug> <taskId>
 The brief pack is deterministic and capped:
 
 - task metadata and decision note
+- actionability, blocked-by, and decision-needed fields
 - dependency and related-task context
 - normalized references with `selectedBecause`
 - up to 5 extracted snippets, capped to 8 KB combined text
@@ -832,7 +857,7 @@ Structural patch example:
 2. If you need focused context before claiming, call `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>`.
 3. If you need to justify the task before touching it, call `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
 4. If you are about to implement, call `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
-5. Pick the top-ranked task whose `ready` flag is `true`, unless the human explicitly redirects you.
+5. Pick the top-ranked task whose `actionability` is `executable`, unless the human explicitly redirects you.
 6. Start the explicit task atomically when you know the task id and want to set status, assignee, and optional scratchpad together:
 
 ```bash
@@ -859,7 +884,7 @@ llm-tracker start <slug> <taskId> --assignee codex
 
 `--assignee` is required unless `LLM_TRACKER_ASSIGNEE` is set.
 
-7. Use `pick` when you want the hub to claim the current top ready task, or when you need the older claim alias:
+7. Use `pick` when you want the hub to claim the current top executable task, or when you need the older claim alias:
 
 ```bash
 curl -X POST http://localhost:<PORT>/api/projects/<slug>/pick \
@@ -876,7 +901,7 @@ Example body:
 }
 ```
 
-If you omit `taskId` from `pick`, the hub claims the current top ready task from the deterministic `next` ranking.
+If you omit `taskId` from `pick`, the hub claims the current top executable task from the deterministic `next` ranking.
 
 Shell shortcut:
 
@@ -1028,8 +1053,8 @@ Error shape:
 | `llm-tracker fuzzy-search <slug> <query> [--json] [--limit N]` | Deterministic fuzzy lexical search.                                      |    **yes**   |
 | `llm-tracker reload [<slug>] [--json]`                    | Reload one or all tracker files from disk into the running hub.               |    **yes**   |
 | `llm-tracker start <slug> <taskId> --assignee ID [--scratchpad TEXT] [--force] [--json]` | Atomically start an explicit task; `LLM_TRACKER_ASSIGNEE` may supply the assignee. |    **yes**   |
-| `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
-| `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |
+| `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top executable task.         |    **yes**   |
+| `llm-tracker next <slug> [--json] [--limit N] [--include-gated]` | Ranked shortlist of the next 1-5 executable tasks.                    |    **yes**   |
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |
 | `llm-tracker rollback <slug> <rev>`                       | Roll back to a prior rev (human-only).                                        |    **yes**   |
 | `llm-tracker link <slug> <abs-path>`                      | Symlink an external tracker (Option C).                                       |    **yes**   |

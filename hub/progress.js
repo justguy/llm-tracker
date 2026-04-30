@@ -1,4 +1,5 @@
 import { STATUS_VALUES } from "./status-vocabulary.js";
+import { ACTIONABILITY_VALUES, buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
 const SCORE = { not_started: 0, in_progress: 0.5, complete: 1, deferred: 0 };
 
@@ -29,17 +30,46 @@ export function pctFor(tasks) {
 }
 
 export function deriveBlocked(tasks) {
-  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const context = buildProjectTaskContext({ data: { tasks } });
   const blocked = {};
   for (const t of tasks) {
-    const open = [];
-    for (const dep of t.dependencies || []) {
-      const d = byId.get(dep);
-      if (d && d.status !== "complete") open.push(dep);
+    const summary = summarizeTask(t, context);
+    if (summary.actionability === "blocked_by_task" && summary.blocked_by.length > 0) {
+      blocked[t.id] = summary.blocked_by;
     }
-    if (open.length > 0) blocked[t.id] = open;
   }
   return blocked;
+}
+
+function zeroActionabilityCounts() {
+  const counts = {};
+  for (const value of ACTIONABILITY_VALUES) counts[value] = 0;
+  return counts;
+}
+
+export function deriveActionabilitySummary(data) {
+  const context = buildProjectTaskContext({ data });
+  const counts = zeroActionabilityCounts();
+  const byTask = {};
+
+  for (const task of data.tasks || []) {
+    if (task.status !== "not_started" && task.status !== "in_progress") continue;
+    const summary = summarizeTask(task, context);
+    if (counts[summary.actionability] !== undefined) counts[summary.actionability] += 1;
+    byTask[task.id] = {
+      actionability: summary.actionability,
+      actionable: summary.actionable,
+      blocked_by: summary.blocked_by,
+      decision_required: summary.decision_required,
+      decision_reason: summary.decision_reason,
+      not_actionable_reason: summary.not_actionable_reason
+    };
+  }
+
+  return {
+    counts,
+    byTask
+  };
 }
 
 export function deriveProject(data) {
@@ -57,6 +87,7 @@ export function deriveProject(data) {
     pct: pctFor(data.tasks),
     total: data.tasks.length,
     perSwimlane,
-    blocked: deriveBlocked(data.tasks)
+    blocked: deriveBlocked(data.tasks),
+    actionability: deriveActionabilitySummary(data)
   };
 }

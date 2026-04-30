@@ -125,16 +125,16 @@ test("buildHeroSummary reuses derived pct and computes open from blocked tasks",
   assert.equal(summary.trackerPath, "~/Documents/dev/llm-project-tracker");
 });
 
-test("buildHeroReason composes readiness, priority, deps, status, and approvals", () => {
+test("buildHeroReason composes actionability, priority, deps, status, and decisions", () => {
   assert.equal(
     buildHeroReason({
-      ready: true,
+      actionability: "executable",
       priorityId: "p1",
       blocking_on: [],
       status: "in_progress",
-      requires_approval: ["product", "design"]
+      decision_required: ["product", "design"]
     }),
-    "highest-ranked ready task · p1 · dependencies satisfied · already in progress · requires product, design approval"
+    "highest-ranked executable task · p1 · dependencies satisfied · already in progress · decision needed: product, design"
   );
 });
 
@@ -173,7 +173,7 @@ test("HeroStripView renders the recommended task and wires PICK and READ actions
     nextTask: {
       id: "t23",
       title: "Build hero strip",
-      reason: ["highest-ranked ready task", "p0", "dependencies satisfied"]
+      reason: ["highest-ranked executable task", "p0", "dependencies satisfied"]
     },
     onPickTask: (...args) => calls.push(["pick", ...args]),
     onOpenTaskModal: (...args) => calls.push(["read", ...args])
@@ -184,7 +184,7 @@ test("HeroStripView renders the recommended task and wires PICK and READ actions
   assert.match(text, /94/);
   assert.match(text, /49 of 56 tasks complete/);
   assert.match(text, /Build hero strip/);
-  assert.match(text, /highest-ranked ready task · p0 · dependencies satisfied/);
+  assert.match(text, /highest-ranked executable task · p0 · dependencies satisfied/);
 
   const pickBtn = findButtonByLabel(vnode, "PICK");
   const readBtn = findButtonByLabel(vnode, "READ");
@@ -261,6 +261,6 @@ test("HeroStripView renders loading, error, and empty states without a recommend
     slug: "llm-tracker"
   });
   const emptyText = collectVNodeText(emptyVnode).replace(/\s+/g, " ").trim();
-  assert.match(emptyText, /No ready task/);
-  assert.match(emptyText, /No ready task is available from the current ranking\./);
+  assert.match(emptyText, /No executable task/);
+  assert.match(emptyText, /No executable task is available from the current ranking\./);
 });

@@ -20,10 +20,16 @@ function summarizeTaskForWhy(task, context) {
     priorityId: summary.priorityId,
     swimlaneId: summary.swimlaneId,
     effort: summary.effort,
+    actionability: summary.actionability,
+    actionable: summary.actionable,
     ready: summary.ready,
     blocked_kind: summary.blocked_kind,
+    blocked_by: summary.blocked_by,
     blocking_on: summary.blocking_on,
     blocker_reason: summary.blocker_reason,
+    decision_required: summary.decision_required,
+    decision_reason: summary.decision_reason,
+    not_actionable_reason: summary.not_actionable_reason,
     requires_approval: summary.requires_approval,
     comment: summary.comment,
     lastTouchedRev: summary.lastTouchedRev,
@@ -90,10 +96,15 @@ function buildWhyReasons(task, summary, downstreamIds) {
     });
   }
 
-  if (summary.blocking_on.length > 0) {
+  if (summary.actionability === "blocked_by_task" && summary.blocked_by.length > 0) {
     reasons.push({
       kind: "blocked",
-      text: `Blocked on ${summary.blocking_on.join(", ")}`
+      text: `Blocked by ${summary.blocked_by.join(", ")}`
+    });
+  } else if (summary.actionability === "decision_gated") {
+    reasons.push({
+      kind: "decision_gated",
+      text: summary.decision_reason || "Decision required before execution"
     });
   } else if (summary.ready) {
     reasons.push({

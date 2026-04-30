@@ -70,6 +70,8 @@ test("renderProject shows swimlanes + blocked tasks", () => {
     assert.ok(out.includes("[SCRATCHPAD]"));
     assert.ok(out.includes("current pin: t1"));
     assert.ok(out.includes("SWIMLANES"));
+    assert.ok(out.includes("Actionability"));
+    assert.ok(out.includes("executable"));
     assert.ok(out.includes("Execution"));
     assert.ok(out.includes("BLOCKED TASKS"));
     assert.ok(out.includes("t2"));
@@ -98,6 +100,8 @@ test("renderJson emits parseable JSON with slug, pct, counts, blocked", () => {
     assert.equal(proj.total, 3);
     assert.ok(typeof proj.pct === "number");
     assert.ok(proj.counts);
+    assert.ok(proj.actionability.counts);
+    assert.equal(proj.actionability.counts.executable, 1);
     assert.ok(proj.blocked.t2);
   } finally {
     rmSync(ws, { recursive: true, force: true });

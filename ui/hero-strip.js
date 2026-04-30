@@ -28,14 +28,14 @@ export function HeroStripView({
     ? "Loading ranked shortlist"
     : nextError
       ? "Recommendation unavailable"
-      : nextTask?.title || "No ready task";
+      : nextTask?.title || "No executable task";
   const nextReason = nextLoading
     ? "Fetching the current top-ranked task from /next."
     : nextError
       ? nextError
       : nextTask
         ? reasonStr
-        : "No ready task is available from the current ranking.";
+        : "No executable task is available from the current ranking.";
   const nextTaskId = nextLoading ? "—" : nextTask?.id || "—";
   const actionsDisabled = nextLoading || !nextTask;
 

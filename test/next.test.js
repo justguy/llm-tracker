@@ -15,7 +15,7 @@ function projectWithPriorities() {
   return project;
 }
 
-test("buildNextPayload ranks ready tasks before blocked tasks and normalizes legacy reference", () => {
+test("buildNextPayload ranks executable tasks and hides task-blocked work by default", () => {
   const project = projectWithPriorities();
   project.tasks[0].comment = "Highest-priority ready task";
   project.tasks[0].reference = "hub/store.js:1-20";
@@ -43,17 +43,17 @@ test("buildNextPayload ranks ready tasks before blocked tasks and normalizes leg
   assert.equal(payload.recommendedTaskId, "t1");
   assert.deepEqual(
     payload.next.map((task) => task.id),
-    ["t1", "t4", "t2"]
+    ["t1", "t4"]
   );
   assert.deepEqual(payload.next[0].references, ["hub/store.js:1-20"]);
   assert.equal(payload.next[0].ready, true);
+  assert.equal(payload.next[0].actionability, "executable");
   assert.equal(payload.next[0].lastTouchedRev, 10);
-  assert.equal(payload.next[2].ready, false);
-  assert.equal(payload.next[2].blocked_kind, "deps");
-  assert.deepEqual(payload.next[2].blocking_on, ["t1"]);
+  assert.equal(payload.actionabilityCounts.blocked_by_task, 1);
+  assert.equal(payload.hiddenByActionability.blocked_by_task, 1);
 });
 
-test("buildNextPayload uses effort and approval to break ties among ready tasks", () => {
+test("buildNextPayload hides decision-gated work unless explicitly included", () => {
   const project = projectWithPriorities();
   project.tasks = [
     {
@@ -82,9 +82,24 @@ test("buildNextPayload uses effort and approval to break ties among ready tasks"
 
   assert.deepEqual(
     payload.next.map((task) => task.id),
+    ["t1"]
+  );
+  assert.equal(payload.actionabilityCounts.decision_gated, 1);
+  assert.equal(payload.hiddenByActionability.decision_gated, 1);
+
+  const withGated = buildNextPayload({
+    slug: "test-project",
+    data: project,
+    includeGated: true
+  });
+
+  assert.deepEqual(
+    withGated.next.map((task) => task.id),
     ["t1", "t2"]
   );
-  assert.ok(payload.next[1].reason.some((reason) => reason.includes("requires approval")));
+  assert.equal(withGated.next[1].actionability, "decision_gated");
+  assert.deepEqual(withGated.next[1].decision_required, ["new dependencies"]);
+  assert.ok(withGated.next[1].reason.some((reason) => reason.includes("Decision required")));
 });
 
 test("buildNextPayload prefers bounded actionable work over aggregate roadmap rows", () => {
@@ -143,15 +158,16 @@ test("buildNextPayload prefers bounded actionable work over aggregate roadmap ro
   assert.equal(payload.recommendedTaskId, "t-017");
   assert.deepEqual(
     payload.next.map((task) => task.id),
-    ["t-017", "rm-investor-demo-open", "rm-parallel-execution"]
+    ["t-017"]
   );
   assert.equal(payload.next[0].ready, true);
   assert.equal(payload.next[0].aggregate, false);
-  assert.equal(payload.next[1].aggregate, true);
-  assert.ok(payload.next[1].reason.some((reason) => reason.includes("aggregate roadmap/container row")));
+  assert.equal(payload.next[0].actionability, "executable");
+  assert.equal(payload.actionabilityCounts.parked, 2);
+  assert.equal(payload.hiddenByActionability.parked, 2);
 });
 
-test("buildNextPayload honestly falls back to aggregate roadmap rows when no bounded task exists", () => {
+test("buildNextPayload does not fall back to aggregate rows when no executable task exists", () => {
   const project = projectWithPriorities();
   project.tasks = [
     {
@@ -189,12 +205,56 @@ test("buildNextPayload honestly falls back to aggregate roadmap rows when no bou
     data: project
   });
 
-  assert.equal(payload.recommendedTaskId, "rm-live-run-progress-surface");
+  assert.equal(payload.recommendedTaskId, null);
   assert.deepEqual(
     payload.next.map((task) => task.id),
-    ["rm-live-run-progress-surface", "rm-operator-trust"]
+    []
   );
-  assert.equal(payload.next[0].aggregate, true);
+  assert.equal(payload.actionabilityCounts.parked, 2);
+  assert.equal(payload.hiddenByActionability.parked, 2);
+});
+
+test("buildNextPayload parks explicit groups and parent containers", () => {
+  const project = projectWithPriorities();
+  project.tasks = [
+    {
+      id: "g1",
+      kind: "group",
+      title: "Container group",
+      status: "not_started",
+      placement: { swimlaneId: "exec", priorityId: "p0" },
+      dependencies: []
+    },
+    {
+      id: "parent",
+      title: "Parent row",
+      status: "not_started",
+      placement: { swimlaneId: "exec", priorityId: "p0" },
+      dependencies: []
+    },
+    {
+      id: "child",
+      title: "Executable child",
+      status: "not_started",
+      parent_id: "parent",
+      placement: { swimlaneId: "exec", priorityId: "p1" },
+      dependencies: []
+    }
+  ];
+
+  const payload = buildNextPayload({
+    slug: "test-project",
+    data: project
+  });
+
+  assert.deepEqual(
+    payload.next.map((task) => task.id),
+    ["child"]
+  );
+  assert.equal(payload.next[0].actionability, "executable");
+  assert.equal(payload.actionabilityCounts.executable, 1);
+  assert.equal(payload.actionabilityCounts.parked, 2);
+  assert.equal(payload.hiddenByActionability.parked, 2);
 });
 
 test("buildNextPayload prefers active bounded work over starting a new bounded task", () => {

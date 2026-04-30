@@ -42,16 +42,16 @@ export function formatHeroPath(project, slug) {
 export function buildHeroReason(task) {
   if (!task) return "";
   const parts = [];
-  if (task.ready) parts.push("highest-ranked ready task");
+  if (task.actionability === "executable" || task.ready) parts.push("highest-ranked executable task");
   if (task.priorityId) parts.push(task.priorityId);
   if (task.dependenciesResolved || (Array.isArray(task.blocking_on) && task.blocking_on.length === 0)) {
     parts.push("dependencies satisfied");
   }
   if (task.status === "in_progress") parts.push("already in progress");
-  if (Array.isArray(task.requires_approval) && task.requires_approval.length > 0) {
-    parts.push(`requires ${task.requires_approval.join(", ")} approval`);
+  if (Array.isArray(task.decision_required) && task.decision_required.length > 0) {
+    parts.push(`decision needed: ${task.decision_required.join(", ")}`);
   }
-  return parts.join(" · ") || "ready for work";
+  return parts.join(" · ") || "executable work";
 }
 
 export function buildHeroSummary(project, slug) {

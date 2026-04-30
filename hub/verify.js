@@ -100,6 +100,11 @@ export function buildVerifyPayload({
       taskState: {
         id: brief.task.id,
         status: brief.task.status,
+        actionability: brief.task.actionability,
+        actionable: brief.task.actionable,
+        blocked_by: brief.task.blocked_by,
+        decision_required: brief.task.decision_required,
+        decision_reason: brief.task.decision_reason,
         assignee: brief.task.assignee,
         lastTouchedRev: brief.task.lastTouchedRev,
         selectedBecause: "current task state"
@@ -129,6 +134,11 @@ export function getVerifyPayload({ workspace, slug, entry, taskId, now }) {
         taskState: {
           id: result.payload.task.id,
           status: result.payload.task.status,
+          actionability: result.payload.task.actionability,
+          actionable: result.payload.task.actionable,
+          blocked_by: result.payload.task.blocked_by,
+          decision_required: result.payload.task.decision_required,
+          decision_reason: result.payload.task.decision_reason,
           assignee: result.payload.task.assignee,
           lastTouchedRev: result.payload.task.lastTouchedRev,
           selectedBecause: "current task state"

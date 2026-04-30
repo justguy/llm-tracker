@@ -2,10 +2,13 @@ import { buildNextPayload } from "./next.js";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
 function blockedMessage(summary) {
-  if (summary.blocking_on.length === 0) {
-    return `task "${summary.id}" is not ready to pick`;
+  if (summary.actionability === "decision_gated") {
+    return summary.decision_reason || `task "${summary.id}" requires a decision before it can be picked`;
   }
-  return `task "${summary.id}" is blocked on dependencies: ${summary.blocking_on.join(", ")}`;
+  if (summary.blocked_by.length === 0) {
+    return `task "${summary.id}" is not executable`;
+  }
+  return `task "${summary.id}" is blocked by tasks: ${summary.blocked_by.join(", ")}`;
 }
 
 function assigneeConflict(summary, assignee) {
@@ -82,7 +85,7 @@ export function resolvePickSelection({
         ok: true,
         taskId: candidate.id,
         autoSelected: true,
-        selectedBecause: candidate.reason?.[0] || "top ready task from next ranking",
+        selectedBecause: candidate.reason?.[0] || "top executable task from next ranking",
         task: candidate
       };
     }
@@ -93,7 +96,7 @@ export function resolvePickSelection({
     firstConflict || {
       ok: false,
       status: 409,
-      message: "no ready task available to pick"
+      message: "no executable task available to pick"
     }
   );
 }

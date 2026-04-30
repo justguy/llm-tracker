@@ -108,6 +108,7 @@ export function renderProject(project, { useColor = CAN_COLOR_DEFAULT } = {}) {
   const { data, derived, slug, path } = project;
   const LINE = c(MUTED, "─".repeat(84), useColor);
   const blockedN = Object.keys(derived.blocked || {}).length;
+  const actionability = derived.actionability?.counts || {};
 
   const lines = [];
   lines.push("");
@@ -116,6 +117,9 @@ export function renderProject(project, { useColor = CAN_COLOR_DEFAULT } = {}) {
   lines.push(`  ${LINE}`);
   lines.push(
     `  ${c(GREEN, padr(derived.pct + "%", 5), useColor)}  ${segBar(derived.counts, derived.total, 28, useColor)}  ${derived.counts.complete || 0}/${derived.total}   ·  ${c(AMBER, (derived.counts.in_progress || 0) + " active", useColor)}  ·  ${c(RED, blockedN + " blocked", useColor)}  ·  ${c(MUTED, (derived.counts.deferred || 0) + " deferred", useColor)}`
+  );
+  lines.push(
+    `  ${c(AMBER, "Actionability", useColor)}  ${actionability.executable || 0} executable · ${actionability.decision_gated || 0} decision-gated · ${actionability.blocked_by_task || 0} blocked-by-task · ${actionability.parked || 0} parked`
   );
 
   if (data.meta.scratchpad) {
@@ -172,6 +176,7 @@ export function renderJson(projects, workspace) {
               total: p.derived.total,
               pct: p.derived.pct,
               counts: p.derived.counts,
+              actionability: p.derived.actionability || {},
               blocked: p.derived.blocked,
               perSwimlane: p.derived.perSwimlane,
               scratchpad: p.data.meta.scratchpad || ""

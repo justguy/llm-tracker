@@ -17,7 +17,7 @@ export function ensureHubResponse(status, body, label) {
 
 function formatQueryMatch(match, index, { includeAssignee = false, includeMatchedOn = false } = {}) {
   const lines = [];
-  const readiness = match.ready ? "ready" : match.blocked_kind || "not_ready";
+  const readiness = match.actionability || (match.ready ? "executable" : match.blocked_kind || "not_actionable");
   lines.push(
     `  ${index + 1}. ${match.id}  ${match.priorityId || "p?"}  ${match.swimlaneId || "?"}  ${readiness}  score=${match.score.toFixed(3)}`
   );
@@ -33,6 +33,8 @@ function formatQueryMatch(match, index, { includeAssignee = false, includeMatche
   if (extras.length > 0) lines.push(`     ${extras.join(" · ")}`);
 
   if (match.excerpt) lines.push(`     excerpt: ${match.excerpt}`);
+  if (match.blocked_by?.length > 0) lines.push(`     blocked by: ${match.blocked_by.join(", ")}`);
+  if (match.decision_required?.length > 0) lines.push(`     decision needed: ${match.decision_required.join(", ")}`);
   if (match.references?.length > 0) lines.push(`     refs: ${match.references.join(" | ")}`);
 
   return lines.join("\n");

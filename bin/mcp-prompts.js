@@ -123,7 +123,7 @@ export function getPrompt(workspace, name, args = {}) {
           `Use \`tracker_project_status\` for \`${slug}\` if you need a quick progress snapshot.`,
           `Call \`tracker_next\` with \`${slug}\` to get the ranked shortlist.`,
           "Inspect the top recommendation and alternatives before choosing work.",
-          `If the task should be explicitly started and the hub is reachable, call \`tracker_start\` for \`${slug}\`; use \`tracker_pick\` only when you want the hub to choose the top ready task.`,
+          `If the task should be explicitly started and the hub is reachable, call \`tracker_start\` for \`${slug}\`; use \`tracker_pick\` only when you want the hub to choose the top executable task.`,
           `If the hub is not reachable, do not pretend the claim succeeded. Use a patch file in \`${patchExample}\` instead.`
         ].join("\n")
       );

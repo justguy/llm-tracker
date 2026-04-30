@@ -34,6 +34,7 @@ test("buildWhyPayload explains why a task matters, what it unblocks, and recent 
 
   assert.equal(payload.packType, "why");
   assert.equal(payload.task.id, "t1");
+  assert.equal(payload.task.actionability, "executable");
   assert.ok(payload.why.some((reason) => reason.kind === "decision_note"));
   assert.ok(payload.why.some((reason) => reason.kind === "unblocks" && reason.text.includes("t2")));
   assert.ok(payload.why.some((reason) => reason.kind === "unblocks" && reason.text.includes("t4")));

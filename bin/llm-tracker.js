@@ -628,7 +628,7 @@ Usage:
   llm-tracker fuzzy|fuzzy-search <slug> <query> [--json] [--limit N]  Fuzzy lexical task search (requires hub)
   llm-tracker start <slug> <taskId> --assignee ID [--scratchpad TEXT] Start an explicit task atomically (requires hub)
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)
-  llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
+  llm-tracker next <slug> [--json] [--limit N] [--include-gated] Print ranked executable tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)
   llm-tracker restore <slug> [--rev <rev>]             Restore a deleted project from its snapshot (requires hub)

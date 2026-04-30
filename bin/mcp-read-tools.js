@@ -98,13 +98,15 @@ export function createReadTools(workspace) {
         type: "object",
         properties: {
           slug: { type: "string", description: "Project slug" },
-          limit: { type: "integer", minimum: 1, maximum: 5 }
+          limit: { type: "integer", minimum: 1, maximum: 5 },
+          includeGated: { type: "boolean", description: "Include decision-gated tasks after executable tasks" }
         },
         required: ["slug"]
       },
       handler: async (args = {}) =>
         readToolPayload(getNextPayload, workspace, nonEmptyString(args.slug), {
-          limit: clampInt(args.limit, { fallback: 5, min: 1, max: 5 })
+          limit: clampInt(args.limit, { fallback: 5, min: 1, max: 5 }),
+          includeGated: args.includeGated === true
         })
     },
     {

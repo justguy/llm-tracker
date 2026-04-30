@@ -9,8 +9,8 @@ function indentBlock(text, prefix = "       ") {
 
 function formatTask(task) {
   const lines = [];
-  const readiness = task.ready ? "ready" : task.blocked_kind || "not_ready";
-  lines.push(`  ${task.id}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${readiness}`);
+  const actionability = task.actionability || (task.ready ? "executable" : task.blocked_kind || "not_actionable");
+  lines.push(`  ${task.id}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${actionability}`);
   lines.push(`     ${task.title}`);
 
   const extras = [];
@@ -21,18 +21,20 @@ function formatTask(task) {
 
   if (task.goal) lines.push(`     goal: ${task.goal}`);
   if (task.comment) lines.push(`     note: ${task.comment}`);
-  if (task.blocking_on?.length > 0) lines.push(`     blocking: ${task.blocking_on.join(", ")}`);
-  if (task.requires_approval?.length > 0) lines.push(`     approval: ${task.requires_approval.join(", ")}`);
+  lines.push(`     Actionability: ${actionability}`);
+  if (task.blocked_by?.length > 0) lines.push(`     Blocked By: ${task.blocked_by.join(", ")}`);
+  if (task.decision_required?.length > 0) lines.push(`     Decision Needed: ${task.decision_required.join(", ")}`);
+  if (task.not_actionable_reason) lines.push(`     Why Not Actionable Now: ${task.not_actionable_reason}`);
   return lines.join("\n");
 }
 
 function formatLinkedTask(task, index) {
   const lines = [];
-  const readiness = task.ready ? "ready" : task.blocked_kind || "not_ready";
-  lines.push(`  ${index + 1}. ${task.id}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${readiness}`);
+  const actionability = task.actionability || (task.ready ? "executable" : task.blocked_kind || "not_actionable");
+  lines.push(`  ${index + 1}. ${task.id}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${actionability}`);
   lines.push(`     ${task.title}`);
   if (task.comment) lines.push(`     note: ${task.comment}`);
-  if (task.blocking_on?.length > 0) lines.push(`     blocking: ${task.blocking_on.join(", ")}`);
+  if (task.blocked_by?.length > 0) lines.push(`     blocked by: ${task.blocked_by.join(", ")}`);
   return lines.join("\n");
 }
 

@@ -13,15 +13,25 @@ function executionContract(task) {
 function buildExecutionPlan(task, references = []) {
   const plan = [];
 
-  if (task.ready) {
+  if (task.actionability === "executable" || task.ready) {
     plan.push({
       kind: "start",
       text: "Task is ready for execution now"
     });
-  } else if (task.blocking_on?.length > 0) {
+  } else if (task.actionability === "blocked_by_task" || task.blocked_by?.length > 0 || task.blocking_on?.length > 0) {
     plan.push({
       kind: "blockers",
-      text: `Resolve blockers first: ${task.blocking_on.join(", ")}`
+      text: `Resolve blockers first: ${(task.blocked_by || task.blocking_on || []).join(", ")}`
+    });
+  } else if (task.actionability === "decision_gated") {
+    plan.push({
+      kind: "decision_required",
+      text: task.decision_reason || `Stop for decision before execution: ${(task.decision_required || []).join(", ")}`
+    });
+  } else if (task.actionability === "parked") {
+    plan.push({
+      kind: "parked",
+      text: task.not_actionable_reason || "Task is not currently actionable"
     });
   }
 
@@ -94,9 +104,15 @@ export function buildExecutePayload({
     ...brief,
     packType: "execute",
     readiness: {
+      actionability: brief.task.actionability,
+      actionable: brief.task.actionable,
       ready: brief.task.ready,
       blocked_kind: brief.task.blocked_kind,
+      blocked_by: brief.task.blocked_by,
       blocking_on: brief.task.blocking_on,
+      decision_required: brief.task.decision_required,
+      decision_reason: brief.task.decision_reason,
+      not_actionable_reason: brief.task.not_actionable_reason,
       requires_approval: brief.task.requires_approval
     },
     executionContract: executionContract(brief.task),
@@ -114,9 +130,15 @@ export function getExecutePayload({ workspace, slug, entry, taskId, now }) {
       ...result.payload,
       packType: "execute",
       readiness: {
+        actionability: result.payload.task.actionability,
+        actionable: result.payload.task.actionable,
         ready: result.payload.task.ready,
         blocked_kind: result.payload.task.blocked_kind,
+        blocked_by: result.payload.task.blocked_by,
         blocking_on: result.payload.task.blocking_on,
+        decision_required: result.payload.task.decision_required,
+        decision_reason: result.payload.task.decision_reason,
+        not_actionable_reason: result.payload.task.not_actionable_reason,
         requires_approval: result.payload.task.requires_approval
       },
       executionContract: executionContract(result.payload.task),

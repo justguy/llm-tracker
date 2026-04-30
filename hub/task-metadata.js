@@ -7,6 +7,8 @@ const KNOWN_PRIORITY_WEIGHTS = {
   p3: 10
 };
 
+export const ACTIONABILITY_VALUES = ["executable", "blocked_by_task", "decision_gated", "parked"];
+
 export function priorityWeight(priorityId, priorities = []) {
   if (KNOWN_PRIORITY_WEIGHTS[priorityId] !== undefined) {
     return KNOWN_PRIORITY_WEIGHTS[priorityId];
@@ -52,31 +54,89 @@ export function taskTags(task) {
   return task.context.tags.filter((value) => typeof value === "string" && value.trim());
 }
 
-export function isAggregateTask(task) {
-  const context = task?.context || {};
+export function isAggregateTask(task, projectContext = {}) {
+  const taskContext = task?.context || {};
   const tags = taskTags(task);
+  const hasChildren =
+    projectContext?.childParentIds instanceof Set ? projectContext.childParentIds.has(task?.id) : false;
   const hasSubtaskCounts =
-    Number.isInteger(context.task_count) ||
-    Number.isInteger(context.open_subtasks) ||
-    Number.isInteger(context.completed_subtasks);
+    Number.isInteger(taskContext.task_count) ||
+    Number.isInteger(taskContext.open_subtasks) ||
+    Number.isInteger(taskContext.completed_subtasks);
   const hasRoadmapEnvelope =
     tags.includes("roadmap") &&
-    typeof context.source_title === "string" &&
-    context.source_title.trim().length > 0;
+    typeof taskContext.source_title === "string" &&
+    taskContext.source_title.trim().length > 0;
 
-  return hasSubtaskCounts || hasRoadmapEnvelope;
+  return task?.kind === "group" || hasChildren || hasSubtaskCounts || hasRoadmapEnvelope;
 }
 
-export function blockingDependencies(task, byId) {
+export function blockingDependencies(task, context) {
+  const byId = context?.byId instanceof Map ? context.byId : context instanceof Map ? context : new Map();
   return (task?.dependencies || []).filter((dep) => {
     const depTask = byId.get(dep);
-    return depTask && depTask.status !== "complete" && !isAggregateTask(depTask);
+    return depTask && depTask.status !== "complete" && !isAggregateTask(depTask, context);
   });
 }
 
-export function buildProjectTaskContext({ data, history = [] }) {
+export function deriveActionability(task, context) {
+  const blockedBy = blockingDependencies(task, context);
+  const decisionRequired = taskRequiresApproval(task);
+  const aggregate = isAggregateTask(task, context);
+
+  if (task?.status === "complete" || task?.status === "deferred" || aggregate) {
+    return {
+      actionability: "parked",
+      blocked_by: blockedBy,
+      decision_required: decisionRequired,
+      decision_reason: null,
+      not_actionable_reason:
+        task?.status === "complete"
+          ? "Task is already complete."
+          : task?.status === "deferred"
+          ? "Task is deferred."
+          : "Task is an aggregate container row, not directly executable."
+    };
+  }
+
+  if (blockedBy.length > 0) {
+    return {
+      actionability: "blocked_by_task",
+      blocked_by: blockedBy,
+      decision_required: decisionRequired,
+      decision_reason: null,
+      not_actionable_reason: `Blocked by task${blockedBy.length === 1 ? "" : "s"}: ${blockedBy.join(", ")}.`
+    };
+  }
+
+  if (decisionRequired.length > 0) {
+    return {
+      actionability: "decision_gated",
+      blocked_by: [],
+      decision_required: decisionRequired,
+      decision_reason: `Decision required before execution: ${decisionRequired.join(", ")}.`,
+      not_actionable_reason: `Decision required before execution: ${decisionRequired.join(", ")}.`
+    };
+  }
+
   return {
-    byId: new Map((data?.tasks || []).map((task) => [task.id, task])),
+    actionability: "executable",
+    blocked_by: [],
+    decision_required: [],
+    decision_reason: null,
+    not_actionable_reason: null
+  };
+}
+
+export function buildProjectTaskContext({ data, history = [] }) {
+  const tasks = data?.tasks || [];
+  return {
+    byId: new Map(tasks.map((task) => [task.id, task])),
+    childParentIds: new Set(
+      tasks
+        .map((task) => (typeof task.parent_id === "string" ? task.parent_id.trim() : ""))
+        .filter(Boolean)
+    ),
     currentRev: data?.meta?.rev ?? null,
     priorities: data?.meta?.priorities || [],
     touchMap: buildTaskTouchMap(history)
@@ -84,9 +144,19 @@ export function buildProjectTaskContext({ data, history = [] }) {
 }
 
 export function summarizeTask(task, context) {
-  const blockingOn = blockingDependencies(task, context.byId);
+  const blockingOn = blockingDependencies(task, context);
   const dependenciesResolved = blockingOn.length === 0;
-  const aggregate = isAggregateTask(task);
+  const aggregate = isAggregateTask(task, context);
+  const actionability = deriveActionability(task, context);
+  const ready = actionability.actionability === "executable";
+  const blockedKind =
+    actionability.actionability === "blocked_by_task"
+      ? "deps"
+      : actionability.actionability === "decision_gated"
+      ? "decision_gated"
+      : actionability.actionability === "parked"
+      ? "parked"
+      : null;
 
   return {
     id: task.id,
@@ -98,10 +168,16 @@ export function summarizeTask(task, context) {
     swimlaneId: task.placement?.swimlaneId ?? null,
     effort: normalizeEffort(task.effort),
     aggregate,
-    ready: dependenciesResolved,
-    blocked_kind: dependenciesResolved ? null : "deps",
+    actionability: actionability.actionability,
+    actionable: ready,
+    ready,
+    blocked_kind: blockedKind,
+    blocked_by: actionability.blocked_by,
     blocking_on: blockingOn,
     blocker_reason: taskBlockerReason(task),
+    decision_required: actionability.decision_required,
+    decision_reason: actionability.decision_reason,
+    not_actionable_reason: actionability.not_actionable_reason,
     requires_approval: taskRequiresApproval(task),
     dependenciesResolved,
     references: normalizeTaskReferences(task),

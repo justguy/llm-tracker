@@ -2,17 +2,20 @@ import { ensureHubResponse } from "./shared.js";
 
 function formatTask(task) {
   const lines = [];
-  const readiness = task.ready ? "ready" : task.blocked_kind || "not_ready";
-  lines.push(`  ${task.id}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${readiness}`);
+  const actionability = task.actionability || (task.ready ? "executable" : task.blocked_kind || "not_actionable");
+  lines.push(`  ${task.id}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${actionability}`);
   lines.push(`     ${task.title}`);
   if (task.goal) lines.push(`     goal: ${task.goal}`);
   if (task.comment) lines.push(`     note: ${task.comment}`);
-  if (task.blocking_on?.length > 0) lines.push(`     blocking: ${task.blocking_on.join(", ")}`);
+  lines.push(`     Actionability: ${actionability}`);
+  if (task.blocked_by?.length > 0) lines.push(`     Blocked By: ${task.blocked_by.join(", ")}`);
+  if (task.decision_required?.length > 0) lines.push(`     Decision Needed: ${task.decision_required.join(", ")}`);
+  if (task.not_actionable_reason) lines.push(`     Why Not Actionable Now: ${task.not_actionable_reason}`);
   return lines.join("\n");
 }
 
 function formatTaskRef(task, index) {
-  return `  ${index + 1}. ${task.id}  ${task.status}\n     ${task.title}`;
+  return `  ${index + 1}. ${task.id}  ${task.status}  ${task.actionability || "unknown"}\n     ${task.title}`;
 }
 
 function formatWhyReason(reason, index) {

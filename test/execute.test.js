@@ -37,7 +37,10 @@ test("buildExecutePayload augments brief context with execution contract and pla
   });
 
   assert.equal(payload.packType, "execute");
+  assert.equal(payload.readiness.actionability, "decision_gated");
+  assert.deepEqual(payload.readiness.decision_required, ["new dependencies"]);
   assert.equal(payload.executionContract.definition_of_done[0], "CLI and HTTP output match");
+  assert.ok(payload.executionPlan.some((item) => item.kind === "decision_required"));
   assert.ok(payload.executionPlan.some((item) => item.kind === "expected_change"));
   assert.ok(payload.executionPlan.some((item) => item.kind === "approval"));
   assert.equal(payload.references[0].selectedBecause, "explicit task reference");

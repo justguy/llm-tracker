@@ -39,6 +39,51 @@ test("resolvePickSelection rejects blocked tasks unless forced", () => {
   assert.equal(forced.taskId, "t2");
 });
 
+test("resolvePickSelection skips container rows when auto-selecting", () => {
+  const project = validProject();
+  project.tasks = [
+    {
+      id: "g1",
+      kind: "group",
+      title: "Container group",
+      status: "not_started",
+      placement: { swimlaneId: "exec", priorityId: "p0" },
+      dependencies: []
+    },
+    {
+      id: "parent",
+      title: "Parent row",
+      status: "not_started",
+      placement: { swimlaneId: "exec", priorityId: "p0" },
+      dependencies: []
+    },
+    {
+      id: "child",
+      title: "Executable child",
+      status: "not_started",
+      parent_id: "parent",
+      placement: { swimlaneId: "exec", priorityId: "p1" },
+      dependencies: []
+    }
+  ];
+
+  const result = resolvePickSelection({
+    slug: "test-project",
+    data: project
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.taskId, "child");
+
+  const group = resolvePickSelection({
+    slug: "test-project",
+    data: project,
+    taskId: "g1"
+  });
+  assert.equal(group.ok, false);
+  assert.equal(group.status, 409);
+});
+
 test("resolvePickSelection refuses in-progress tasks owned by another assignee", () => {
   const project = validProject();
 

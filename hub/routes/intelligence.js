@@ -14,6 +14,11 @@ function clampLimit(value, fallback, max) {
   return Math.min(parsed, max);
 }
 
+function truthyQueryFlag(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === true || raw === "true" || raw === "1" || raw === "yes";
+}
+
 export function registerIntelligenceRoutes(app, { workspace, store, targetFor = () => ({}) }) {
   const queryValue = (value) => (Array.isArray(value) ? value[0] : value);
   const requireQuery = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -39,7 +44,8 @@ export function registerIntelligenceRoutes(app, { workspace, store, targetFor = 
       workspace,
       slug: req.params.slug,
       entry,
-      limit: clampLimit(req.query.limit, 5, 5)
+      limit: clampLimit(req.query.limit, 5, 5),
+      includeGated: truthyQueryFlag(req.query.includeGated)
     });
     res.json(withTarget(req.params.slug, payload));
   });

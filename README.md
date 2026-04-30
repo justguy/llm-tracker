@@ -10,7 +10,7 @@ Stop forcing your LLMs to re-read and rewrite massive architecture files just to
 
 It's a file-system-as-database tracker. Your LLMs update project states with tiny HTTP or file-based patches, and the local hub renders a live, **calm terminal-style** priority matrix so you can see exactly what your agents are doing at a glance.
 
-When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker. The ranking prefers bounded actionable work over aggregate roadmap/container rows, and prefers continuing active bounded work over starting a fresh bounded task.
+When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked executable shortlist instead of re-reading the full tracker. The ranking uses derived `actionability` (`executable`, `blocked_by_task`, `decision_gated`, `parked`) separately from lifecycle `status`, so decision-gated and blocked rows do not crowd out work an agent can actually act on.
 
 When a human or agent asks "what about the feature with the..." instead of naming a task id, the hub now exposes both `GET /api/projects/<slug>/search?q=...` for local embedding-backed semantic search and `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic fuzzy lexical matching. Both modes are reachable from the UI through the global `⌘K` command palette (prefix `~` for fuzzy, `?` for semantic).
 
@@ -263,8 +263,8 @@ npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
 npx llm-tracker search <slug> <query>  # semantic local-model search (requires hub)
 npx llm-tracker fuzzy-search <slug> <query>  # deterministic fuzzy lexical search (requires hub)
 npx llm-tracker start <slug> <task-id> --assignee codex  # explicit start; assignee required unless env is set
-npx llm-tracker pick <slug> [task-id] --assignee codex  # atomic claim, defaults to top ready task
-npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + alternatives
+npx llm-tracker pick <slug> [task-id] --assignee codex  # atomic claim, defaults to top executable task
+npx llm-tracker next <slug> [--limit 5] [--include-gated]  # ranked executable shortlist
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
 npx llm-tracker rollback <slug> <rev>
 npx llm-tracker link <slug> <abs-path>  # symlink an external tracker into the workspace
@@ -306,6 +306,7 @@ curl http://localhost:4400/help
 curl http://localhost:4400/api/projects
 curl http://localhost:4400/api/projects/<slug>
 curl "http://localhost:4400/api/projects/<slug>/next?limit=5"
+curl "http://localhost:4400/api/projects/<slug>/next?limit=5&includeGated=true"
 curl "http://localhost:4400/api/projects/<slug>/since/<rev>"
 
 # Focused task context
@@ -338,7 +339,7 @@ curl -X POST http://localhost:4400/api/projects/<slug>/start \
   -H "Content-Type: application/json" \
   -d '{"taskId":"<task-id>","assignee":"codex","scratchpad":"starting <task-id>"}'
 
-# Atomic claim / pick; omit taskId to claim the top ready task
+# Atomic claim / pick; omit taskId to claim the top executable task
 curl -X POST http://localhost:4400/api/projects/<slug>/pick \
   -H "Content-Type: application/json" \
   -d '{"taskId":"<task-id>","assignee":"codex"}'
@@ -395,7 +396,7 @@ Patch payloads stay small. Typical shape:
 - Use `next`, `brief`, `why`, `execute`, and `verify` instead of rereading the whole tracker.
 - Use `patch` for status/content updates.
 - Use `start` when you know the exact task and want to atomically set `status: in_progress`, assignee, and optional scratchpad.
-- Use `pick` when you want an atomic claim instead of hand-rolling status changes, especially when the hub should select the top ready task.
+- Use `pick` when you want an atomic claim instead of hand-rolling status changes, especially when the hub should select the top executable task.
 - Keep writes small and frequent.
 
 ### Agent Interfaces
@@ -502,6 +503,8 @@ For feature-oriented or fuzzy questions, prefer:
 Legacy compatibility: if an older patch or tracker file still uses `status: "partial"`, the hub normalizes it to `in_progress` on ingest and writes back the canonical value.
 
 `outcome` is separate from `status`: use `partial_slice_landed` when a bounded slice shipped but the task remains open. Progress % still keys only off the four status values above.
+
+`actionability` is also separate from `status`: the hub derives `executable`, `blocked_by_task`, `decision_gated`, or `parked` from dependencies, approval requirements, aggregate rows, and lifecycle state. `next` ranks executable work by default; `includeGated=true` / `--include-gated` adds decision-gated rows for diagnostics.
 
 ### Semantic search stack
 

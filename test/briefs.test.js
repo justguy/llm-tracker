@@ -45,6 +45,8 @@ test("buildBriefPayload caps snippets and history within deterministic budgets",
 
   assert.equal(payload.packType, "brief");
   assert.equal(payload.task.id, "t1");
+  assert.equal(payload.task.actionability, "executable");
+  assert.deepEqual(payload.task.blocked_by, []);
   assert.equal(payload.relatedTasks[0].id, "t2");
   assert.equal(payload.snippets.length, 4);
   assert.equal(payload.truncation.snippets.applied, true);

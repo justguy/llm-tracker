@@ -337,6 +337,14 @@ test("tracker_next returns deterministic ranking over stdio MCP", async () => {
   const tracker = validProject();
   tracker.tasks[0].comment = "Highest-priority ready task";
   tracker.tasks[1].dependencies = ["t1"];
+  tracker.tasks.push({
+    id: "t4",
+    title: "Decision gated task",
+    status: "not_started",
+    placement: { swimlaneId: "ops", priorityId: "p0" },
+    dependencies: [],
+    approval_required_for: ["product"]
+  });
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(tracker, null, 2));
 
   const client = startMcp(workspace);
@@ -352,7 +360,22 @@ test("tracker_next returns deterministic ranking over stdio MCP", async () => {
     const payload = JSON.parse(next.result.content[0].text);
     assert.equal(payload.recommendedTaskId, "t1");
     assert.equal(payload.next[0].id, "t1");
-    assert.equal(payload.next[1].id, "t2");
+    assert.equal(payload.next[0].actionability, "executable");
+    assert.equal(payload.actionabilityCounts.blocked_by_task, 1);
+    assert.equal(payload.actionabilityCounts.decision_gated, 1);
+    assert.equal(payload.next.length, 1);
+
+    const includeGated = await client.request("tools/call", {
+      name: "tracker_next",
+      arguments: { slug: "test-project", limit: 3, includeGated: true }
+    });
+    assert.notEqual(includeGated.result.isError, true);
+    const includePayload = JSON.parse(includeGated.result.content[0].text);
+    assert.deepEqual(
+      includePayload.next.map((task) => task.id),
+      ["t1", "t4"]
+    );
+    assert.equal(includePayload.next[1].actionability, "decision_gated");
   } finally {
     await client.close();
     rmSync(workspace, { recursive: true, force: true });

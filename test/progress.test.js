@@ -44,6 +44,33 @@ test("deriveBlocked finds open deps", () => {
   assert.deepEqual(blocked, { t2: ["t1"] });
 });
 
+test("deriveBlocked ignores aggregate container dependencies", () => {
+  const p = validProject();
+  p.tasks[0].kind = "group";
+
+  const blocked = deriveBlocked(p.tasks);
+  assert.deepEqual(blocked, {});
+
+  const d = deriveProject(p);
+  assert.equal(d.actionability.byTask.t1.actionability, "parked");
+  assert.equal(d.actionability.byTask.t2.actionability, "executable");
+});
+
+test("deriveBlocked ignores parent container dependencies", () => {
+  const p = validProject();
+  p.tasks[2].status = "not_started";
+  p.tasks[2].dependencies = ["t1"];
+  p.tasks[2].parent_id = "t1";
+
+  const blocked = deriveBlocked(p.tasks);
+  assert.deepEqual(blocked, {});
+
+  const d = deriveProject(p);
+  assert.equal(d.actionability.byTask.t1.actionability, "parked");
+  assert.equal(d.actionability.byTask.t2.actionability, "executable");
+  assert.equal(d.actionability.byTask.t3.actionability, "executable");
+});
+
 test("deriveProject produces per-swimlane breakdown", () => {
   const d = deriveProject(validProject());
   assert.equal(d.total, 3);

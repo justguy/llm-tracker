@@ -34,6 +34,7 @@ test("buildVerifyPayload derives evidence sources and deterministic checks", () 
   });
 
   assert.equal(payload.packType, "verify");
+  assert.equal(payload.evidenceSources.taskState.actionability, "parked");
   assert.equal(payload.evidenceSources.taskState.selectedBecause, "current task state");
   assert.equal(payload.evidenceSources.references[0].selectedBecause, "explicit task reference");
   assert.ok(payload.checks.some((check) => check.kind === "definition_of_done"));
