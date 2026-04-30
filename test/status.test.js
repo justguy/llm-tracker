@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadProjects, renderDashboard, renderProject, renderJson } from "../hub/status.js";
@@ -90,6 +90,11 @@ test("renderJson emits parseable JSON with slug, pct, counts, blocked", () => {
     assert.equal(data.projects.length, 1);
     const proj = data.projects[0];
     assert.equal(proj.slug, "good");
+    assert.equal(proj.workspace, ws);
+    assert.equal(proj.port, null);
+    assert.equal(proj.file, realpathSync(join(ws, "trackers", "good.json")));
+    assert.equal(proj.registrationFile, join(ws, "trackers", "good.json"));
+    assert.equal(proj.topology, "shared-workspace");
     assert.equal(proj.total, 3);
     assert.ok(typeof proj.pct === "number");
     assert.ok(proj.counts);

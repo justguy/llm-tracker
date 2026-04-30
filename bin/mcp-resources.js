@@ -14,7 +14,7 @@ import {
 } from "./mcp-context-data.js";
 
 export function listResources(workspace) {
-  const projects = listProjectEntries(workspace).map(summarizeProject);
+  const projects = listProjectEntries(workspace).map((entry) => summarizeProject(entry, workspace));
 
   return [
     {
@@ -79,7 +79,7 @@ export function readResource(workspace, uri) {
           {
             workspace,
             projectCount: listProjectEntries(workspace).length,
-            projects: listProjectEntries(workspace).map(summarizeProject)
+            projects: listProjectEntries(workspace).map((entry) => summarizeProject(entry, workspace))
           },
           null,
           2

@@ -250,6 +250,8 @@ test("MCP resources expose workspace help, runtime, and project status", async (
     const project = await client.request("resources/read", { uri: "tracker://projects/test-project/status" });
     const projectPayload = JSON.parse(project.result.contents[0].text);
     assert.equal(projectPayload.project.slug, "test-project");
+    assert.equal(projectPayload.project.registrationFile, join(workspace, "trackers", "test-project.json"));
+    assert.equal(projectPayload.project.topology, "shared-workspace");
     assert.equal(projectPayload.project.counts.not_started, 1);
   } finally {
     await client.close();

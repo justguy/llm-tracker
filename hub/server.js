@@ -173,6 +173,7 @@ function projectPayload(slug, entry, runtime = {}) {
       rev: null,
       error: null,
       file: target.file,
+      registrationFile: target.registrationFile,
       workspace: target.workspace,
       port: target.port,
       topology: target.topology,
@@ -186,6 +187,7 @@ function projectPayload(slug, entry, runtime = {}) {
     rev: entry.rev,
     error: entry.error || null,
     file: target.file,
+    registrationFile: target.registrationFile,
     workspace: target.workspace,
     port: target.port,
     topology: target.topology,
@@ -426,10 +428,11 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   });
 
   app.delete("/api/projects/:slug", async (req, res) => {
+    const target = targetFor(req.params.slug);
     const r = await store.deleteProject(req.params.slug);
     if (!r.ok) return res.status(r.status || 400).json({ error: r.message });
     broadcast({ type: "REMOVE", slug: req.params.slug });
-    res.json({ ok: true, slug: req.params.slug, rev: r.deletedRev ?? null, ...targetFor(req.params.slug) });
+    res.json({ ok: true, slug: req.params.slug, rev: r.deletedRev ?? null, ...target });
   });
 
   app.post("/api/projects/:slug/restore", async (req, res) => {
@@ -502,6 +505,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     const result = await reloadAllProjects();
     res.json({
       ok: result.errors.length === 0,
+      workspace,
+      port,
       reloaded: result.reloaded,
       errors: result.errors
     });
@@ -676,7 +681,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
   app.get("/api/history/:slug", (req, res) => {
     const history = store.history(req.params.slug, { fromRev: 0, limit: 50 });
-    res.json({ lines: history?.events || [] });
+    res.json({ lines: history?.events || [], ...targetFor(req.params.slug) });
   });
 
   // Vendor UI deps resolved from the hub's node_modules (works for local dev
@@ -1007,11 +1012,13 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       const result = await ingestTrackerFile(filePath, { broadcastUpdate });
       if (!result) continue;
       if (result.ok) {
+        const entry = store.get(result.slug);
         reloaded.push({
           slug: result.slug,
-          rev: store.get(result.slug)?.rev ?? null,
+          rev: entry?.rev ?? null,
           event: result.event,
-          noop: result.noop === true
+          noop: result.noop === true,
+          ...targetFor(result.slug, entry)
         });
       } else {
         errors.push({

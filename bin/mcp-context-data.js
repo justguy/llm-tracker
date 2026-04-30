@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { daemonMetaPath, getDaemonStatus, runtimeDir } from "../hub/runtime.js";
 import { listProjectEntries } from "../hub/project-loader.js";
+import { targetMetadata } from "../hub/target-metadata.js";
 
 export const HELP_URI = "tracker://help";
 export const WORKSPACE_STATUS_URI = "tracker://workspace/status";
@@ -60,7 +61,7 @@ export function makePrompt(description, text) {
   };
 }
 
-export function summarizeProject(entry) {
+export function summarizeProject(entry, workspace = null) {
   if (!entry.ok) {
     return {
       slug: entry.slug,
@@ -70,10 +71,12 @@ export function summarizeProject(entry) {
     };
   }
 
+  const target = targetMetadata(workspace, entry.slug, entry);
   return {
     slug: entry.slug,
     ok: true,
     path: entry.path,
+    ...target,
     name: entry.data?.meta?.name || null,
     rev: entry.rev,
     total: entry.derived?.total ?? 0,
@@ -94,12 +97,16 @@ export function projectStatusPayload(workspace, entry) {
     };
   }
 
+  const target = targetMetadata(workspace, entry.slug, entry);
   return {
     workspace,
+    ...target,
     project: {
       slug: entry.slug,
       name: entry.data?.meta?.name || null,
       path: entry.path,
+      ...target,
+      target,
       rev: entry.rev,
       total: entry.derived?.total ?? 0,
       pct: entry.derived?.pct ?? 0,
@@ -127,7 +134,7 @@ export function parseProjectStatusUri(uri) {
 }
 
 export function workspaceStatusPayload(workspace) {
-  const projects = listProjectEntries(workspace).map(summarizeProject);
+  const projects = listProjectEntries(workspace).map((entry) => summarizeProject(entry, workspace));
   const daemon = getDaemonStatus(workspace);
 
   return {

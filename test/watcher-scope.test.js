@@ -77,6 +77,7 @@ test("symlink target edits propagate through the dedicated polling watcher", asy
     assert.equal(initialBody.workspace, workspace);
     assert.equal(initialBody.port, port);
     assert.equal(initialBody.topology, "repo-linked");
+    assert.equal(initialBody.registrationFile, join(workspace, "trackers", "linked.json"));
     assert.equal(initialBody.target.registrationFile, join(workspace, "trackers", "linked.json"));
     assert.equal(initialBody.target.file, realpathSync(targetPath));
 
@@ -90,6 +91,15 @@ test("symlink target edits propagate through the dedicated polling watcher", asy
       (payload) => payload?.data?.meta?.scratchpad === "edited-via-target"
     );
     assert.equal(updated.data.meta.scratchpad, "edited-via-target");
+
+    const deleted = await fetch(`http://127.0.0.1:${port}/api/projects/linked`, { method: "DELETE" });
+    assert.equal(deleted.status, 200);
+    const deletedBody = await deleted.json();
+    assert.equal(deletedBody.file, realpathSync(targetPath));
+    assert.equal(deletedBody.registrationFile, join(workspace, "trackers", "linked.json"));
+    assert.equal(deletedBody.workspace, workspace);
+    assert.equal(deletedBody.port, port);
+    assert.equal(deletedBody.topology, "repo-linked");
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

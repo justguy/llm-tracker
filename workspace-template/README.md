@@ -485,7 +485,7 @@ If MCP is configured, the matching tools are `tracker_projects_status`, `tracker
 
 Daemon rule:
 
-- MCP reads do **not** require a running daemon.
+- MCP reads do **not** require a running daemon and include `workspace`, `port`, `file`, `registrationFile`, and `topology` on project-specific payloads.
 - MCP writes (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
 
 Helpful MCP resources:

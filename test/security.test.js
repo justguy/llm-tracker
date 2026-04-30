@@ -218,6 +218,7 @@ test("bearer token is required and browser UI uses a session cookie without expo
     assert.equal(read.status, 200);
     const readBody = await read.json();
     assert.equal(readBody.file, realpathSync(join(workspace, "trackers", "test-project.json")));
+    assert.equal(readBody.registrationFile, join(workspace, "trackers", "test-project.json"));
     assert.equal(readBody.workspace, workspace);
     assert.equal(readBody.port, port);
     assert.equal(readBody.topology, "shared-workspace");
@@ -228,6 +229,27 @@ test("bearer token is required and browser UI uses a session cookie without expo
       registrationFile: join(workspace, "trackers", "test-project.json"),
       topology: "shared-workspace"
     });
+
+    const history = await fetch(`http://127.0.0.1:${port}/api/history/test-project`);
+    assert.equal(history.status, 200);
+    const historyBody = await history.json();
+    assert.equal(historyBody.file, realpathSync(join(workspace, "trackers", "test-project.json")));
+    assert.equal(historyBody.registrationFile, join(workspace, "trackers", "test-project.json"));
+    assert.equal(historyBody.workspace, workspace);
+    assert.equal(historyBody.port, port);
+    assert.equal(historyBody.topology, "shared-workspace");
+
+    const reload = await fetch(`http://127.0.0.1:${port}/api/reload`, {
+      method: "POST",
+      headers: { Authorization: "Bearer s3cret" }
+    });
+    assert.equal(reload.status, 200);
+    const reloadBody = await reload.json();
+    assert.equal(reloadBody.workspace, workspace);
+    assert.equal(reloadBody.port, port);
+    assert.equal(reloadBody.reloaded[0].file, realpathSync(join(workspace, "trackers", "test-project.json")));
+    assert.equal(reloadBody.reloaded[0].registrationFile, join(workspace, "trackers", "test-project.json"));
+    assert.equal(reloadBody.reloaded[0].topology, "shared-workspace");
 
     const html = await fetch(`http://127.0.0.1:${port}/index.html`);
     assert.equal(html.status, 200);

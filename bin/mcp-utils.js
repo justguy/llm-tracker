@@ -1,5 +1,6 @@
 import { httpRequest } from "./workspace-client.js";
 import { loadProjectEntry } from "../hub/project-loader.js";
+import { targetMetadata } from "../hub/target-metadata.js";
 
 export function clampInt(value, { fallback, min, max }) {
   const parsed = parseInt(value, 10);
@@ -59,7 +60,10 @@ export async function readToolPayload(getter, workspace, slug, extra = {}) {
     return makeTextResult(`Project "${slug}" is not available.`, { isError: true });
   }
 
-  return makeJsonResult(payload.payload || payload);
+  return makeJsonResult({
+    ...(payload.payload || payload),
+    ...targetMetadata(workspace, slug, loaded.entry)
+  });
 }
 
 export async function runHubMutation({ workspace, portFlag, method, path, label, body }) {

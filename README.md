@@ -415,7 +415,7 @@ args = [
 startup_timeout_sec = 60
 ```
 
-MCP reads work directly from workspace files. MCP writes still require the shared hub or daemon to be reachable.
+MCP reads work directly from workspace files and include `workspace`, `port`, `file`, `registrationFile`, and `topology` when they return project-specific payloads. MCP writes still require the shared hub or daemon to be reachable.
 
 ## Background daemon
 

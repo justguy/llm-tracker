@@ -1,4 +1,5 @@
 import { readHistory } from "../hub/snapshots.js";
+import { targetMetadata } from "../hub/target-metadata.js";
 import { getBlockersPayload } from "../hub/blockers.js";
 import { getBriefPayload } from "../hub/briefs.js";
 import { getChangedPayload } from "../hub/changed.js";
@@ -51,7 +52,7 @@ export function createReadTools(workspace) {
       description: "List projects available in the configured llm-tracker workspace.",
       inputSchema: { type: "object", properties: {} },
       handler: async () => {
-        const projects = listProjectEntries(workspace).map(summarizeProject);
+        const projects = listProjectEntries(workspace).map((entry) => summarizeProject(entry, workspace));
         return makeJsonResult({
           workspace,
           projectCount: projects.length,
@@ -64,7 +65,7 @@ export function createReadTools(workspace) {
       description: "Return overall status for all projects in the configured workspace.",
       inputSchema: { type: "object", properties: {} },
       handler: async () => {
-        const projects = listProjectEntries(workspace).map(summarizeProject);
+        const projects = listProjectEntries(workspace).map((entry) => summarizeProject(entry, workspace));
         return makeJsonResult({
           workspace,
           projectCount: projects.length,
@@ -284,6 +285,7 @@ export function createReadTools(workspace) {
           currentRev: loaded.entry.rev,
           fromRev,
           events,
+          ...targetMetadata(workspace, slug, loaded.entry),
           truncation: {
             applied: events.length < all.length,
             returned: events.length,

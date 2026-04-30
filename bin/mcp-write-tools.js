@@ -1,25 +1,23 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runHubMutation, nonEmptyString, makeTextResult, makeJsonResult } from "./mcp-utils.js";
 import { Store, trackerPath } from "../hub/store.js";
+import { targetMetadata } from "../hub/target-metadata.js";
 
 function resolveTargetWorkspace(defaultWorkspace, value) {
   return value === undefined ? defaultWorkspace : resolve(nonEmptyString(value) || "");
 }
 
-function projectFilePayload(slug, entry) {
-  let file = entry?.path || trackerPath(entry?.workspace || "", slug);
-  try {
-    file = realpathSync(file);
-  } catch {}
-  return file;
-}
-
 async function runDirectPatch({ workspace, slug, patch }) {
   const file = trackerPath(workspace, slug);
   if (!existsSync(file)) {
-    return makeTextResult(
-      `tracker_patch direct mode could not find ${file}. Pass the workspace that owns trackers/${slug}.json, or register/link the project first.`,
+    return makeJsonResult(
+      {
+        ok: false,
+        status: 404,
+        error: `tracker_patch direct mode could not find ${file}. Pass the workspace that owns trackers/${slug}.json, or register/link the project first.`,
+        ...targetMetadata(workspace, slug, null)
+      },
       { isError: true }
     );
   }
@@ -27,8 +25,13 @@ async function runDirectPatch({ workspace, slug, patch }) {
   const store = new Store(workspace);
   const loaded = store.ingest(file, readFileSync(file, "utf-8"));
   if (!loaded?.ok) {
-    return makeTextResult(
-      `tracker_patch direct mode could not load ${file}: ${loaded?.message || loaded?.reason || "unknown error"}`,
+    return makeJsonResult(
+      {
+        ok: false,
+        status: loaded?.status || 400,
+        error: `tracker_patch direct mode could not load ${file}: ${loaded?.message || loaded?.reason || "unknown error"}`,
+        ...targetMetadata(workspace, slug, null)
+      },
       { isError: true }
     );
   }
@@ -44,7 +47,8 @@ async function runDirectPatch({ workspace, slug, patch }) {
         hint: result.hint || null,
         repair: result.repair || null,
         expectedRev: Number.isInteger(result.expectedRev) ? result.expectedRev : null,
-        currentRev: Number.isInteger(result.currentRev) ? result.currentRev : null
+        currentRev: Number.isInteger(result.currentRev) ? result.currentRev : null,
+        ...targetMetadata(workspace, slug, store.get(slug))
       },
       { isError: true }
     );
@@ -55,7 +59,7 @@ async function runDirectPatch({ workspace, slug, patch }) {
     ok: true,
     rev: result.rev ?? entry?.rev ?? null,
     updatedAt: entry?.data?.meta?.updatedAt ?? null,
-    file: projectFilePayload(slug, { ...entry, workspace }),
+    ...targetMetadata(workspace, slug, entry),
     workspace,
     mode: "direct",
     notes: result.notes,

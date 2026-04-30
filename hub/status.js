@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { validateProject } from "./validator.js";
 import { deriveProject } from "./progress.js";
+import { targetMetadata } from "./target-metadata.js";
 
 // ANSI ─────────────────────────────────────────────────────────────
 const CAN_COLOR_DEFAULT =
@@ -167,6 +168,7 @@ export function renderJson(projects, workspace) {
           ? {
               slug: p.slug,
               name: p.data.meta.name,
+              ...targetMetadata(workspace, p.slug, p),
               total: p.derived.total,
               pct: p.derived.pct,
               counts: p.derived.counts,

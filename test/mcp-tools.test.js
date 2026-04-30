@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTools } from "../bin/mcp-tools.js";
 import { workspaceRuntimePayload } from "../bin/mcp-context-data.js";
 import { getPrompt } from "../bin/mcp-prompts.js";
+import { readResource } from "../bin/mcp-resources.js";
 import { validProject } from "./fixtures.js";
 
 function setupWorkspace(prefix = "llm-tracker-mcp-tools-") {
@@ -38,6 +39,59 @@ test("tracker_patch is exposed across MCP tools, runtime metadata, and prompts",
     assert.match(patchWrite.messages[0].content.text, /tracker_patch/);
     assert.match(patchWrite.messages[0].content.text, /taskOps/);
     assert.match(patchWrite.messages[0].content.text, /expectedRev/);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("MCP read tools include effective target metadata", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-target-read-");
+  try {
+    const tools = createTools(workspace);
+    const result = await tools.get("tracker_next").handler({ slug: "test-project", limit: 1 });
+
+    assert.equal(result.isError, false);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.workspace, workspace);
+    assert.equal(payload.port, null);
+    assert.equal(payload.file, realpathSync(join(workspace, "trackers", "test-project.json")));
+    assert.equal(payload.registrationFile, join(workspace, "trackers", "test-project.json"));
+    assert.equal(payload.topology, "shared-workspace");
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_history includes effective target metadata", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-target-history-");
+  try {
+    const tools = createTools(workspace);
+    const result = await tools.get("tracker_history").handler({ slug: "test-project", limit: 5 });
+
+    assert.equal(result.isError, false);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.workspace, workspace);
+    assert.equal(payload.port, null);
+    assert.equal(payload.file, realpathSync(join(workspace, "trackers", "test-project.json")));
+    assert.equal(payload.registrationFile, join(workspace, "trackers", "test-project.json"));
+    assert.equal(payload.topology, "shared-workspace");
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("MCP project resources include effective target metadata", () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-target-resource-");
+  try {
+    const resources = readResource(workspace, "tracker://projects");
+    const payload = JSON.parse(resources.contents[0].text);
+    const project = payload.projects.find((item) => item.slug === "test-project");
+
+    assert.equal(project.workspace, workspace);
+    assert.equal(project.port, null);
+    assert.equal(project.file, realpathSync(join(workspace, "trackers", "test-project.json")));
+    assert.equal(project.registrationFile, join(workspace, "trackers", "test-project.json"));
+    assert.equal(project.topology, "shared-workspace");
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
@@ -81,6 +135,9 @@ test("tracker_patch direct mode returns structured expectedRev conflicts", async
     assert.equal(payload.type, "conflict");
     assert.equal(payload.expectedRev, 0);
     assert.equal(payload.currentRev, 1);
+    assert.equal(payload.file, realpathSync(join(workspace, "trackers", "test-project.json")));
+    assert.equal(payload.registrationFile, join(workspace, "trackers", "test-project.json"));
+    assert.equal(payload.topology, "shared-workspace");
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
