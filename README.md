@@ -363,6 +363,8 @@ Successful `POST /api/projects/<slug>/patch` responses are authoritative immedia
 
 Patch payloads may include top-level `expectedRev`. If it does not match the current project rev, the hub rejects the write with `409` and returns `type: "conflict"`, `expectedRev`, `currentRev`, and a retry hint.
 
+Completed-task truth is protected. Reopening a task from `complete` to `not_started` or `in_progress` is rejected unless the write includes top-level `statusRegression: { allow: true, reason: "..." }`; bulk reopenings also require `statusRegression.migration: true`. This catches stale restores and accidental mass resets before they can overwrite tracker truth.
+
 Patch payloads may also include structural operation arrays when a narrow merge is clearer than a full replacement:
 
 - `swimlaneOps`: `{op:"add"|"update"|"move"|"remove"}` with lane ids, optional `index`/`direction`, and `reassignTo` when removing a lane with tasks.
@@ -538,6 +540,8 @@ Two write modes:
 - **Mode B — HTTP patches** (fastest): `POST /api/projects/:slug/patch`; one-time `curl` approval in your CLI, then no filesystem access.
 
 Patch failures now return `error`, `type`, and `hint` so agents do not have to reverse-engineer raw schema regex output. The same hint-bearing payload is written to `.errors.json` files in file-patch mode and direct tracker-file validation failures. For oversized fields, keep `task.comment` as a short note, `task.blocker_reason` as the active blocker summary, and `meta.scratchpad` as a live status banner; move durable detail into `context.*`, `references[]`, `definition_of_done`, or `expected_changes`.
+
+MCP read tools do not treat read-safe validation issues in existing tracker data as blockers. Oversized `task.comment` / `task.blocker_reason` / `meta.scratchpad` values and invalid `reference` / `references[]` strings are returned as repeated `warning` / `trackerWarning` payloads while the tool still serves project data, so agents can keep working and see the repair instruction every time until the tracker is fixed. Structural schema failures, such as missing required task fields, still block reads.
 
 Full schema, merge semantics, field ownership, versioning, rollback, and the whole LLM-facing contract → **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 

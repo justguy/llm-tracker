@@ -121,7 +121,7 @@ function createPatchToolDefinition() {
         patch: {
           type: "object",
           description:
-            "Partial tracker patch body to merge through the hub. Optional top-level `expectedRev` rejects stale writes when it does not match the current project rev. `swimlaneOps` supports add/update/move/remove structural lane edits; `taskOps` supports move/archive/split/merge structural task edits. Structural failures may return `repair` with a safe retry shape. `task.context` is shallow-merged; set a key to `null` to delete it.",
+            "Partial tracker patch body to merge through the hub. Optional top-level `expectedRev` rejects stale writes when it does not match the current project rev. Reopening a complete task as not_started/in_progress requires top-level `statusRegression: { allow: true, reason }`; bulk reopenings also require `migration: true`. `swimlaneOps` supports add/update/move/remove structural lane edits; `taskOps` supports move/archive/split/merge structural task edits. Structural failures may return `repair` with a safe retry shape. `task.context` is shallow-merged; set a key to `null` to delete it.",
           additionalProperties: true
         }
       },

@@ -310,6 +310,114 @@ test("applyPatch: expectedRev must be a non-negative integer", async () => {
   }
 });
 
+test("applyPatch: completed tasks cannot be reopened without explicit statusRegression intent", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+    const before = readFileSync(file, "utf-8");
+    const beforeRev = store.get("test-project").rev;
+
+    const res = await store.applyPatch("test-project", {
+      tasks: { t3: { status: "not_started" } }
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 409);
+    assert.equal(res.type, "status_regression");
+    assert.match(res.message, /t3 \(complete -> not_started\)/);
+    assert.match(res.hint, /statusRegression\.allow/);
+    assert.equal(store.get("test-project").rev, beforeRev);
+    assert.equal(readFileSync(file, "utf-8"), before);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: intentional completed-task reopen requires a concrete reason", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(validProject()));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      statusRegression: {
+        allow: true,
+        reason: "Verification showed the prior completion evidence was invalid."
+      },
+      tasks: { t3: { status: "in_progress" } }
+    });
+
+    assert.equal(res.ok, true);
+    const after = JSON.parse(readFileSync(file, "utf-8"));
+    assert.equal(after.tasks.find((task) => task.id === "t3").status, "in_progress");
+    assert.equal(Object.prototype.hasOwnProperty.call(after, "statusRegression"), false);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("applyPatch: bulk completed-task reopen requires migration intent", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const p = validProject();
+    p.tasks[0].status = "complete";
+    const file = trackerPath(ws, "test-project");
+    writeFileSync(file, JSON.stringify(p));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    const res = await store.applyPatch("test-project", {
+      statusRegression: {
+        allow: true,
+        reason: "Tracker migration is intentionally reopening validated completed work."
+      },
+      tasks: {
+        t1: { status: "not_started" },
+        t3: { status: "not_started" }
+      }
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 409);
+    assert.equal(res.type, "status_regression");
+    assert.match(res.message, /bulk status regression rejected/);
+    assert.match(res.hint, /migration/);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("ingest: direct tracker-file edits cannot reopen completed tasks without statusRegression intent", () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    const p = validProject();
+    writeFileSync(file, JSON.stringify(p));
+    store.ingest(file, readFileSync(file, "utf-8"));
+
+    p.tasks.find((task) => task.id === "t3").status = "not_started";
+    writeFileSync(file, JSON.stringify(p));
+
+    const res = store.ingest(file, readFileSync(file, "utf-8"));
+
+    assert.equal(res.ok, false);
+    assert.equal(res.event, "ERROR");
+    assert.equal(res.type, "status_regression");
+    assert.match(res.hint, /statusRegression\.allow/);
+    assert.equal(store.get("test-project").data.tasks.find((task) => task.id === "t3").status, "complete");
+    const error = JSON.parse(readFileSync(errorPath(ws, "test-project"), "utf-8"));
+    assert.equal(error.type, "status_regression");
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("applyPatch: body must be a JSON object", async () => {
   const ws = setupWorkspace();
   try {

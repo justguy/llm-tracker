@@ -86,7 +86,8 @@ export function summarizeProject(entry, workspace = null) {
     pct: entry.derived?.pct ?? 0,
     counts: entry.derived?.counts || {},
     actionability: entry.derived?.actionability || {},
-    blockedCount: Object.keys(entry.derived?.blocked || {}).length
+    blockedCount: Object.keys(entry.derived?.blocked || {}).length,
+    ...(entry.warning ? { warning: entry.warning } : {})
   };
 }
 
@@ -104,6 +105,7 @@ export function projectStatusPayload(workspace, entry) {
   const target = targetMetadata(workspace, entry.slug, entry);
   return {
     workspace,
+    ...(entry.warning ? { warning: entry.warning } : {}),
     ...target,
     project: {
       slug: entry.slug,
@@ -119,7 +121,8 @@ export function projectStatusPayload(workspace, entry) {
       blocked: entry.derived?.blocked || {},
       perSwimlane: entry.derived?.perSwimlane || {},
       scratchpad: entry.data?.meta?.scratchpad || "",
-      updatedAt: entry.data?.meta?.updatedAt || null
+      updatedAt: entry.data?.meta?.updatedAt || null,
+      ...(entry.warning ? { warning: entry.warning } : {})
     }
   };
 }

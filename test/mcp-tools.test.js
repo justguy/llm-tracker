@@ -65,6 +65,68 @@ test("MCP read tools include effective target metadata", async () => {
   }
 });
 
+test("MCP read tools warn but do not block on read-safe schema validation issues", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-schema-warning-");
+  try {
+    const project = validProject();
+    project.tasks[0].comment = "x".repeat(501);
+    project.tasks[0].references = ["https://example.com/bare-url"];
+    writeFileSync(
+      join(workspace, "trackers", "test-project.json"),
+      JSON.stringify(project, null, 2)
+    );
+
+    const tools = createTools(workspace);
+    const statusResult = await tools.get("tracker_project_status").handler({ slug: "test-project" });
+    assert.equal(statusResult.isError, false);
+    const statusPayload = JSON.parse(statusResult.content[0].text);
+    assert.equal(statusPayload.warning.type, "schema");
+    assert.match(statusPayload.warning.error, /task\.comment is too long/);
+    assert.match(statusPayload.warning.error, /reference must use path:line/);
+    assert.match(statusPayload.warning.hint, /500 chars|path:line/);
+    assert.equal(statusPayload.project.total, 3);
+
+    const nextResult = await tools.get("tracker_next").handler({ slug: "test-project", limit: 1 });
+    assert.equal(nextResult.isError, false);
+    const nextPayload = JSON.parse(nextResult.content[0].text);
+    assert.equal(nextPayload.trackerWarning.type, "schema");
+    assert.equal(nextPayload.warnings[0].type, "schema");
+
+    const projectsResult = await tools.get("tracker_projects_status").handler({});
+    const projectsPayload = JSON.parse(projectsResult.content[0].text);
+    const listed = projectsPayload.projects.find((item) => item.slug === "test-project");
+    assert.equal(listed.ok, true);
+    assert.equal(listed.warning.type, "schema");
+
+    const resource = readResource(workspace, "tracker://projects/test-project/status");
+    const resourcePayload = JSON.parse(resource.contents[0].text);
+    assert.equal(resourcePayload.warning.type, "schema");
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("MCP read tools still block structural schema validation failures", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-schema-error-");
+  try {
+    const project = validProject();
+    delete project.tasks[0].title;
+    writeFileSync(
+      join(workspace, "trackers", "test-project.json"),
+      JSON.stringify(project, null, 2)
+    );
+
+    const result = await createTools(workspace)
+      .get("tracker_project_status")
+      .handler({ slug: "test-project" });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /missing required field "title"/);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("tracker_history includes effective target metadata", async () => {
   const workspace = setupWorkspace("llm-tracker-mcp-tools-target-history-");
   try {

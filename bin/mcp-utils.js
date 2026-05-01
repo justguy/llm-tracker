@@ -42,6 +42,22 @@ export function loadReadableEntry(workspace, slug) {
   return { ok: true, entry };
 }
 
+function attachEntryWarning(payload, entry) {
+  if (!entry?.warning || !payload || typeof payload !== "object") return payload;
+  const existingWarnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  const warnings = [
+    entry.warning,
+    ...(payload.warning ? [payload.warning] : []),
+    ...existingWarnings
+  ];
+  return {
+    ...payload,
+    warning: payload.warning || entry.warning,
+    trackerWarning: entry.warning,
+    warnings
+  };
+}
+
 export async function readToolPayload(getter, workspace, slug, extra = {}) {
   const loaded = loadReadableEntry(workspace, slug);
   if (!loaded.ok) return loaded.result;
@@ -61,7 +77,7 @@ export async function readToolPayload(getter, workspace, slug, extra = {}) {
   }
 
   return makeJsonResult({
-    ...(payload.payload || payload),
+    ...attachEntryWarning(payload.payload || payload, loaded.entry),
     ...targetMetadata(workspace, slug, loaded.entry)
   });
 }

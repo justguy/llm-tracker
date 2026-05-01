@@ -29,6 +29,10 @@ export function inferTrackerErrorHint(message = "") {
     return "Send a JSON object with `tasks`, `meta`, `swimlaneOps`, `taskOps`, or `expectedRev`. Do not send arrays, strings, numbers, or null as the patch body.";
   }
 
+  if (message.includes("status regression rejected") || message.includes("bulk status regression rejected")) {
+    return "Do not mass-restore or stale-write tracker truth. Reopening completed tasks requires `statusRegression: { allow: true, reason: \"...\" }`; bulk reopenings also require `migration: true`.";
+  }
+
   if (message.includes("unsupported swimlane op")) {
     return "Use one of the supported swimlane operations: `add`, `update`, `move`, or `remove`.";
   }

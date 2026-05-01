@@ -843,6 +843,22 @@ To protect against stale writes, include a top-level `expectedRev` in the patch 
 
 If `expectedRev` does not match the current project rev, the hub rejects the write with `409` and returns `{error, type: "conflict", expectedRev, currentRev, hint}`. Refresh the project, reapply your intended change to the current state, and retry with the new rev.
 
+Completed-task truth is protected. A patch or direct linked-tracker ingest that changes a task from `complete` back to `not_started` or `in_progress` is rejected unless the write includes an explicit top-level intent:
+
+```json
+{
+  "statusRegression": {
+    "allow": true,
+    "reason": "Verification showed the prior completion evidence was invalid."
+  },
+  "tasks": {
+    "t-001": { "status": "in_progress" }
+  }
+}
+```
+
+If one write reopens multiple completed tasks, it must also include `"migration": true` inside `statusRegression`. Use this only for deliberate tracker migrations; stale restores, `git checkout`, `git restore`, and merge cleanup are not valid reasons to regress tracker truth.
+
 ### Merge semantics (both modes)
 
 - `tasks` patch keyed by id → each listed task is field-merged with existing (shallow merge on `context` and `placement`; other fields replaced).
@@ -1046,6 +1062,8 @@ Error shape:
 
 `type` / `kind` is `parse` (malformed JSON) or `schema` (valid JSON, fails §4 or §4.5). `message` is kept for compatibility; prefer `error` + `hint` in new consumers. Prior valid state remains live. If a limit guard fires, do not cram the same text back into the rejected field: keep `task.comment` short, keep `task.blocker_reason` focused on the active blocker, keep `meta.scratchpad` as a live status banner, and move durable detail into `context.*`, `references[]`, `definition_of_done`, or `expected_changes`.
 
+MCP read tools do not treat read-safe validation issues in existing tracker data as blockers. Oversized `task.comment` / `task.blocker_reason` / `meta.scratchpad` values and invalid `reference` / `references[]` strings are returned as repeated `warning` / `trackerWarning` payloads while the tool still serves project data, so keep using MCP and fix the tracker. Structural schema failures, such as missing required task fields, still block reads.
+
 ---
 
 ## 13. CLI reference (if you can run shell commands)
@@ -1149,6 +1167,7 @@ That installs a small `lt` shell function in the current shell, so the human can
 - In shared-daemon mode, never drop patch files into a repo-local `.llm-tracker/` folder. Use the shared workspace or HTTP.
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.
+- Never reopen a `complete` task as `not_started` or `in_progress` unless the human explicitly asks or verification proves the prior completion false; the hub requires `statusRegression.allow`, a concrete `reason`, and `statusRegression.migration` for bulk reopenings.
 - Never invent a `priorityId` or `swimlaneId` not declared in `meta`.
 - Never append a brand-new patch task as already `complete` or `deferred`; patch-mode task creation is for open work.
 - Never add a standalone docs-only/workflow task and then immediately retire it if the work already belongs under an existing owning row.

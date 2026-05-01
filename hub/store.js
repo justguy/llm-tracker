@@ -249,6 +249,71 @@ function validateExpectedRev(patch, currentRev) {
   return { ok: true };
 }
 
+const REOPENED_FROM_COMPLETE_STATUSES = new Set(["not_started", "in_progress"]);
+
+function statusRegressionIntent(source) {
+  const intent = source && typeof source === "object" ? source.statusRegression : null;
+  if (!intent || typeof intent !== "object" || Array.isArray(intent)) {
+    return { allow: false, migration: false, reason: "" };
+  }
+  return {
+    allow: intent.allow === true,
+    migration: intent.migration === true,
+    reason: typeof intent.reason === "string" ? intent.reason.trim() : ""
+  };
+}
+
+function statusRegressionFailure(regressions, source) {
+  const intent = statusRegressionIntent(source);
+  const ids = regressions.map((item) => `${item.id} (${item.from} -> ${item.to})`).join(", ");
+  const reasonOk = intent.reason.length >= 10;
+
+  if (!intent.allow || !reasonOk) {
+    return {
+      ok: false,
+      status: 409,
+      type: "status_regression",
+      message:
+        `status regression rejected for completed task${regressions.length === 1 ? "" : "s"}: ${ids}. ` +
+        "Reopening completed tracker work requires `statusRegression: { allow: true, reason: \"...\" }` with a concrete reason.",
+      hint:
+        "Do not mass-restore or stale-write tracker truth. Verify the task evidence first; if reopening is intentional, retry with `statusRegression.allow: true` and a reason. For bulk regressions, also set `statusRegression.migration: true`."
+    };
+  }
+
+  if (regressions.length > 1 && !intent.migration) {
+    return {
+      ok: false,
+      status: 409,
+      type: "status_regression",
+      message:
+        `bulk status regression rejected for completed tasks: ${ids}. ` +
+        "Bulk reopening requires `statusRegression.migration: true` in addition to an allow flag and reason.",
+      hint:
+        "Bulk complete-to-open changes are treated as migrations because they can erase tracker truth. Verify the affected tasks, then retry only if the migration is intentional."
+    };
+  }
+
+  return null;
+}
+
+function validateStatusRegressions(existing, next, source) {
+  if (!existing?.tasks || !next?.tasks) return { ok: true };
+  const existingById = new Map(existing.tasks.map((task) => [task.id, task]));
+  const regressions = [];
+
+  for (const task of next.tasks) {
+    const prev = existingById.get(task.id);
+    if (!prev) continue;
+    if (prev.status !== "complete") continue;
+    if (!REOPENED_FROM_COMPLETE_STATUSES.has(task.status)) continue;
+    regressions.push({ id: task.id, from: prev.status, to: task.status });
+  }
+
+  if (regressions.length === 0) return { ok: true };
+  return statusRegressionFailure(regressions, source) || { ok: true };
+}
+
 function nonEmptyStrings(values) {
   return Array.isArray(values) ? values.filter((value) => typeof value === "string" && value) : [];
 }
@@ -726,6 +791,16 @@ export class Store {
         notes.warnings.push(...normalizationNotes.warnings);
       }
 
+      const regressionGuard = validateStatusRegressions(prevData, merged, loadedIncoming.data);
+      if (!regressionGuard.ok) {
+        return this._recordError(slug, filePath, {
+          kind: regressionGuard.type || "status_regression",
+          type: regressionGuard.type || "status_regression",
+          message: regressionGuard.message,
+          hint: regressionGuard.hint
+        });
+      }
+
       const { ok, errors } = validateProject(merged);
       if (!ok) {
         return this._recordError(slug, filePath, { kind: "schema", message: errors.join("; ") });
@@ -1169,6 +1244,15 @@ export class Store {
       if (normalizationNotes.warnings.length > 0) {
         notes.warnings.push(...normalizationNotes.warnings);
       }
+
+      const regressionGuard = validateStatusRegressions(existing, merged, patch);
+      if (!regressionGuard.ok) {
+        return {
+          ...regressionGuard,
+          notes
+        };
+      }
+
       const { ok, errors } = validateProject(merged);
       if (!ok) {
         const message = errors.join("; ");

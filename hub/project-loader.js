@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { deriveProject } from "./progress.js";
+import { inferTrackerErrorHint } from "./error-payload.js";
 import { loadProjectWithRuntimeOverlay } from "./runtime-overlay.js";
 import { normalizeProjectStatuses } from "./status-vocabulary.js";
 import { validateProject } from "./validator.js";
@@ -21,6 +22,29 @@ export function trackerFilePath(workspace, slug) {
   return join(workspace, "trackers", `${slug}.json`);
 }
 
+const READ_SAFE_SCHEMA_ERROR_PATTERNS = [
+  /task\.comment is too long/,
+  /task\.blocker_reason is too long/,
+  /meta\.scratchpad is too long/,
+  /reference must use path:line or path:line-line/
+];
+
+function isReadSafeSchemaError(error) {
+  return READ_SAFE_SCHEMA_ERROR_PATTERNS.some((pattern) => pattern.test(error));
+}
+
+function schemaWarning(errors) {
+  const message = errors.join("; ");
+  return {
+    type: "schema",
+    error: message,
+    message,
+    hint:
+      inferTrackerErrorHint(message) ||
+      "Existing tracker data has schema validation issues. Read tools are showing the current state, but fix the reported fields with tracker_patch or a valid tracker-file repair."
+  };
+}
+
 function loadProjectFile(workspace, path, slug) {
   if (!existsSync(path)) {
     return { ok: false, status: 404, message: "project not found", slug, path };
@@ -38,14 +62,19 @@ function loadProjectFile(workspace, path, slug) {
       baseProject: normalized
     });
     const validation = validateProject(loaded.data);
+    let warning = null;
     if (!validation.ok) {
-      return {
-        ok: false,
-        status: 400,
-        message: validation.errors.join("; "),
-        slug,
-        path
-      };
+      if (!validation.errors.every(isReadSafeSchemaError)) {
+        return {
+          ok: false,
+          status: 400,
+          message: validation.errors.join("; "),
+          slug,
+          path
+        };
+      }
+      warning = schemaWarning(validation.errors);
+      notes.warnings.push(warning.message);
     }
 
     return {
@@ -56,7 +85,8 @@ function loadProjectFile(workspace, path, slug) {
       base: loaded.base,
       derived: deriveProject(loaded.data),
       rev: loaded.data?.meta?.rev ?? null,
-      notes
+      notes,
+      warning
     };
   } catch (error) {
     return {
