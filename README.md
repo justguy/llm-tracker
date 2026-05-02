@@ -363,7 +363,7 @@ Successful `POST /api/projects/<slug>/patch` responses are authoritative immedia
 
 Patch payloads may include top-level `expectedRev`. If it does not match the current project rev, the hub rejects the write with `409` and returns `type: "conflict"`, `expectedRev`, `currentRev`, and a retry hint.
 
-Completed-task truth is protected. Reopening a task from `complete` to `not_started` or `in_progress` is rejected unless the write includes top-level `statusRegression: { allow: true, reason: "..." }`; bulk reopenings also require `statusRegression.migration: true`. This catches stale restores and accidental mass resets before they can overwrite tracker truth.
+Completed-task truth is protected on hub-authored writes. Reopening a task from `complete` to `not_started` or `in_progress` through `tracker_patch` / HTTP patch is rejected unless the write includes top-level `statusRegression: { allow: true, reason: "..." }`; bulk reopenings also require `statusRegression.migration: true`. Direct repo-local tracker-file ingest still accepts the versioned file as git truth and records a warning, so branch checkout and merge can intentionally move tracker state.
 
 Patch payloads may also include structural operation arrays when a narrow merge is clearer than a full replacement:
 

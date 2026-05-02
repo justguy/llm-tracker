@@ -843,7 +843,7 @@ To protect against stale writes, include a top-level `expectedRev` in the patch 
 
 If `expectedRev` does not match the current project rev, the hub rejects the write with `409` and returns `{error, type: "conflict", expectedRev, currentRev, hint}`. Refresh the project, reapply your intended change to the current state, and retry with the new rev.
 
-Completed-task truth is protected. A patch or direct linked-tracker ingest that changes a task from `complete` back to `not_started` or `in_progress` is rejected unless the write includes an explicit top-level intent:
+Completed-task truth is protected on hub-authored writes. A `tracker_patch` / HTTP patch that changes a task from `complete` back to `not_started` or `in_progress` is rejected unless the write includes an explicit top-level intent:
 
 ```json
 {
@@ -857,7 +857,7 @@ Completed-task truth is protected. A patch or direct linked-tracker ingest that 
 }
 ```
 
-If one write reopens multiple completed tasks, it must also include `"migration": true` inside `statusRegression`. Use this only for deliberate tracker migrations; stale restores, `git checkout`, `git restore`, and merge cleanup are not valid reasons to regress tracker truth.
+If one write reopens multiple completed tasks, it must also include `"migration": true` inside `statusRegression`. Use this only for deliberate tracker migrations; stale patch payloads and merge cleanup are not valid reasons to regress tracker truth. Direct repo-local tracker-file ingest still accepts the versioned file as git truth and records a warning, so branch checkout and merge can intentionally move tracker state.
 
 ### Merge semantics (both modes)
 
@@ -1167,7 +1167,7 @@ That installs a small `lt` shell function in the current shell, so the human can
 - In shared-daemon mode, never drop patch files into a repo-local `.llm-tracker/` folder. Use the shared workspace or HTTP.
 - Never write to `trackers/<slug>.json` after registration — use Mode A or Mode B patches.
 - Never invent a `status` value outside the four in §5.
-- Never reopen a `complete` task as `not_started` or `in_progress` unless the human explicitly asks or verification proves the prior completion false; the hub requires `statusRegression.allow`, a concrete `reason`, and `statusRegression.migration` for bulk reopenings.
+- Never reopen a `complete` task as `not_started` or `in_progress` through hub-authored writes unless the human explicitly asks or verification proves the prior completion false; `tracker_patch` / HTTP patch requires `statusRegression.allow`, a concrete `reason`, and `statusRegression.migration` for bulk reopenings. Direct repo-local tracker-file ingest follows git branch truth and warns instead of rejecting.
 - Never invent a `priorityId` or `swimlaneId` not declared in `meta`.
 - Never append a brand-new patch task as already `complete` or `deferred`; patch-mode task creation is for open work.
 - Never add a standalone docs-only/workflow task and then immediately retire it if the work already belongs under an existing owning row.

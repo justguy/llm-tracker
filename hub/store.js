@@ -297,8 +297,8 @@ function statusRegressionFailure(regressions, source) {
   return null;
 }
 
-function validateStatusRegressions(existing, next, source) {
-  if (!existing?.tasks || !next?.tasks) return { ok: true };
+function collectStatusRegressions(existing, next) {
+  if (!existing?.tasks || !next?.tasks) return [];
   const existingById = new Map(existing.tasks.map((task) => [task.id, task]));
   const regressions = [];
 
@@ -310,6 +310,11 @@ function validateStatusRegressions(existing, next, source) {
     regressions.push({ id: task.id, from: prev.status, to: task.status });
   }
 
+  return regressions;
+}
+
+function validateStatusRegressions(existing, next, source) {
+  const regressions = collectStatusRegressions(existing, next);
   if (regressions.length === 0) return { ok: true };
   return statusRegressionFailure(regressions, source) || { ok: true };
 }
@@ -791,14 +796,14 @@ export class Store {
         notes.warnings.push(...normalizationNotes.warnings);
       }
 
-      const regressionGuard = validateStatusRegressions(prevData, merged, loadedIncoming.data);
-      if (!regressionGuard.ok) {
-        return this._recordError(slug, filePath, {
-          kind: regressionGuard.type || "status_regression",
-          type: regressionGuard.type || "status_regression",
-          message: regressionGuard.message,
-          hint: regressionGuard.hint
-        });
+      const directStatusRegressions = collectStatusRegressions(prevData, merged);
+      if (directStatusRegressions.length > 0) {
+        const ids = directStatusRegressions
+          .map((item) => `${item.id} (${item.from} -> ${item.to})`)
+          .join(", ");
+        notes.warnings.push(
+          `direct tracker-file ingest accepted completed-task status regression from versioned file truth: ${ids}`
+        );
       }
 
       const { ok, errors } = validateProject(merged);

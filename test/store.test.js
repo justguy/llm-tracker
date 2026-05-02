@@ -392,7 +392,7 @@ test("applyPatch: bulk completed-task reopen requires migration intent", async (
   }
 });
 
-test("ingest: direct tracker-file edits cannot reopen completed tasks without statusRegression intent", () => {
+test("ingest: direct tracker-file edits can reopen completed tasks as versioned file truth with warning", () => {
   const ws = setupWorkspace();
   try {
     const store = new Store(ws);
@@ -400,19 +400,23 @@ test("ingest: direct tracker-file edits cannot reopen completed tasks without st
     const p = validProject();
     writeFileSync(file, JSON.stringify(p));
     store.ingest(file, readFileSync(file, "utf-8"));
+    const beforeRev = store.get("test-project").rev;
 
     p.tasks.find((task) => task.id === "t3").status = "not_started";
     writeFileSync(file, JSON.stringify(p));
 
     const res = store.ingest(file, readFileSync(file, "utf-8"));
 
-    assert.equal(res.ok, false);
-    assert.equal(res.event, "ERROR");
-    assert.equal(res.type, "status_regression");
-    assert.match(res.hint, /statusRegression\.allow/);
-    assert.equal(store.get("test-project").data.tasks.find((task) => task.id === "t3").status, "complete");
-    const error = JSON.parse(readFileSync(errorPath(ws, "test-project"), "utf-8"));
-    assert.equal(error.type, "status_regression");
+    assert.equal(res.ok, true);
+    assert.equal(res.event, "UPDATE");
+    assert.equal(store.get("test-project").rev, beforeRev + 1);
+    assert.equal(store.get("test-project").data.tasks.find((task) => task.id === "t3").status, "not_started");
+    assert.ok(
+      res.notes.warnings.some((warning) =>
+        warning.includes("direct tracker-file ingest accepted completed-task status regression")
+      )
+    );
+    assert.equal(existsSync(errorPath(ws, "test-project")), false);
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }

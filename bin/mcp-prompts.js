@@ -139,7 +139,7 @@ export function getPrompt(workspace, name, args = {}) {
           "2. Read resource `tracker://workspace/runtime` for daemon state, patch directory, and MCP write rules.",
           `3. MCP read tools do not require the daemon. MCP write tools ${WRITE_TOOL_NAMES.map((tool) => `\`${tool}\``).join(", ")} do require the hub or daemon.`,
           `4. If the hub is unavailable, file-mode patches go in \`${join(workspace, "patches")}\` as \`${patchExample}\`. Rejections create a sibling \`.errors.json\` file.`,
-          "5. Structural board edits belong in `swimlaneOps` and `taskOps`; stale writes can use `expectedRev`, and structural failures may return `repair` with a retry shape. Reopening `complete` tasks requires explicit `statusRegression` intent.",
+          "5. Structural board edits belong in `swimlaneOps` and `taskOps`; stale writes can use `expectedRev`, and structural failures may return `repair` with a retry shape. Reopening `complete` tasks through tracker_patch requires explicit `statusRegression` intent.",
           "6. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_start` for an explicit task start or `tracker_pick` for top-task claim, then `tracker_patch`, and finally `tracker_verify`."
         ].join("\n")
       );
@@ -219,7 +219,7 @@ export function getPrompt(workspace, name, args = {}) {
           `Use a filename like \`${patchExample}\`.`,
           "Use `swimlaneOps` for lane add/update/move/remove and `taskOps` for task move/archive/split/merge instead of full tracker rewrites.",
           "Include top-level `expectedRev` when guarding against stale context; if structural validation returns `repair`, retry with the provided operation shape.",
-          "Never reopen a `complete` task as `not_started` or `in_progress` unless verification proves completion was false; use top-level `statusRegression: { allow: true, reason }`, plus `migration: true` for bulk reopenings.",
+          "Never reopen a `complete` task as `not_started` or `in_progress` through patch writes unless verification proves completion was false; use top-level `statusRegression: { allow: true, reason }`, plus `migration: true` for bulk reopenings.",
           "Patch mode is the fallback for when the hub is unavailable; MCP write tools remain hub-backed.",
           "If a patch is rejected, inspect the sibling `.errors.json` file for the structured validation error.",
           "Once the hub is reachable again, prefer `tracker_patch` or HTTP writes so locking, revisioning, and broadcasts stay authoritative."
