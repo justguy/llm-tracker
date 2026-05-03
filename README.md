@@ -541,7 +541,7 @@ Two write modes:
 
 Patch failures now return `error`, `type`, and `hint` so agents do not have to reverse-engineer raw schema regex output. The same hint-bearing payload is written to `.errors.json` files in file-patch mode and direct tracker-file validation failures. For oversized fields, keep `task.comment` as a short note, `task.blocker_reason` as the active blocker summary, and `meta.scratchpad` as a live status banner; move durable detail into `context.*`, `references[]`, `definition_of_done`, or `expected_changes`.
 
-MCP read tools do not treat read-safe validation issues in existing tracker data as blockers. Oversized `task.comment` / `task.blocker_reason` / `meta.scratchpad` values and invalid `reference` / `references[]` strings are returned as repeated `warning` / `trackerWarning` payloads while the tool still serves project data, so agents can keep working and see the repair instruction every time until the tracker is fixed. Structural schema failures, such as missing required task fields, still block reads.
+MCP read tools and direct `tracker_patch` repair do not treat read-safe validation issues in existing tracker data as blockers. Oversized `task.comment` / `task.blocker_reason` / `meta.scratchpad` values and invalid `reference` / `references[]` strings are returned as repeated `warning` / `trackerWarning` payloads while the tool still serves project data and accepts direct patches, so agents can keep working and see the repair instruction every time until the tracker is fixed. Structural schema failures, such as missing required task fields, still block reads and writes.
 
 Full schema, merge semantics, field ownership, versioning, rollback, and the whole LLM-facing contract → **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 

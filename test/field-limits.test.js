@@ -305,7 +305,7 @@ test("stale expectedRev in file patch writes structured conflict errors", async 
   }
 });
 
-test("reload surfaces direct-file schema hints for oversized task comments", async () => {
+test("reload surfaces direct-file schema warnings for oversized task comments", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();
   const trackerFile = join(workspace, "trackers", "test-project.json");
@@ -322,18 +322,17 @@ test("reload surfaces direct-file schema hints for oversized task comments", asy
     const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/reload`, {
       method: "POST"
     });
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.type, "schema");
-    assert.match(body.error, /task\.comment is too long/);
-    assert.match(body.hint, /context\.notes/);
+    assert.equal(body.ok, true);
+    assert.match(body.notes.warnings[0], /task\.comment is too long/);
 
     const list = await fetch(`http://127.0.0.1:${port}/api/projects`);
     assert.equal(list.status, 200);
     const payload = await list.json();
     const project = payload.projects.find((item) => item.slug === "test-project");
-    assert.equal(project.error.type, "schema");
-    assert.match(project.error.hint, /task\.comment/);
+    assert.equal(project.error, null);
+    assert.match(project.warnings[0], /task\.comment/);
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });
@@ -433,7 +432,7 @@ test("JSON body limit is enforced with machine-readable response", async () => {
   }
 });
 
-test("oversized blocker_reason is rejected in store validation so file patch mode cannot bypass it", async () => {
+test("oversized blocker_reason in store validation warns so direct repair is never blocked", async () => {
   const workspace = setupWorkspace();
   try {
     const store = new Store(workspace);
@@ -446,9 +445,8 @@ test("oversized blocker_reason is rejected in store validation so file patch mod
         t1: { blocker_reason: "b".repeat(2100) }
       }
     });
-    assert.equal(res.ok, false);
-    assert.equal(res.status, 400);
-    assert.match(res.message, /blocker_reason/);
+    assert.equal(res.ok, true);
+    assert.match(res.notes.warnings[0], /blocker_reason/);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

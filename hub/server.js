@@ -512,6 +512,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       rev: store.get(req.params.slug)?.rev ?? null,
       event: result.event,
       noop: result.noop === true,
+      notes: result.notes || store.get(req.params.slug)?.notes || null,
       ...targetFor(req.params.slug)
     });
   });
@@ -1065,6 +1066,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
           rev: entry?.rev ?? null,
           event: result.event,
           noop: result.noop === true,
+          notes: result.notes || entry?.notes || null,
           ...targetFor(result.slug, entry)
         });
       } else {

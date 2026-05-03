@@ -12,6 +12,7 @@ import {
 import { isAbsolute } from "node:path";
 import { basename, join } from "node:path";
 import { buildTrackerErrorBody, inferTrackerErrorHint } from "./error-payload.js";
+import { isReadSafeSchemaError, readSafeSchemaWarning } from "./read-safe-validation.js";
 import { validateProject } from "./validator.js";
 import { deriveProject } from "./progress.js";
 import { mergeProject, stableEq } from "./merge.js";
@@ -711,7 +712,8 @@ export class Store {
         counts: p.derived?.counts || {},
         total: p.derived?.total ?? 0,
         rev: p.rev,
-        error: p.error || null
+        error: p.error || null,
+        warnings: p.notes?.warnings || []
       });
     }
     return out.sort((a, b) => a.slug.localeCompare(b.slug));
@@ -756,8 +758,18 @@ export class Store {
           if (snap) {
             if (stableEq(normalizeForCompare(snap), normalizeForCompare(incoming))) {
               const { ok: vOk, errors: vErr } = validateProject(incoming);
+              const notes = {
+                ignored: [],
+                warnings: [...normalizationNotes.warnings],
+                appended: [],
+                updated: []
+              };
               if (!vOk) {
-                return this._recordError(slug, filePath, { kind: "schema", message: vErr.join("; ") });
+                if (!vErr.every(isReadSafeSchemaError)) {
+                  return this._recordError(slug, filePath, { kind: "schema", message: vErr.join("; ") });
+                }
+                const warning = readSafeSchemaWarning(vErr);
+                notes.warnings.push(warning.message);
               }
               const entry = this._entry(
                 slug,
@@ -765,18 +777,13 @@ export class Store {
                 incoming,
                 incomingBase,
                 incomingRev,
-                {
-                  ignored: [],
-                  warnings: [...normalizationNotes.warnings],
-                  appended: [],
-                  updated: []
-                }
+                notes
               );
               entry.overlayEnabled = overlayEnabled;
               this.projects.set(slug, entry);
               if (legacyOverlayPresent) clearRuntimeOverlay(this.workspace, slug);
               clearErrorFile(this.workspace, slug);
-              return { ok: true, slug, event: "UPDATE", project: entry, resumed: true };
+              return { ok: true, slug, event: "UPDATE", project: entry, resumed: true, notes };
             }
             // Snapshot differs from incoming — treat snapshot as the prev baseline.
             prev = {
@@ -808,7 +815,11 @@ export class Store {
 
       const { ok, errors } = validateProject(merged);
       if (!ok) {
-        return this._recordError(slug, filePath, { kind: "schema", message: errors.join("; ") });
+        if (!errors.every(isReadSafeSchemaError)) {
+          return this._recordError(slug, filePath, { kind: "schema", message: errors.join("; ") });
+        }
+        const warning = readSafeSchemaWarning(errors);
+        notes.warnings.push(warning.message);
       }
 
       const delta = computeDelta(prevData, merged);
@@ -1261,14 +1272,18 @@ export class Store {
       const { ok, errors } = validateProject(merged);
       if (!ok) {
         const message = errors.join("; ");
-        return {
-          ok: false,
-          status: 400,
-          type: "schema",
-          message,
-          hint: inferTrackerErrorHint(message),
-          notes
-        };
+        if (!errors.every(isReadSafeSchemaError)) {
+          return {
+            ok: false,
+            status: 400,
+            type: "schema",
+            message,
+            hint: inferTrackerErrorHint(message),
+            notes
+          };
+        }
+        const warning = readSafeSchemaWarning(errors);
+        notes.warnings.push(warning.message);
       }
 
       const delta = computeDelta(existing, merged);

@@ -48,7 +48,7 @@ test("ingest invalid JSON writes error file", () => {
   }
 });
 
-test("ingest schema error for overlong direct-file task comment gives an actionable hint", () => {
+test("ingest read-safe schema error for overlong task comment loads with a warning", () => {
   const ws = setupWorkspace();
   try {
     const store = new Store(ws);
@@ -59,23 +59,20 @@ test("ingest schema error for overlong direct-file task comment gives an actiona
 
     const res = store.ingest(file, readFileSync(file, "utf-8"));
 
-    assert.equal(res.ok, false);
-    assert.equal(res.event, "ERROR");
+    assert.equal(res.ok, true);
+    assert.equal(res.event, "UPDATE");
     const entry = store.get("test-project");
-    assert.equal(entry.error.kind, "schema");
-    assert.match(entry.error.message, /task\.comment is too long/);
-    assert.match(entry.error.hint, /500 chars/);
-    assert.match(entry.error.hint, /context\.notes/);
-    const error = JSON.parse(readFileSync(errorPath(ws, "test-project"), "utf-8"));
-    assert.equal(error.type, "schema");
-    assert.match(error.error, /task\.comment is too long/);
-    assert.match(error.hint, /references\[\]/);
+    assert.equal(entry.error, null);
+    assert.equal(entry.data.tasks[0].comment.length, 501);
+    assert.match(entry.notes.warnings[0], /task\.comment is too long/);
+    assert.match(res.notes.warnings[0], /task\.comment is too long/);
+    assert.equal(existsSync(errorPath(ws, "test-project")), false);
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
 });
 
-test("list includes invalid cold-start projects with schema hints", () => {
+test("list includes read-safe schema warnings for cold-start projects", () => {
   const ws = setupWorkspace();
   try {
     const store = new Store(ws);
@@ -85,13 +82,13 @@ test("list includes invalid cold-start projects with schema hints", () => {
     writeFileSync(file, JSON.stringify(p));
 
     const res = store.ingest(file, readFileSync(file, "utf-8"));
-    assert.equal(res.ok, false);
+    assert.equal(res.ok, true);
 
     const [listed] = store.list();
     assert.equal(listed.slug, "test-project");
-    assert.equal(listed.name, "test-project");
-    assert.equal(listed.error.type, "schema");
-    assert.match(listed.error.hint, /task\.comment/);
+    assert.equal(listed.name, "Test Project");
+    assert.equal(listed.error, null);
+    assert.match(listed.warnings[0], /task\.comment/);
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }

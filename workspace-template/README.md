@@ -1062,7 +1062,7 @@ Error shape:
 
 `type` / `kind` is `parse` (malformed JSON) or `schema` (valid JSON, fails §4 or §4.5). `message` is kept for compatibility; prefer `error` + `hint` in new consumers. Prior valid state remains live. If a limit guard fires, do not cram the same text back into the rejected field: keep `task.comment` short, keep `task.blocker_reason` focused on the active blocker, keep `meta.scratchpad` as a live status banner, and move durable detail into `context.*`, `references[]`, `definition_of_done`, or `expected_changes`.
 
-MCP read tools do not treat read-safe validation issues in existing tracker data as blockers. Oversized `task.comment` / `task.blocker_reason` / `meta.scratchpad` values and invalid `reference` / `references[]` strings are returned as repeated `warning` / `trackerWarning` payloads while the tool still serves project data, so keep using MCP and fix the tracker. Structural schema failures, such as missing required task fields, still block reads.
+MCP read tools and direct `tracker_patch` repair do not treat read-safe validation issues in existing tracker data as blockers. Oversized `task.comment` / `task.blocker_reason` / `meta.scratchpad` values and invalid `reference` / `references[]` strings are returned as repeated `warning` / `trackerWarning` payloads while the tool still serves project data and accepts direct patches, so keep using MCP and fix the tracker. Structural schema failures, such as missing required task fields, still block reads and writes.
 
 ---
 

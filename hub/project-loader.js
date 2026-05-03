@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { deriveProject } from "./progress.js";
-import { inferTrackerErrorHint } from "./error-payload.js";
+import { isReadSafeSchemaError, readSafeSchemaWarning } from "./read-safe-validation.js";
 import { loadProjectWithRuntimeOverlay } from "./runtime-overlay.js";
 import { normalizeProjectStatuses } from "./status-vocabulary.js";
 import { validateProject } from "./validator.js";
@@ -20,29 +20,6 @@ export function readWorkspaceHelp(workspace) {
 
 export function trackerFilePath(workspace, slug) {
   return join(workspace, "trackers", `${slug}.json`);
-}
-
-const READ_SAFE_SCHEMA_ERROR_PATTERNS = [
-  /task\.comment is too long/,
-  /task\.blocker_reason is too long/,
-  /meta\.scratchpad is too long/,
-  /reference must use path:line or path:line-line/
-];
-
-function isReadSafeSchemaError(error) {
-  return READ_SAFE_SCHEMA_ERROR_PATTERNS.some((pattern) => pattern.test(error));
-}
-
-function schemaWarning(errors) {
-  const message = errors.join("; ");
-  return {
-    type: "schema",
-    error: message,
-    message,
-    hint:
-      inferTrackerErrorHint(message) ||
-      "Existing tracker data has schema validation issues. Read tools are showing the current state, but fix the reported fields with tracker_patch or a valid tracker-file repair."
-  };
 }
 
 function loadProjectFile(workspace, path, slug) {
@@ -73,7 +50,7 @@ function loadProjectFile(workspace, path, slug) {
           path
         };
       }
-      warning = schemaWarning(validation.errors);
+      warning = readSafeSchemaWarning(validation.errors);
       notes.warnings.push(warning.message);
     }
 

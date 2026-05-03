@@ -35,6 +35,7 @@ async function runDirectPatch({ workspace, slug, patch }) {
       { isError: true }
     );
   }
+  const loadWarnings = loaded?.notes?.warnings || [];
 
   const result = await store.applyPatch(slug, patch);
   if (!result.ok) {
@@ -62,7 +63,10 @@ async function runDirectPatch({ workspace, slug, patch }) {
     ...targetMetadata(workspace, slug, entry),
     workspace,
     mode: "direct",
-    notes: result.notes,
+    notes: {
+      ...result.notes,
+      warnings: [...loadWarnings, ...(result.notes?.warnings || [])]
+    },
     noopReason: result.noopReason || null,
     noop: result.noop === true
   });

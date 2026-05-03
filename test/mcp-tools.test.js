@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTools } from "../bin/mcp-tools.js";
@@ -224,6 +224,50 @@ test("tracker_patch direct mode returns structured expectedRev conflicts", async
     assert.equal(payload.file, realpathSync(join(workspace, "trackers", "test-project.json")));
     assert.equal(payload.registrationFile, join(workspace, "trackers", "test-project.json"));
     assert.equal(payload.topology, "shared-workspace");
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_patch direct mode warns instead of blocking on read-safe schema issues", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-direct-schema-warning-");
+  try {
+    const project = validProject();
+    project.tasks[0].comment = "x".repeat(501);
+    writeFileSync(
+      join(workspace, "trackers", "test-project.json"),
+      JSON.stringify(project, null, 2)
+    );
+
+    const tool = createTools(workspace).get("tracker_patch");
+    const unrelated = await tool.handler({
+      slug: "test-project",
+      mode: "direct",
+      patch: {
+        tasks: { t2: { context: { notes: "Unrelated update while t1 still needs cleanup." } } }
+      }
+    });
+
+    assert.equal(unrelated.isError, false);
+    const unrelatedPayload = JSON.parse(unrelated.content[0].text);
+    assert.match(unrelatedPayload.notes.warnings[0], /task\.comment is too long/);
+
+    const repaired = await tool.handler({
+      slug: "test-project",
+      mode: "direct",
+      patch: {
+        tasks: { t1: { comment: "Short decision note." } }
+      }
+    });
+
+    assert.equal(repaired.isError, false);
+    const repairedPayload = JSON.parse(repaired.content[0].text);
+    assert.match(repairedPayload.notes.warnings[0], /task\.comment is too long/);
+
+    const persisted = JSON.parse(
+      readFileSync(join(workspace, "trackers", "test-project.json"), "utf-8")
+    );
+    assert.equal(persisted.tasks.find((task) => task.id === "t1").comment, "Short decision note.");
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
