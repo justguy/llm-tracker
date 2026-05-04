@@ -164,7 +164,7 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - for linked trackers, task state, assignee, blocker notes, scratchpad, timestamps, and rev all write through to the repo-visible JSON so branch checkouts and rollbacks carry tracker state with code
 - legacy linked-tracker overlays in `.runtime/overlays/<slug>.json` are not project truth and are cleared on ingest/write
 - durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
-- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
+- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 **Landing gate.** For linked repo-local trackers, patch the tracker **before** you commit or push the matching code, and include the tracker JSON diff in the same commit. Patching after a commit/push leaves the working tree dirty; patching after a squash-merge dirties `main`. Because the repo JSON is the only project truth, status notes and assignment changes are branch state too. See the agent contract at `/help` for the full rule.
 
@@ -367,7 +367,7 @@ Completed-task truth is protected on hub-authored writes. Reopening a task from 
 
 Patch payloads may also include structural operation arrays when a narrow merge is clearer than a full replacement:
 
-- `swimlaneOps`: `{op:"add"|"update"|"move"|"remove"}` with lane ids, optional `index`/`direction`, and `reassignTo` when removing a lane with tasks.
+- `swimlaneOps`: `{op:"add"|"update"|"move"|"remove"}` with lane ids, optional `index`/`direction`, and `reassignTo` when removing a lane with tasks. MCP clients can use `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, and `tracker_delete_swimlane` instead of hand-writing this shape.
 - `taskOps`: `{op:"move"|"archive"|"split"|"merge"}` for card placement, deferring folded work, creating an open follow-up after a source task, or recording a source task as merged into a target.
 
 Structural failures return the same `{error, type, hint}` envelope plus `repair` when the hub can describe a safe retry. For example, removing a swimlane that still contains tasks returns `repair.moveTasksTo`, `repair.affectedTaskIds`, and a ready-to-retry `repair.swimlaneOps` shape.
@@ -415,7 +415,7 @@ Use the workspace contract first, then the narrowest interface that fits:
 
 - read `GET /help` or `tracker_help` first for the active workspace contract
 - use `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_hygiene`, `tracker_search`, and `tracker_fuzzy_search` for focused reads
-- use `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
+- use `tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
 
 Register the server in your client config instead of launching it manually:
 

@@ -54,7 +54,7 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - if that repo-local tracker JSON is versioned in the project, expect successful patch writes that change durable fields to update that repo-visible JSON file in place
 - for linked trackers, the repo-local tracker JSON is the only project truth; task state, assignee, blocker notes, scratchpad, timestamps, and rev write through to that repo-visible JSON
 - legacy linked-tracker overlays in `<shared-workspace>/.runtime/overlays/<slug>.json` are not project truth and are cleared on ingest/write
-- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
+- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 ### Landing gate — order tracker writes before the commit
 
@@ -85,8 +85,8 @@ When the tracker file lives inside a repo, tracker writes update the repo-visibl
 - **When you are ready to act**, prefer `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
 - **When you need a deterministic sign-off checklist**, prefer `GET /api/projects/<slug>/tasks/<taskId>/verify` or `llm-tracker verify <slug> <taskId>`.
 - **When you need the contract**, prefer `GET /help` instead of guessing write modes, endpoint shapes, or status vocabulary.
-- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
-- MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
+- **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
+- MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
 - If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
 - If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, `tracker_handoff_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
@@ -524,12 +524,12 @@ The shortlist is deterministic and capped at 5 tasks:
 
 Use this instead of scanning the whole tracker just to choose work.
 
-If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
+If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
 
 Daemon rule:
 
 - MCP reads do **not** require a running daemon and include `workspace`, `port`, `file`, `registrationFile`, and `topology` on project-specific payloads.
-- MCP writes (`tracker_patch`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
+- MCP writes (`tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the shared hub or daemon.
 
 Helpful MCP resources:
 
@@ -864,7 +864,7 @@ If one write reopens multiple completed tasks, it must also include `"migration"
 - `tasks` patch keyed by id → each listed task is field-merged with existing (shallow merge on `context` and `placement`; other fields replaced).
 - `tasks` patch as an array → same, but tasks missing from the array are **preserved, not deleted**, with a warning in `notes`.
 - New task IDs in `tasks` → **appended to the end of `tasks[]`**, and brand-new patch tasks must start as `not_started` or `in_progress`. Use `taskOps.split` when you need to create an open follow-up immediately after a source task.
-- `swimlaneOps` → structural lane edits without a full replacement. Supported ops: `add` with `lane`, `update` with `id` + `patch`, `move` with `index` or `direction: "up"|"down"`, and `remove` with `reassignTo` when tasks still live in the lane.
+- `swimlaneOps` → structural lane edits without a full replacement. Supported ops: `add` with `lane`, `update` with `id` + `patch`, `move` with `index` or `direction: "up"|"down"`, and `remove` with `reassignTo` when tasks still live in the lane. MCP clients can use `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, and `tracker_delete_swimlane` instead of hand-writing this shape.
 - `taskOps` → structural task edits without a full replacement. Supported ops: `move` with `swimlaneId`/`priorityId`/optional `targetIndex`, `archive` with optional `reason`, `split` with `sourceId` + open `newTask`, and `merge` with `sourceId` + `targetId`.
 - `meta.swimlanes[i].collapsed` → always dropped. Hub keeps whatever's on disk.
 - `updatedAt`, `rev` → always dropped. Hub-owned.

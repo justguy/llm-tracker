@@ -8,14 +8,14 @@ function resolveTargetWorkspace(defaultWorkspace, value) {
   return value === undefined ? defaultWorkspace : resolve(nonEmptyString(value) || "");
 }
 
-async function runDirectPatch({ workspace, slug, patch }) {
+async function runDirectPatch({ workspace, slug, patch, label = "tracker_patch" }) {
   const file = trackerPath(workspace, slug);
   if (!existsSync(file)) {
     return makeJsonResult(
       {
         ok: false,
         status: 404,
-        error: `tracker_patch direct mode could not find ${file}. Pass the workspace that owns trackers/${slug}.json, or register/link the project first.`,
+        error: `${label} direct mode could not find ${file}. Pass the workspace that owns trackers/${slug}.json, or register/link the project first.`,
         ...targetMetadata(workspace, slug, null)
       },
       { isError: true }
@@ -29,7 +29,7 @@ async function runDirectPatch({ workspace, slug, patch }) {
       {
         ok: false,
         status: loaded?.status || 400,
-        error: `tracker_patch direct mode could not load ${file}: ${loaded?.message || loaded?.reason || "unknown error"}`,
+        error: `${label} direct mode could not load ${file}: ${loaded?.message || loaded?.reason || "unknown error"}`,
         ...targetMetadata(workspace, slug, null)
       },
       { isError: true }
@@ -87,7 +87,8 @@ function createHubWriteTool(workspace, portFlag, definition) {
         return runDirectPatch({
           workspace: targetWorkspace,
           slug: prepared.slug,
-          patch: prepared.body
+          patch: prepared.body,
+          label: definition.name
         });
       }
       return runHubMutation({
@@ -149,6 +150,220 @@ function createPatchToolDefinition() {
         mode,
         path: `/api/projects/${slug}/patch`,
         body: args.patch
+      };
+    }
+  };
+}
+
+function writeModeProperties() {
+  return {
+    slug: { type: "string", description: "Project slug" },
+    workspace: {
+      type: "string",
+      description:
+        "Optional tracker workspace path. Use this to target a repo-local `.llm-tracker` workspace instead of the MCP server's configured shared workspace."
+    },
+    mode: {
+      type: "string",
+      enum: ["hub", "direct"],
+      description:
+        "`hub` posts to the running hub. `direct` applies the structural patch to the target workspace file without requiring a daemon."
+    },
+    expectedRev: {
+      type: "integer",
+      minimum: 0,
+      description: "Optional optimistic concurrency guard. Rejects if the current project rev differs."
+    }
+  };
+}
+
+function swimlaneIdFromArgs(args, toolName) {
+  const id = nonEmptyString(args.id) || nonEmptyString(args.swimlaneId);
+  return id || { error: `${toolName} requires id or swimlaneId.` };
+}
+
+function structuralPatch(args, op) {
+  const body = { swimlaneOps: [op] };
+  if (Number.isInteger(args.expectedRev)) body.expectedRev = args.expectedRev;
+  return body;
+}
+
+function createSwimlaneToolDefinition() {
+  return {
+    name: "tracker_create_swimlane",
+    description:
+      "Create a swimlane through the same structural patch path as swimlaneOps.add. Supports hub and direct modes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...writeModeProperties(),
+        id: { type: "string", description: "New swimlane id." },
+        label: { type: "string", description: "Human-readable swimlane label." },
+        description: { type: "string", description: "Optional swimlane description." },
+        index: {
+          type: "integer",
+          minimum: 0,
+          description: "Optional insertion index. Defaults to the end."
+        }
+      },
+      required: ["slug", "id", "label"]
+    },
+    prepareRequest(args = {}) {
+      const slug = nonEmptyString(args.slug);
+      if (!slug) return { error: "tracker_create_swimlane requires a project slug." };
+      const id = nonEmptyString(args.id);
+      if (!id) return { error: "tracker_create_swimlane requires id." };
+      const label = nonEmptyString(args.label);
+      if (!label) return { error: "tracker_create_swimlane requires label." };
+      const lane = { id, label };
+      const description = nonEmptyString(args.description);
+      if (description) lane.description = description;
+      const op = { op: "add", lane };
+      if (Number.isInteger(args.index)) op.index = args.index;
+      const mode = nonEmptyString(args.mode) || "hub";
+      if (mode !== "hub" && mode !== "direct") {
+        return { error: "tracker_create_swimlane mode must be `hub` or `direct`." };
+      }
+      return {
+        slug,
+        workspace: resolveTargetWorkspace(this?.workspace, args.workspace),
+        mode,
+        path: `/api/projects/${slug}/patch`,
+        body: structuralPatch(args, op)
+      };
+    }
+  };
+}
+
+function updateSwimlaneToolDefinition() {
+  return {
+    name: "tracker_update_swimlane",
+    description:
+      "Update swimlane metadata through the same structural patch path as swimlaneOps.update. Label and description are agent-owned; collapsed UI state is ignored by the hub.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...writeModeProperties(),
+        id: { type: "string", description: "Swimlane id." },
+        swimlaneId: { type: "string", description: "Alias for id." },
+        label: { type: "string", description: "New swimlane label." },
+        description: { type: "string", description: "New swimlane description." }
+      },
+      required: ["slug"]
+    },
+    prepareRequest(args = {}) {
+      const slug = nonEmptyString(args.slug);
+      if (!slug) return { error: "tracker_update_swimlane requires a project slug." };
+      const id = swimlaneIdFromArgs(args, "tracker_update_swimlane");
+      if (typeof id !== "string") return id;
+      const patch = {};
+      if (args.label !== undefined) {
+        const label = nonEmptyString(args.label);
+        if (!label) return { error: "tracker_update_swimlane label must be a non-empty string." };
+        patch.label = label;
+      }
+      if (args.description !== undefined) {
+        patch.description = String(args.description);
+      }
+      if (Object.keys(patch).length === 0) {
+        return { error: "tracker_update_swimlane requires label or description." };
+      }
+      const mode = nonEmptyString(args.mode) || "hub";
+      if (mode !== "hub" && mode !== "direct") {
+        return { error: "tracker_update_swimlane mode must be `hub` or `direct`." };
+      }
+      return {
+        slug,
+        workspace: resolveTargetWorkspace(this?.workspace, args.workspace),
+        mode,
+        path: `/api/projects/${slug}/patch`,
+        body: structuralPatch(args, { op: "update", id, patch })
+      };
+    }
+  };
+}
+
+function moveSwimlaneToolDefinition() {
+  return {
+    name: "tracker_move_swimlane",
+    description:
+      "Move a swimlane by direction or absolute index through the same structural patch path as swimlaneOps.move.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...writeModeProperties(),
+        id: { type: "string", description: "Swimlane id." },
+        swimlaneId: { type: "string", description: "Alias for id." },
+        direction: { type: "string", enum: ["up", "down"], description: "Move one position up or down." },
+        index: { type: "integer", minimum: 0, description: "Absolute target index." }
+      },
+      required: ["slug"]
+    },
+    prepareRequest(args = {}) {
+      const slug = nonEmptyString(args.slug);
+      if (!slug) return { error: "tracker_move_swimlane requires a project slug." };
+      const id = swimlaneIdFromArgs(args, "tracker_move_swimlane");
+      if (typeof id !== "string") return id;
+      const direction = nonEmptyString(args.direction);
+      const hasIndex = Number.isInteger(args.index);
+      if (!hasIndex && direction !== "up" && direction !== "down") {
+        return { error: "tracker_move_swimlane requires direction up|down or index." };
+      }
+      const op = { op: "move", id };
+      if (hasIndex) op.index = args.index;
+      else op.direction = direction;
+      const mode = nonEmptyString(args.mode) || "hub";
+      if (mode !== "hub" && mode !== "direct") {
+        return { error: "tracker_move_swimlane mode must be `hub` or `direct`." };
+      }
+      return {
+        slug,
+        workspace: resolveTargetWorkspace(this?.workspace, args.workspace),
+        mode,
+        path: `/api/projects/${slug}/patch`,
+        body: structuralPatch(args, op)
+      };
+    }
+  };
+}
+
+function deleteSwimlaneToolDefinition() {
+  return {
+    name: "tracker_delete_swimlane",
+    description:
+      "Delete a swimlane through the same structural patch path as swimlaneOps.remove. If tasks are in the lane, provide reassignTo or use the returned repair payload.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...writeModeProperties(),
+        id: { type: "string", description: "Swimlane id." },
+        swimlaneId: { type: "string", description: "Alias for id." },
+        reassignTo: {
+          type: "string",
+          description: "Optional destination swimlane id for tasks currently in the deleted lane."
+        },
+        reassignToSwimlaneId: { type: "string", description: "Alias for reassignTo." }
+      },
+      required: ["slug"]
+    },
+    prepareRequest(args = {}) {
+      const slug = nonEmptyString(args.slug);
+      if (!slug) return { error: "tracker_delete_swimlane requires a project slug." };
+      const id = swimlaneIdFromArgs(args, "tracker_delete_swimlane");
+      if (typeof id !== "string") return id;
+      const op = { op: "remove", id };
+      const reassignTo = nonEmptyString(args.reassignTo) || nonEmptyString(args.reassignToSwimlaneId);
+      if (reassignTo) op.reassignTo = reassignTo;
+      const mode = nonEmptyString(args.mode) || "hub";
+      if (mode !== "hub" && mode !== "direct") {
+        return { error: "tracker_delete_swimlane mode must be `hub` or `direct`." };
+      }
+      return {
+        slug,
+        workspace: resolveTargetWorkspace(this?.workspace, args.workspace),
+        mode,
+        path: `/api/projects/${slug}/patch`,
+        body: structuralPatch(args, op)
       };
     }
   };
@@ -255,6 +470,10 @@ function createSlugWriteTool(name, description, pathSuffix) {
 export function createWriteTools(workspace, portFlag) {
   return [
     createHubWriteTool(workspace, portFlag, createPatchToolDefinition()),
+    createHubWriteTool(workspace, portFlag, createSwimlaneToolDefinition()),
+    createHubWriteTool(workspace, portFlag, updateSwimlaneToolDefinition()),
+    createHubWriteTool(workspace, portFlag, moveSwimlaneToolDefinition()),
+    createHubWriteTool(workspace, portFlag, deleteSwimlaneToolDefinition()),
     createHubWriteTool(workspace, portFlag, createStartToolDefinition()),
     createHubWriteTool(workspace, portFlag, createPickToolDefinition()),
     createHubWriteTool(

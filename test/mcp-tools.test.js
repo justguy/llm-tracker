@@ -27,14 +27,24 @@ test("tracker_patch is exposed across MCP tools, runtime metadata, and prompts",
   try {
     const tools = createTools(workspace);
     assert.ok(tools.has("tracker_patch"));
+    assert.ok(tools.has("tracker_create_swimlane"));
+    assert.ok(tools.has("tracker_update_swimlane"));
+    assert.ok(tools.has("tracker_move_swimlane"));
+    assert.ok(tools.has("tracker_delete_swimlane"));
     assert.ok(tools.has("tracker_start"));
 
     const runtime = workspaceRuntimePayload(workspace);
     assert.ok(runtime.daemonRule.writeTools.includes("tracker_patch"));
+    assert.ok(runtime.daemonRule.writeTools.includes("tracker_create_swimlane"));
+    assert.ok(runtime.daemonRule.writeTools.includes("tracker_update_swimlane"));
+    assert.ok(runtime.daemonRule.writeTools.includes("tracker_move_swimlane"));
+    assert.ok(runtime.daemonRule.writeTools.includes("tracker_delete_swimlane"));
     assert.ok(runtime.daemonRule.writeTools.includes("tracker_start"));
 
     const startHere = getPrompt(workspace, "tracker_start_here");
     assert.match(startHere.messages[0].content.text, /tracker_patch/);
+    assert.match(startHere.messages[0].content.text, /tracker_create_swimlane/);
+    assert.match(startHere.messages[0].content.text, /tracker_delete_swimlane/);
     assert.match(startHere.messages[0].content.text, /tracker_start/);
     assert.match(startHere.messages[0].content.text, /swimlaneOps/);
 
@@ -268,6 +278,62 @@ test("tracker_patch direct mode warns instead of blocking on read-safe schema is
       readFileSync(join(workspace, "trackers", "test-project.json"), "utf-8")
     );
     assert.equal(persisted.tasks.find((task) => task.id === "t1").comment, "Short decision note.");
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("dedicated swimlane MCP tools write through direct structural patch mode", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-swimlanes-");
+  try {
+    const tools = createTools(workspace);
+
+    const created = await tools.get("tracker_create_swimlane").handler({
+      slug: "test-project",
+      mode: "direct",
+      id: "qa",
+      label: "QA",
+      description: "Verification work",
+      index: 1
+    });
+    assert.equal(created.isError, false);
+
+    const updated = await tools.get("tracker_update_swimlane").handler({
+      slug: "test-project",
+      mode: "direct",
+      id: "qa",
+      label: "QA Ready"
+    });
+    assert.equal(updated.isError, false);
+
+    const moved = await tools.get("tracker_move_swimlane").handler({
+      slug: "test-project",
+      mode: "direct",
+      swimlaneId: "qa",
+      direction: "down"
+    });
+    assert.equal(moved.isError, false);
+
+    const removed = await tools.get("tracker_delete_swimlane").handler({
+      slug: "test-project",
+      mode: "direct",
+      id: "ops",
+      reassignTo: "qa"
+    });
+    assert.equal(removed.isError, false);
+    const removedPayload = JSON.parse(removed.content[0].text);
+    assert.ok(removedPayload.notes.updated.includes("swimlane:ops"));
+
+    const persisted = JSON.parse(
+      readFileSync(join(workspace, "trackers", "test-project.json"), "utf-8")
+    );
+    assert.deepEqual(
+      persisted.meta.swimlanes.map((lane) => lane.id),
+      ["exec", "qa"]
+    );
+    assert.equal(persisted.meta.swimlanes.find((lane) => lane.id === "qa").label, "QA Ready");
+    assert.equal(persisted.meta.swimlanes.find((lane) => lane.id === "qa").description, "Verification work");
+    assert.equal(persisted.tasks.find((task) => task.id === "t3").placement.swimlaneId, "qa");
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

@@ -30,6 +30,10 @@ export const READ_TOOL_NAMES = [
 
 export const WRITE_TOOL_NAMES = [
   "tracker_patch",
+  "tracker_create_swimlane",
+  "tracker_update_swimlane",
+  "tracker_move_swimlane",
+  "tracker_delete_swimlane",
   "tracker_start",
   "tracker_pick",
   "tracker_undo",
