@@ -152,6 +152,12 @@ The dependency graph view, when shown, is derived from those same `dependencies[
 - Recommended: **one shared workspace + one shared daemon + many linked projects.** Run the hub on a central workspace such as `~/.llm-tracker`, then link repo-local tracker files into it with `npx llm-tracker link <slug> <abs-path>`. This gives one source of truth for humans and agents.
 - Supported: **multiple isolated workspaces + multiple daemons.** Useful for demos, sandboxes, or teams that want hard isolation. Each daemon needs its own workspace folder and port.
 
+Friendly advice for choosing where the tracker JSON lives:
+
+- **Keep it central.** Store `trackers/<slug>.json` in the shared workspace, such as `~/.llm-tracker`. This is the simplest option and avoids repo churn from live status updates.
+- **Keep it local and versioned.** Put the tracker JSON in the project repo and link it into the shared workspace. This keeps task truth with the code, but LLMs can have a harder time with it because the daemon updates the file as work happens.
+- **Copy it into the repo at commit time.** Keep the live tracker central, then use a local git hook or release script to copy the current tracker JSON into the project before committing. This gives you a versioned snapshot without making every live daemon write a repo change.
+
 If you keep a tracker file in a repo and link it into the shared workspace:
 
 - the shared daemon automatically watches the linked tracker file for direct edits
