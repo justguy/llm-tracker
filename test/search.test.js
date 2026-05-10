@@ -71,6 +71,57 @@ test("buildSearchPayload returns semantic matches from the local embedder", asyn
   assert.ok(payload.matches[0].score >= 0.9);
 });
 
+test("buildSearchPayload prioritizes task id, title, then details lexical matches", async () => {
+  setSemanticExtractorFactoryForTests(makeKeywordEmbedderFactory(["unrelated"]));
+
+  const project = validProject({
+    tasks: [
+      {
+        id: "title-hit",
+        title: "wf-loop-000 recovery notes",
+        goal: "Title-only distractor.",
+        status: "not_started",
+        placement: { swimlaneId: "exec", priorityId: "p0" },
+        dependencies: []
+      },
+      {
+        id: "details-hit",
+        title: "Workflow loop follow-up",
+        goal: "Mentions wf-loop-000 in task details.",
+        status: "not_started",
+        placement: { swimlaneId: "exec", priorityId: "p0" },
+        dependencies: []
+      },
+      {
+        id: "wf-loop-000",
+        title: "Workflow loop guard",
+        goal: "Exact task id should win.",
+        status: "not_started",
+        placement: { swimlaneId: "exec", priorityId: "p0" },
+        dependencies: []
+      }
+    ]
+  });
+  project.meta.rev = 25;
+
+  const payload = await buildSearchPayload({
+    slug: "test-project",
+    data: project,
+    query: "wf-loop-000",
+    limit: 5,
+    workspace: "/tmp/search-test"
+  });
+
+  assert.deepEqual(payload.matches.map((match) => match.id), [
+    "wf-loop-000",
+    "title-hit",
+    "details-hit"
+  ]);
+  assert.ok(payload.matches[0].matchedOn.includes("id"));
+  assert.ok(payload.matches[1].matchedOn.includes("title"));
+  assert.ok(payload.matches[2].matchedOn.includes("goal") || payload.matches[2].matchedOn.includes("details"));
+});
+
 test("buildFuzzySearchPayload returns approximate lexical matches", () => {
   const project = validProject();
   project.meta.rev = 12;

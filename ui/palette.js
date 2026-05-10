@@ -21,6 +21,91 @@ function matchesFilter(text, q) {
   return text.toLowerCase().includes(q.toLowerCase());
 }
 
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function flattenSearchValues(value) {
+  if (value === null || value === undefined) return [];
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  if (Array.isArray(value)) return value.flatMap((item) => flattenSearchValues(item));
+  if (typeof value === "object") return Object.values(value).flatMap((item) => flattenSearchValues(item));
+  return [];
+}
+
+function fieldScore(query, value) {
+  const q = normalizeSearchText(query);
+  const text = normalizeSearchText(value);
+  if (!q || !text) return 0;
+  if (text === q) return 1;
+  if (text.startsWith(q)) return 0.97;
+  if (text.includes(q)) return 0.9;
+
+  const queryTokens = q.split(/\s+/).filter(Boolean);
+  const textTokens = new Set(text.split(/\s+/).filter(Boolean));
+  if (!queryTokens.length || !textTokens.size) return 0;
+  const hits = queryTokens.filter((token) => textTokens.has(token)).length;
+  return hits / queryTokens.length;
+}
+
+function taskDetailsText(task) {
+  return flattenSearchValues([
+    task?.goal,
+    task?.comment,
+    task?.blocker_reason,
+    task?.reference,
+    task?.references,
+    task?.dependencies,
+    task?.related,
+    task?.definition_of_done,
+    task?.constraints,
+    task?.expected_changes,
+    task?.allowed_paths,
+    task?.context
+  ]).join(" ");
+}
+
+export function rankPaletteTaskMatches(tasks = [], query, limit = 10) {
+  const q = String(query || "").trim();
+  if (q.length < 2) return [];
+
+  const weighted = [
+    { label: "id", priority: 3, weight: 1, value: (task) => task?.id },
+    { label: "title", priority: 2, weight: 0.96, value: (task) => task?.title },
+    { label: "details", priority: 1, weight: 0.88, value: taskDetailsText }
+  ];
+
+  return tasks
+    .map((task) => {
+      let best = null;
+      for (const field of weighted) {
+        const score = fieldScore(q, field.value(task)) * field.weight;
+        if (!best || score > best.score || (score === best.score && field.priority > best.priority)) {
+          best = { score, priority: field.priority, matchedOn: field.label };
+        }
+      }
+      if (!best || best.score < 0.22) return null;
+      return {
+        ...task,
+        matchedOn: [best.matchedOn],
+        score: best.score,
+        _palettePriority: best.priority
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b._palettePriority !== a._palettePriority) return b._palettePriority - a._palettePriority;
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.status !== b.status) return a.status === "in_progress" ? -1 : 1;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    })
+    .slice(0, limit);
+}
+
 function ProjectRow({ proj, slug, active }) {
   const meta = proj?.data?.meta;
   const name = meta?.name || slug;
@@ -39,11 +124,13 @@ function ProjectRow({ proj, slug, active }) {
 
 function TaskRow({ item }) {
   const icon = item.status === "complete" ? "◉" : "·";
+  const swimlaneId = item.swimlaneId || item.placement?.swimlaneId || "";
+  const priorityId = item.priorityId || item.placement?.priorityId || "";
   return html`
     <span class="palette-row__icon">${icon}</span>
     <span class="palette-row__main">
       <span class="palette-row__label">${item.title}</span>
-      <span class="palette-row__sub">${item.id}${item.swimlaneId ? ` · ${item.swimlaneId}` : ""}${item.priorityId ? ` · ${item.priorityId}` : ""}</span>
+      <span class="palette-row__sub">${item.id}${swimlaneId ? ` · ${swimlaneId}` : ""}${priorityId ? ` · ${priorityId}` : ""}</span>
     </span>
     <span class="palette-row__hint">${item.status || ""}</span>
   `;
@@ -130,7 +217,11 @@ export function CommandPalette({ open, onClose, projects, activeSlug, actions, o
       .map((a) => ({ kind: "action", key: `act:${a.label}`, action: a }));
   })();
 
-  const taskRows = taskResults.map((t) => ({ kind: "task", key: `task:${t.id}`, item: t }));
+  const localTaskResults = mode === "command"
+    ? rankPaletteTaskMatches(projects?.[activeSlug]?.data?.tasks || [], bare, 10)
+    : [];
+  const taskRows = (mode === "command" ? localTaskResults : taskResults)
+    .map((t) => ({ kind: "task", key: `task:${t.id}`, item: t }));
 
   let rows;
   if (mode === "fuzzy" || mode === "semantic") {
@@ -142,7 +233,7 @@ export function CommandPalette({ open, onClose, projects, activeSlug, actions, o
           ? [{ kind: "info", key: "empty", label: "No results" }]
           : [{ kind: "info", key: "hint", label: `Type ≥ 2 chars to search ${mode === "semantic" ? "semantically" : "with fuzzy match"}` }];
   } else {
-    rows = [...projectRows, ...actionRows];
+    rows = [...taskRows, ...projectRows, ...actionRows];
   }
 
   const clampedCursor = rows.length > 0 ? Math.min(cursor, rows.length - 1) : 0;
@@ -163,7 +254,7 @@ export function CommandPalette({ open, onClose, projects, activeSlug, actions, o
     } else if (row.kind === "task") {
       const slug = activeSlug;
       const taskId = row.item.id;
-      const swimlaneId = row.item.swimlaneId;
+      const swimlaneId = row.item.swimlaneId || row.item.placement?.swimlaneId;
       if (slug && swimlaneId && onToggleCollapse) {
         onToggleCollapse(slug, swimlaneId, false);
       }

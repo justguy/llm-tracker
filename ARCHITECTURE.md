@@ -350,8 +350,8 @@ Design rule:
 - `GET /api/projects/:slug/tasks/:taskId/execute` returns the action pack: readiness, explicit contract fields, references, snippets, and recent task history.
 - `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources, including repo-specific allowed-path and approval checks when `task.repos` is present.
 - `GET /api/projects/:slug/tasks/:taskId/handoff?from=<id>&to=<id>` returns a deterministic handoff pack: brief, why, execution contract, recent decisions, recent task history, and a pre-rendered markdown `handoffPrompt` for the next agent.
-- `GET /api/projects/:slug/search?q=<query>` runs semantic local-model search through `@huggingface/transformers` + `Xenova/all-MiniLM-L6-v2`.
-- `GET /api/projects/:slug/fuzzy-search?q=<query>` runs deterministic fuzzy lexical matching without embeddings.
+- `GET /api/projects/:slug/search?q=<query>` runs semantic local-model search through `@huggingface/transformers` + `Xenova/all-MiniLM-L6-v2`, with direct lexical matches ranked first by task id, then title, then task details.
+- `GET /api/projects/:slug/fuzzy-search?q=<query>` runs deterministic fuzzy lexical matching without embeddings and uses the same id/title/details priority order.
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.
 - `GET /api/projects/:slug/hygiene?staleAfterRevs=N` returns board hygiene findings: empty swimlanes (with a `removable` flag), orphaned priorities, `in_progress` tasks not touched in the last N revs (default 10), and blocked or decision-gated tasks missing narrative.
 - `GET /api/projects/:slug/changed?fromRev=N&limit=20` returns changed tasks since a rev, with current task state plus grouped change kinds and keys.

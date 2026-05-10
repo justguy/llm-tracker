@@ -10,6 +10,16 @@ const MIN_SEMANTIC_SCORE = 0.18;
 const MIN_FUZZY_SCORE = 0.22;
 const EMBEDDING_MODEL = process.env.LLM_TRACKER_EMBEDDING_MODEL || "Xenova/all-MiniLM-L6-v2";
 const LOCAL_HASH_VECTOR_SIZE = 384;
+const LEXICAL_CATEGORY_WEIGHT = {
+  id: 1,
+  title: 0.96,
+  details: 0.88
+};
+const LEXICAL_CATEGORY_PRIORITY = {
+  id: 3,
+  title: 2,
+  details: 1
+};
 const ORT_SYMBOL = Symbol.for("onnxruntime");
 const SEARCH_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TRANSFORMERS_WEB_MODULE = resolve(
@@ -106,6 +116,39 @@ function traceabilityText(traceability = {}) {
     .join(" ");
 }
 
+function flattenSearchValues(value) {
+  if (value === null || value === undefined) return [];
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  if (Array.isArray(value)) return value.flatMap((item) => flattenSearchValues(item));
+  if (typeof value === "object") return Object.values(value).flatMap((item) => flattenSearchValues(item));
+  return [];
+}
+
+function buildTaskDetailValues(task, summary = null) {
+  const context = task?.context || {};
+  return flattenSearchValues([
+    task?.goal,
+    task?.comment,
+    task?.blocker_reason,
+    task?.reference,
+    task?.references,
+    task?.dependencies,
+    task?.related,
+    task?.definition_of_done,
+    task?.constraints,
+    task?.expected_changes,
+    task?.allowed_paths,
+    taskTags(task),
+    context,
+    summary ? traceabilityText(summary.traceability) : null
+  ]);
+}
+
+function buildTaskDetailDocument(task, summary = null) {
+  return buildTaskDetailValues(task, summary).join("\n");
+}
+
 function buildSearchDocument(task) {
   const context = task?.context || {};
   const traceabilityValues = [
@@ -134,6 +177,15 @@ function buildSearchDocument(task) {
     context.executionReportReference || "",
     context.architectureTruthDoc || "",
     context.architectureReference || "",
+    task?.reference || "",
+    ...(Array.isArray(task?.references) ? task.references : []),
+    ...(Array.isArray(task?.dependencies) ? task.dependencies : []),
+    ...(Array.isArray(task?.related) ? task.related : []),
+    ...(Array.isArray(task?.definition_of_done) ? task.definition_of_done : []),
+    ...(Array.isArray(task?.constraints) ? task.constraints : []),
+    ...(Array.isArray(task?.expected_changes) ? task.expected_changes : []),
+    ...(Array.isArray(task?.allowed_paths) ? task.allowed_paths : []),
+    ...flattenSearchValues(context),
     taskTags(task).join(" ")
   ]
     .map((value) => (typeof value === "string" ? value.trim() : ""))
@@ -252,6 +304,9 @@ function summarizeResult(task, summary, score, extras = {}) {
 }
 
 function sortMatches(a, b) {
+  const priorityA = Number.isFinite(a._matchPriority) ? a._matchPriority : 0;
+  const priorityB = Number.isFinite(b._matchPriority) ? b._matchPriority : 0;
+  if (priorityA !== priorityB) return priorityB - priorityA;
   if (b.score !== a.score) return b.score - a.score;
   if (a.aggregate !== b.aggregate) return a.aggregate ? 1 : -1;
   if (a.status !== b.status) return a.status === "in_progress" ? -1 : 1;
@@ -574,29 +629,51 @@ function fuzzyFieldScore(query, value) {
   return score;
 }
 
-function fuzzyTaskMatch(task, summary, query) {
+function attachMatchPriority(result, signal = null) {
+  Object.defineProperty(result, "_matchPriority", {
+    value: signal?.priority || 0,
+    enumerable: false
+  });
+  return result;
+}
+
+function lexicalTaskSignal(task, summary, query) {
   const matchedOn = [];
   const fieldScores = [];
   let score = 0;
+  let priority = 0;
 
-  const consider = (label, value) => {
-    const fieldScore = fuzzyFieldScore(query, value);
-    if (fieldScore > score) score = fieldScore;
-    fieldScores.push({ label, score: fieldScore });
-    if (fieldScore >= 0.55) matchedOn.push(label);
+  const consider = (label, category, value) => {
+    const rawScore = fuzzyFieldScore(query, value);
+    const weightedScore = rawScore * (LEXICAL_CATEGORY_WEIGHT[category] || 1);
+    const fieldPriority = LEXICAL_CATEGORY_PRIORITY[category] || 0;
+    if (weightedScore > score || (weightedScore === score && fieldPriority > priority)) {
+      score = weightedScore;
+      priority = fieldPriority;
+    }
+    fieldScores.push({ label, category, rawScore, score: weightedScore, priority: fieldPriority });
+    if (rawScore >= 0.55) matchedOn.push(label);
   };
 
-  consider("id", task.id);
-  consider("title", task.title);
-  consider("goal", task.goal || "");
-  consider("comment", task.comment || "");
-  consider("notes", task.context?.notes || "");
-  consider("source", task.context?.source_title || "");
-  consider("traceability", traceabilityText(summary.traceability));
-  for (const tag of taskTags(task)) consider("tag", tag);
+  consider("id", "id", task.id);
+  consider("title", "title", task.title);
+  consider("goal", "details", task.goal || "");
+  consider("comment", "details", task.comment || "");
+  consider("blocker", "details", task.blocker_reason || "");
+  consider("notes", "details", task.context?.notes || "");
+  consider("source", "details", task.context?.source_title || "");
+  consider("traceability", "details", traceabilityText(summary.traceability));
+  consider("reference", "details", [
+    task.reference,
+    ...(Array.isArray(task.references) ? task.references : [])
+  ].filter(Boolean).join(" "));
+  consider("dependency", "details", [
+    ...(Array.isArray(task.dependencies) ? task.dependencies : []),
+    ...(Array.isArray(task.related) ? task.related : [])
+  ].join(" "));
+  consider("details", "details", buildTaskDetailDocument(task, summary));
+  for (const tag of taskTags(task)) consider("tag", "details", tag);
 
-  const combinedScore = fuzzyFieldScore(query, buildSearchDocument(task));
-  score = Math.max(score, combinedScore * 0.95);
   if (score < MIN_FUZZY_SCORE) return null;
 
   const selectedFields = Array.from(new Set(
@@ -604,14 +681,27 @@ function fuzzyTaskMatch(task, summary, query) {
       ? matchedOn
       : fieldScores
           .filter((entry) => entry.score > 0)
-          .sort((a, b) => b.score - a.score)
+          .sort((a, b) => b.priority - a.priority || b.score - a.score)
           .slice(0, 2)
           .map((entry) => entry.label)
   )).slice(0, 4);
 
-  return summarizeResult(task, summary, score, {
+  return {
+    priority,
+    score,
     matchedOn: selectedFields
-  });
+  };
+}
+
+function fuzzyTaskMatch(task, summary, query) {
+  const signal = lexicalTaskSignal(task, summary, query);
+  if (!signal) return null;
+  return attachMatchPriority(
+    summarizeResult(task, summary, signal.score, {
+      matchedOn: signal.matchedOn
+    }),
+    signal
+  );
 }
 
 export function clearSearchCachesForSlug(workspace, slug) {
@@ -702,10 +792,18 @@ export async function getSearchPayload({
     const indexed = await ensureSemanticIndex({ workspace, slug, entry, runtime, externalLookup: lookup });
     const embeddedQuery = await embedText(state.raw, indexed.runtime);
     const all = indexed.items
-      .map((item) => ({
-        ...summarizeResult(item.task, item.summary, cosineSimilarity(embeddedQuery.vector, item.vector))
-      }))
-      .filter((item) => item.score >= MIN_SEMANTIC_SCORE)
+      .map((item) => {
+        const semanticScore = cosineSimilarity(embeddedQuery.vector, item.vector);
+        const lexicalSignal = lexicalTaskSignal(item.task, item.summary, state);
+        const resultScore = Math.max(semanticScore, lexicalSignal?.score || 0);
+        return attachMatchPriority(
+          summarizeResult(item.task, item.summary, resultScore, {
+            matchedOn: lexicalSignal?.matchedOn || []
+          }),
+          lexicalSignal
+        );
+      })
+      .filter((item) => item.score >= MIN_SEMANTIC_SCORE || item._matchPriority > 0)
       .sort(sortMatches);
 
     const matches = all.slice(0, cappedLimit);
