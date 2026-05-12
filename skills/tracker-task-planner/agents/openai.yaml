@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tracker Task Planner"
+  short_description: "Draft tracker tasks with dependencies and DoD"
+  default_prompt: "Use $tracker-task-planner to turn this goal into reviewable tracker tasks."

@@ -1,0 +1,20 @@
+{
+  "name": "llm-tracker",
+  "interface": {
+    "displayName": "LLM Tracker"
+  },
+  "plugins": [
+    {
+      "name": "llm-tracker-workflows",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llm-tracker-workflows/local"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -195,6 +195,48 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 
 ## Wire it into your LLM CLI
 
+### Packaged workflow skills
+
+This repo ships three installable workflow skills:
+
+- `tracker-execute-scope` for "start executing this swimlane" or "execute the open tasks"
+- `tracker-closeout-sweep` for "make sure tasks are updated and closed"
+- `tracker-task-planner` for "create tasks, dependencies, and DoD for review"
+
+Codex discovers these as plugin-contributed skills. From a repo checkout, add this repo as a local marketplace, then enable the plugin in Codex:
+
+```bash
+codex plugin marketplace add /path/to/llm-project-tracker
+```
+
+If you manage `~/.codex/config.toml` by hand, the plugin entry is:
+
+```toml
+[plugins."llm-tracker-workflows@llm-tracker"]
+enabled = true
+```
+
+Restart Codex after enabling the plugin. Raw copies into `~/.codex/skills/<name>` are not enough in current Codex builds; Codex loads these through the `lt` plugin wrapper.
+
+Codex skill shortcuts after restart:
+
+- `$lt:execute`
+- `$lt:closeout`
+- `$lt:plan`
+
+Claude Code uses direct skill folders:
+
+```bash
+mkdir -p "$HOME/.claude/skills"
+cp -R skills/tracker-execute-scope skills/tracker-closeout-sweep skills/tracker-task-planner "$HOME/.claude/skills/"
+```
+
+From a global npm install, set `pkg_root="$(npm root -g)/llm-tracker"` first. For Codex, run `codex plugin marketplace add "$pkg_root"`, enable `llm-tracker-workflows`, then restart Codex. For Claude Code, copy from `$pkg_root/skills/...` instead of the checkout `skills/...` paths.
+
+The MCP server also exposes equivalent prompt workflows: `tracker_execute_scope`, `tracker_closeout_sweep`, and `tracker_plan_tasks`. Skills and prompts are still model-side guidance. For zero-token terminal commands, use `llm-tracker shortcuts`.
+
+### Status shortcut
+
 Drop a one-line file into your coding CLI's rules/skills folder. That's the whole install. Next time you ask "what's the state of my projects?" the LLM runs `npx llm-tracker status` on its own.
 
 That path is still prompt-driven. It saves rereads, but it still spends model tokens.

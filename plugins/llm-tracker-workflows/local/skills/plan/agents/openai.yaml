@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan"
+  short_description: "Draft tracker tasks with dependencies and DoD"
+  default_prompt: "Use $lt:plan to turn this goal into reviewable tracker tasks."

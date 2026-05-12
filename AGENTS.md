@@ -14,6 +14,7 @@ If you change any agent-facing behavior, keep these in sync:
 - `README.md` for human-facing usage and reminders
 - `AGENTS.md` when the repo-level workflow changes
 - the MCP layer (`llm-tracker mcp`) when the HTTP/CLI contract changes, including tools, resources, and prompts
+- `skills/` when workflow skills and MCP prompt workflows need to stay aligned
 
 For this repo specifically:
 

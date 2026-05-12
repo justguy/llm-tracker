@@ -1,0 +1,4 @@
+interface:
+  display_name: "Execute"
+  short_description: "Run bounded tracker execution workflows"
+  default_prompt: "Use $lt:execute to execute the open tasks in this swimlane."

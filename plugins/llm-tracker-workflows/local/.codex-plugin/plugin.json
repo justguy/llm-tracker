@@ -1,0 +1,34 @@
+{
+  "name": "llm-tracker-workflows",
+  "version": "1.1.0",
+  "description": "Workflow skills for executing, closing, and planning LLM Project Tracker tasks.",
+  "author": {
+    "name": "justguy"
+  },
+  "homepage": "https://github.com/justguy/llm-tracker",
+  "repository": "https://github.com/justguy/llm-tracker",
+  "license": "Apache-2.0",
+  "keywords": [
+    "llm-tracker",
+    "project-management",
+    "agent-workflows"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "lt",
+    "shortDescription": "Execute, close, and plan tracker work.",
+    "longDescription": "Workflow skills for bounded LLM Project Tracker execution, evidence-backed closeout sweeps, and task planning with dependencies and definition of done.",
+    "developerName": "justguy",
+    "category": "Productivity",
+    "capabilities": [
+      "Write"
+    ],
+    "websiteURL": "https://github.com/justguy/llm-tracker",
+    "privacyPolicyURL": "https://github.com/justguy/llm-tracker/blob/main/SECURITY.md",
+    "termsOfServiceURL": "https://github.com/justguy/llm-tracker/blob/main/LICENSE",
+    "defaultPrompt": [
+      "Use the LLM Tracker workflow skills when executing, closing, or planning tracker tasks."
+    ],
+    "screenshots": []
+  }
+}

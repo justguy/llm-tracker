@@ -88,7 +88,7 @@ When the tracker file lives inside a repo, tracker writes update the repo-visibl
 - **When MCP is configured**, prefer `tracker_help`, `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_handoff`, `tracker_blockers`, `tracker_hygiene`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` over raw `curl`.
 - MCP read tools work directly from workspace files and do **not** require the daemon. MCP write tools (`tracker_patch`, `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, `tracker_delete_swimlane`, `tracker_start`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) do require the hub or daemon to be reachable.
 - If MCP resources are configured, prefer `tracker://help` for the full contract and `tracker://workspace/runtime` for daemon state, patch paths, and the read-vs-write daemon rule.
-- If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, `tracker_handoff_task`, or `tracker_patch_write` instead of inventing the workflow from scratch.
+- If MCP prompts are configured, start with `tracker_start_here` and then use `tracker_pick_next`, `tracker_task_context`, `tracker_execute_task`, `tracker_verify_task`, `tracker_handoff_task`, `tracker_execute_scope`, `tracker_closeout_sweep`, `tracker_plan_tasks`, or `tracker_patch_write` instead of inventing the workflow from scratch.
 - **Writes are fire-and-forget patches.** No re-read before each write. The hub merges your changes under a per-project lock.
 - **Reads at decision points only** — claiming a task, resolving a blocker, answering the human. Use `GET /api/projects/<slug>/since/<last-rev>` to pull only what changed; don't re-read the whole tracker.
 - **On failure**, read `<slug>.errors.json` (file mode) or the JSON response body (HTTP mode). Both are structured `{error, type, hint}` with a precise path pointer.
@@ -581,6 +581,10 @@ Helpful MCP prompts:
 - `tracker_task_context`
 - `tracker_execute_task`
 - `tracker_verify_task`
+- `tracker_handoff_task`
+- `tracker_execute_scope`
+- `tracker_closeout_sweep`
+- `tracker_plan_tasks`
 - `tracker_patch_write`
 
 Related deterministic reads:
@@ -1128,6 +1132,46 @@ If `llm-tracker daemon status` and actual hub reachability disagree:
 1. Check `llm-tracker daemon logs [--path <dir>] --lines 120`.
 2. If the workspace has a recorded PID but the port is dead, tell the human the daemon is wedged rather than silently creating a new workspace.
 3. Recovery is: stop the stale PID, clear stale `.runtime/daemon.json` if needed, then restart the daemon on the same workspace.
+
+### Installing workflow skills
+
+The `llm-tracker` package includes installable workflow skills under `skills/`:
+
+- `tracker-execute-scope` for bounded execution by swimlane, next tasks, all open tasks, or explicit ids
+- `tracker-closeout-sweep` for evidence-backed task updates and closure
+- `tracker-task-planner` for reviewable task creation with dependencies and definition of done
+
+Codex discovers these as plugin-contributed skills. From a repo checkout, add this repo as a local marketplace, then enable the plugin in Codex:
+
+```bash
+codex plugin marketplace add /path/to/llm-project-tracker
+```
+
+If you manage `~/.codex/config.toml` by hand, the plugin entry is:
+
+```toml
+[plugins."llm-tracker-workflows@llm-tracker"]
+enabled = true
+```
+
+Restart Codex after enabling the plugin. Raw copies into `~/.codex/skills/<name>` are not enough in current Codex builds; Codex loads these through the `lt` plugin wrapper.
+
+Codex skill shortcuts after restart:
+
+- `$lt:execute`
+- `$lt:closeout`
+- `$lt:plan`
+
+Claude Code uses direct skill folders:
+
+```bash
+mkdir -p "$HOME/.claude/skills"
+cp -R skills/tracker-execute-scope skills/tracker-closeout-sweep skills/tracker-task-planner "$HOME/.claude/skills/"
+```
+
+From a global npm install, set `pkg_root="$(npm root -g)/llm-tracker"` first. For Codex, run `codex plugin marketplace add "$pkg_root"`, enable `llm-tracker-workflows`, then restart Codex. For Claude Code, copy from `$pkg_root/skills/...` instead of the checkout `skills/...` paths.
+
+Equivalent MCP prompt workflows are available as `tracker_execute_scope`, `tracker_closeout_sweep`, and `tracker_plan_tasks`. Skills and MCP prompts still spend model tokens; use `llm-tracker shortcuts` for direct zero-token terminal commands.
 
 ### Wiring the status shortcut into the user's CLI
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tracker Closeout Sweep"
+  short_description: "Update and close tracker tasks with evidence"
+  default_prompt: "Use $tracker-closeout-sweep to ensure this project has no stale open tasks."

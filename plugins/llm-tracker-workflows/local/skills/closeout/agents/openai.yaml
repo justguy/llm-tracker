@@ -1,0 +1,4 @@
+interface:
+  display_name: "Closeout"
+  short_description: "Update and close tracker tasks with evidence"
+  default_prompt: "Use $lt:closeout to ensure this project has no stale open tasks."

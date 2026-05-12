@@ -111,6 +111,104 @@ export function listPrompts() {
       ]
     },
     {
+      name: "tracker_execute_scope",
+      description: "Execute a bounded project scope such as a swimlane, next tasks, all open tasks, or explicit ids.",
+      arguments: [
+        {
+          name: "slug",
+          description: "Project slug",
+          required: true
+        },
+        {
+          name: "scope",
+          description: "Scope type such as next, swimlane, all-open, or explicit task ids",
+          required: false
+        },
+        {
+          name: "swimlane",
+          description: "Swimlane id or label when scope is swimlane",
+          required: false
+        },
+        {
+          name: "maxTasks",
+          description: "Maximum tasks to execute in this burst",
+          required: false
+        },
+        {
+          name: "assignee",
+          description: "Assignee label to use when starting tasks",
+          required: false
+        },
+        {
+          name: "parallelism",
+          description: "Optional subagent count when the host permits delegation",
+          required: false
+        },
+        {
+          name: "includeDecisionGated",
+          description: "Set true only when the user explicitly wants gated tasks considered",
+          required: false
+        }
+      ]
+    },
+    {
+      name: "tracker_closeout_sweep",
+      description: "Sweep open or stale tasks and close only the work that has tracker-backed evidence.",
+      arguments: [
+        {
+          name: "slug",
+          description: "Project slug",
+          required: true
+        },
+        {
+          name: "scope",
+          description: "Scope such as project, swimlane, changed, in-progress, or explicit ids",
+          required: false
+        },
+        {
+          name: "swimlane",
+          description: "Swimlane id or label when scope is swimlane",
+          required: false
+        },
+        {
+          name: "closePolicy",
+          description: "Completion policy, usually evidence-required",
+          required: false
+        }
+      ]
+    },
+    {
+      name: "tracker_plan_tasks",
+      description: "Draft tracker tasks with dependencies and definitions of done for human review.",
+      arguments: [
+        {
+          name: "slug",
+          description: "Project slug",
+          required: true
+        },
+        {
+          name: "goal",
+          description: "Goal or outcome to turn into tracker tasks",
+          required: true
+        },
+        {
+          name: "swimlane",
+          description: "Target swimlane id or label",
+          required: false
+        },
+        {
+          name: "priority",
+          description: "Target priority id or label",
+          required: false
+        },
+        {
+          name: "reviewOnly",
+          description: "Default true; patch only after review unless explicitly false",
+          required: false
+        }
+      ]
+    },
+    {
       name: "tracker_patch_write",
       description: "Explain the file-based patch workflow when the hub is unavailable.",
       arguments: [
@@ -140,7 +238,8 @@ export function getPrompt(workspace, name, args = {}) {
           `3. MCP read tools do not require the daemon. MCP write tools ${WRITE_TOOL_NAMES.map((tool) => `\`${tool}\``).join(", ")} do require the hub or daemon.`,
           `4. If the hub is unavailable, file-mode patches go in \`${join(workspace, "patches")}\` as \`${patchExample}\`. Rejections create a sibling \`.errors.json\` file.`,
           "5. Structural board edits belong in `swimlaneOps` and `taskOps`; use the dedicated `tracker_create_swimlane`, `tracker_update_swimlane`, `tracker_move_swimlane`, and `tracker_delete_swimlane` tools when changing lanes. Stale writes can use `expectedRev`, and structural failures may return `repair` with a retry shape. Reopening `complete` tasks through tracker_patch requires explicit `statusRegression` intent.",
-          "6. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_start` for an explicit task start or `tracker_pick` for top-task claim, then `tracker_patch`, and finally `tracker_verify`."
+          "6. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_start` for an explicit task start or `tracker_pick` for top-task claim, then `tracker_patch`, and finally `tracker_verify`.",
+          "7. Higher-level workflow prompts are available as `tracker_execute_scope`, `tracker_closeout_sweep`, and `tracker_plan_tasks`."
         ].join("\n")
       );
     case "tracker_pick_next":
@@ -207,6 +306,69 @@ export function getPrompt(workspace, name, args = {}) {
           "Paste the returned `handoffPrompt` field to the next agent verbatim instead of synthesizing a handoff by hand.",
           `If the next agent needs structural board context first, also call \`tracker_project_status\` for \`${slug}\`.`,
           "Do not mark the task complete from inside the handoff — the receiving agent verifies via `tracker_verify` after picking it up."
+        ].join("\n")
+      );
+    }
+    case "tracker_execute_scope": {
+      const scope = typeof args.scope === "string" && args.scope.trim() ? args.scope.trim() : "next executable tasks";
+      const swimlane = typeof args.swimlane === "string" && args.swimlane.trim() ? args.swimlane.trim() : null;
+      const maxTasks = typeof args.maxTasks === "string" && args.maxTasks.trim() ? args.maxTasks.trim() : null;
+      const assignee = typeof args.assignee === "string" && args.assignee.trim() ? args.assignee.trim() : null;
+      const parallelism =
+        typeof args.parallelism === "string" && args.parallelism.trim() ? args.parallelism.trim() : null;
+      const includeDecisionGated =
+        args.includeDecisionGated === true ||
+        (typeof args.includeDecisionGated === "string" && args.includeDecisionGated.toLowerCase() === "true");
+      return makePrompt(
+        `Execute a bounded tracker scope for ${slug}.`,
+        [
+          "Use the `tracker-execute-scope` skill workflow.",
+          "Call `tracker_help` or read `tracker://help` before touching project state.",
+          `Resolve scope for \`${slug}\`: \`${scope}\`${swimlane ? `, swimlane \`${swimlane}\`` : ""}${maxTasks ? `, max tasks \`${maxTasks}\`` : ""}.`,
+          `Start with \`tracker_project_status\` and \`tracker_next\`${includeDecisionGated ? " with gated work included only for inspection" : " without gated work unless explicitly authorized"}.`,
+          "For each candidate, call `tracker_brief`, `tracker_why` when intent is unclear, and `tracker_execute` before editing.",
+          `${assignee ? `Use assignee \`${assignee}\` when calling \`tracker_start\`.` : "Use `tracker_start` only when the task is actually starting."}`,
+          "Verify with `tracker_verify` before patching a task complete; patch blockers with a concrete `blocker_reason`.",
+          `${parallelism ? `If this host explicitly permits subagents, use at most \`${parallelism}\` independent workers with disjoint task/file ownership.` : "Use subagents only when the host and user explicitly permit delegation."}`
+        ].join("\n")
+      );
+    }
+    case "tracker_closeout_sweep": {
+      const scope = typeof args.scope === "string" && args.scope.trim() ? args.scope.trim() : "project";
+      const swimlane = typeof args.swimlane === "string" && args.swimlane.trim() ? args.swimlane.trim() : null;
+      const closePolicy =
+        typeof args.closePolicy === "string" && args.closePolicy.trim() ? args.closePolicy.trim() : "evidence-required";
+      return makePrompt(
+        `Sweep tracker state for ${slug}.`,
+        [
+          "Use the `tracker-closeout-sweep` skill workflow.",
+          "Call `tracker_help` or read `tracker://help` before writing.",
+          `Sweep scope for \`${slug}\`: \`${scope}\`${swimlane ? `, swimlane \`${swimlane}\`` : ""}; close policy \`${closePolicy}\`.`,
+          "Load `tracker_project_status`, `tracker_hygiene`, `tracker_blockers`, and `tracker_changed` when a recent rev is known.",
+          "For each stale or open task, call `tracker_brief` and `tracker_verify` before deciding whether it can close.",
+          "Patch `status: \"complete\"` only with evidence; otherwise patch the accurate remaining work, status, or `blocker_reason`.",
+          "Re-run a bounded status or hygiene check after material updates and report closed, open, blocked, and decision-gated tasks."
+        ].join("\n")
+      );
+    }
+    case "tracker_plan_tasks": {
+      const goal = typeof args.goal === "string" && args.goal.trim() ? args.goal.trim() : "<goal>";
+      const swimlane = typeof args.swimlane === "string" && args.swimlane.trim() ? args.swimlane.trim() : null;
+      const priority = typeof args.priority === "string" && args.priority.trim() ? args.priority.trim() : null;
+      const reviewOnly =
+        args.reviewOnly !== false &&
+        !(typeof args.reviewOnly === "string" && args.reviewOnly.toLowerCase() === "false");
+      return makePrompt(
+        `Plan tracker tasks for ${slug}.`,
+        [
+          "Use the `tracker-task-planner` skill workflow.",
+          "Call `tracker_help` or read `tracker://help` before writing.",
+          `Goal: ${goal}`,
+          `Target placement: ${swimlane ? `swimlane \`${swimlane}\`` : "resolve swimlane from project context"}; ${priority ? `priority \`${priority}\`` : "resolve priority from project context"}.`,
+          "Search existing work with `tracker_search` and `tracker_fuzzy_search` before creating new tasks.",
+          "Draft tasks with ids, titles, goals, valid placement, blocker-only `dependencies`, optional `parent_id` for grouping, definition of done, expected changes, allowed paths, and approval gates.",
+          "Check for duplicate tasks, missing dependencies, cycles, unclear ownership, and missing DoD.",
+          `${reviewOnly ? "Show the proposed task graph and DoD for human review before calling `tracker_patch`." : "Patch the approved task set with `tracker_patch`; new patch-mode tasks must remain open."}`
         ].join("\n")
       );
     }

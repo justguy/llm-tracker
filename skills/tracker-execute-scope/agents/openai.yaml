@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tracker Execute Scope"
+  short_description: "Run bounded tracker execution workflows"
+  default_prompt: "Use $tracker-execute-scope to execute the open tasks in this swimlane."

@@ -284,6 +284,9 @@ test("MCP prompts expose tracker workflows and operational guidance", async () =
     assert.ok(names.includes("tracker_verify_task"));
     assert.ok(names.includes("tracker_patch_write"));
     assert.ok(names.includes("tracker_handoff_task"));
+    assert.ok(names.includes("tracker_execute_scope"));
+    assert.ok(names.includes("tracker_closeout_sweep"));
+    assert.ok(names.includes("tracker_plan_tasks"));
 
     const handoff = await client.request("prompts/get", {
       name: "tracker_handoff_task",
@@ -311,6 +314,26 @@ test("MCP prompts expose tracker workflows and operational guidance", async () =
     assert.match(executeText, /tracker_verify/);
     assert.match(executeText, /test-project/);
     assert.match(executeText, /t1/);
+
+    const scope = await client.request("prompts/get", {
+      name: "tracker_execute_scope",
+      arguments: { slug: "test-project", scope: "swimlane", swimlane: "Governance", maxTasks: "3" }
+    });
+    const scopeText = scope.result.messages[0].content.text;
+    assert.match(scopeText, /tracker-execute-scope/);
+    assert.match(scopeText, /tracker_next/);
+    assert.match(scopeText, /tracker_verify/);
+    assert.match(scopeText, /Governance/);
+
+    const planner = await client.request("prompts/get", {
+      name: "tracker_plan_tasks",
+      arguments: { slug: "test-project", goal: "Add workflow skills", reviewOnly: "true" }
+    });
+    const plannerText = planner.result.messages[0].content.text;
+    assert.match(plannerText, /tracker-task-planner/);
+    assert.match(plannerText, /tracker_search/);
+    assert.match(plannerText, /definition of done/i);
+    assert.match(plannerText, /human review/);
   } finally {
     await client.close();
     rmSync(workspace, { recursive: true, force: true });

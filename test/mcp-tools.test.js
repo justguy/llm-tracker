@@ -46,12 +46,23 @@ test("tracker_patch is exposed across MCP tools, runtime metadata, and prompts",
     assert.match(startHere.messages[0].content.text, /tracker_create_swimlane/);
     assert.match(startHere.messages[0].content.text, /tracker_delete_swimlane/);
     assert.match(startHere.messages[0].content.text, /tracker_start/);
+    assert.match(startHere.messages[0].content.text, /tracker_execute_scope/);
+    assert.match(startHere.messages[0].content.text, /tracker_closeout_sweep/);
+    assert.match(startHere.messages[0].content.text, /tracker_plan_tasks/);
     assert.match(startHere.messages[0].content.text, /swimlaneOps/);
 
     const patchWrite = getPrompt(workspace, "tracker_patch_write", { slug: "test-project" });
     assert.match(patchWrite.messages[0].content.text, /tracker_patch/);
     assert.match(patchWrite.messages[0].content.text, /taskOps/);
     assert.match(patchWrite.messages[0].content.text, /expectedRev/);
+
+    const closeoutSweep = getPrompt(workspace, "tracker_closeout_sweep", {
+      slug: "test-project",
+      scope: "in-progress"
+    });
+    assert.match(closeoutSweep.messages[0].content.text, /tracker-closeout-sweep/);
+    assert.match(closeoutSweep.messages[0].content.text, /tracker_hygiene/);
+    assert.match(closeoutSweep.messages[0].content.text, /evidence-required/);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

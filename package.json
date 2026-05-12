@@ -54,8 +54,11 @@
   },
   "files": [
     "bin",
+    ".agents",
     "hub",
+    "plugins",
     "ui",
+    "skills",
     "workspace-template",
     "img",
     "README.md",
