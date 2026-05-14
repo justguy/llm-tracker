@@ -21,6 +21,7 @@ test("packaged tracker workflow skills are installable and complete", () => {
     assert.match(skill, /description: .+Use when /);
     assert.doesNotMatch(skill, /TODO/);
     assert.match(skill, /tracker_help|tracker:\/\/help/);
+    assert.match(skill, /Default to the relevant slug for the current app\/project/);
 
     const openai = readFileSync(openaiPath, "utf8");
     assert.match(openai, new RegExp(`\\$${name}`));
@@ -54,6 +55,7 @@ test("Codex plugin wrapper exposes the same workflow skills", () => {
     assert.match(skill, new RegExp(`name: ${name}`));
     assert.match(skill, /description: .+Use when /);
     assert.match(skill, /tracker_help|tracker:\/\/help/);
+    assert.match(skill, /Default to the relevant slug for the current app\/project/);
     assert.doesNotMatch(skill, /TODO/);
   }
 });

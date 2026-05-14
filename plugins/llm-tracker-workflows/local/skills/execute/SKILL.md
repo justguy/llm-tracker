@@ -11,7 +11,7 @@ Run a bounded work burst from tracker state to verified task updates. Prefer `tr
 
 Resolve these from the user request or project defaults:
 
-- `slug`: project slug.
+- `slug`: project slug. Default to the relevant slug for the current app/project unless the user explicitly names another slug.
 - `scope`: `swimlane`, `all-open`, `next`, or explicit task ids.
 - `swimlane`: lane id or label when scope is a swimlane.
 - `maxTasks`: cap for the burst; default to a small batch if unspecified.

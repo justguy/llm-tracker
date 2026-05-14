@@ -11,7 +11,7 @@ Convert a goal into reviewable tracker work. Default to review-first planning: s
 
 Resolve these from the user request:
 
-- `slug`: project slug.
+- `slug`: project slug. Default to the relevant slug for the current app/project unless the user explicitly names another slug.
 - `goal`: outcome the tasks should accomplish.
 - `swimlane`: target lane id or label.
 - `priority`: target priority id or label.

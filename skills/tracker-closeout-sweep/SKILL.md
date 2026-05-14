@@ -11,7 +11,7 @@ Update tracker truth after work has happened. This skill is evidence-first: clos
 
 Resolve these from the user request:
 
-- `slug`: project slug.
+- `slug`: project slug. Default to the relevant slug for the current app/project unless the user explicitly names another slug.
 - `scope`: `project`, `swimlane`, `changed`, `in-progress`, or explicit task ids.
 - `swimlane`: lane id or label when applicable.
 - `closePolicy`: default `evidence-required`.
