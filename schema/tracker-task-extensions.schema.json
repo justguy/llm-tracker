@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tracker-task-extensions.schema.json",
+  "title": "Tracker task extensions (Session Hub v0.5)",
+  "description": "Additive optional task fields per TDD §6.9 + §6.9.4. Existing tracker JSON without these keys remains valid; present-but-invalid fields fail validation. Path semantics and verify-item id uniqueness are enforced in hub/validator/task-extensions.js (see Validation constraints not expressible in pure JSON Schema).",
+  "definitions": {
+    "TaskRepoRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "worktree": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "allowed_paths": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "TaskRepos": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "primary": { "$ref": "#/definitions/TaskRepoRef" },
+        "secondary": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/definitions/TaskRepoRef" }
+        }
+      }
+    },
+    "VerifyItem": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "required", "cmd"],
+          "properties": {
+            "kind": { "const": "command" },
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
+            "required": { "type": "boolean" },
+            "cmd": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "cwd": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "timeoutSec": { "type": "integer", "minimum": 1, "maximum": 3600 },
+            "expectExit": { "type": "integer" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "required", "tool"],
+          "properties": {
+            "kind": { "const": "lint" },
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
+            "required": { "type": "boolean" },
+            "tool": { "type": "string", "minLength": 1, "pattern": "^[a-zA-Z0-9_.:-]+$" },
+            "args": { "type": "array", "maxItems": 128, "items": { "type": "string" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "required", "skillId"],
+          "properties": {
+            "kind": { "const": "skill_run" },
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
+            "required": { "type": "boolean" },
+            "skillId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "required", "prompt"],
+          "properties": {
+            "kind": { "const": "human_approval" },
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
+            "required": { "type": "boolean" },
+            "prompt": { "type": "string", "minLength": 1, "maxLength": 2000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "required", "ref"],
+          "properties": {
+            "kind": { "const": "dod_check" },
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
+            "required": { "type": "boolean" },
+            "ref": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      ]
+    },
+    "TaskVerify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/definitions/VerifyItem" }
+        },
+        "notes": { "type": "string", "maxLength": 4000 }
+      }
+    },
+    "TaskExtensions": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "repos": { "$ref": "#/definitions/TaskRepos" },
+        "verify": { "$ref": "#/definitions/TaskVerify" }
+      }
+    }
+  },
+  "$ref": "#/definitions/TaskExtensions"
+}
