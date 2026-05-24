@@ -17,6 +17,8 @@ import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
 import { buildTrackerErrorBody } from "./error-payload.js";
 import { registerSessionsRoutes } from "./api/sessions.js";
+import { registerRunSessionRoutes } from "./api/run-session.js";
+import { createDraftStore } from "./run-session/drafts.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
 import { loadWorkspaceConfig } from "./config/loader.js";
@@ -447,6 +449,12 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     makeRuntimeId,
     validateRuntimeEvent,
     workspace
+  });
+  const runSessionDraftStore = createDraftStore();
+  registerRunSessionRoutes(app, {
+    store,
+    draftStore: runSessionDraftStore,
+    projection: runtimeProjection
   });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {
