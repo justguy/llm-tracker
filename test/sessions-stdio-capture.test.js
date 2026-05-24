@@ -131,6 +131,64 @@ test("capture ON, over cap: rotates and starts a fresh live log", async () => {
   }
 });
 
+test("capture ON, first oversized append is split into bounded live/rotated segments", async () => {
+  const baseDir = makeTmp("oversized-first");
+  try {
+    const cap = createStdioCapture({
+      sessionId: "ses_big",
+      baseDir,
+      captureToDisk: true,
+      maxBytes: 100,
+      rotatedSegments: 3,
+      promptOnFirstCapture: false,
+    });
+    const res = await cap.append(Buffer.alloc(250, 0x58));
+    assert.equal(res.rotated, true);
+    assert.equal(res.segmentCount, 2);
+    assert.equal(res.currentLogBytes, 50);
+
+    const dir = logDir(baseDir);
+    assert.equal(statSync(join(dir, "ses_big.log")).size, 50, "live log stays under cap");
+    assert.equal(statSync(join(dir, "ses_big.1.log")).size, 100, ".1.log is a capped segment");
+    assert.equal(statSync(join(dir, "ses_big.2.log")).size, 100, ".2.log is a capped segment");
+    await cap.close();
+  } finally {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+test("capture ON: concurrent appends serialize disk rotation state", async () => {
+  const baseDir = makeTmp("concurrent");
+  try {
+    const cap = createStdioCapture({
+      sessionId: "ses_q",
+      baseDir,
+      captureToDisk: true,
+      maxBytes: 100,
+      rotatedSegments: 3,
+      promptOnFirstCapture: false,
+    });
+    const results = await Promise.all([
+      cap.append(Buffer.alloc(80, 0x41)),
+      cap.append(Buffer.alloc(80, 0x42)),
+      cap.append(Buffer.alloc(80, 0x43)),
+      cap.append(Buffer.alloc(80, 0x44)),
+    ]);
+    assert.equal(results.some((r) => r.rotated), true, "at least one append reports rotation");
+    assert.equal(cap.state().rotatedSegmentCount, 3);
+
+    const dir = logDir(baseDir);
+    const files = readdirSync(dir).filter((f) => f.startsWith("ses_q"));
+    assert.equal(files.length, 4, "1 live + 3 rotated files");
+    for (const file of files) {
+      assert.ok(statSync(join(dir, file)).size <= 100, `${file} must stay under maxBytes`);
+    }
+    await cap.close();
+  } finally {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
 // -- capture ON, exceeds rotatedSegments cap --------------------------------
 
 test("capture ON: oldest rotated segment is deleted when retention cap exceeded", async () => {

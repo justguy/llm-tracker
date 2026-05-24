@@ -90,6 +90,7 @@ export function createStdioCapture({
   let segmentCount = 0;
   let dirReady = false;
   let closed = false;
+  let appendQueue = Promise.resolve();
 
   // Whether capture is *effectively* writing to disk (i.e. ack gate cleared).
   function canWriteDisk() {
@@ -135,25 +136,43 @@ export function createStdioCapture({
     return n;
   }
 
+  async function appendDisk(data) {
+    await ensureDir();
+    let rotated = false;
+
+    let offset = 0;
+    while (offset < data.length) {
+      const remaining = data.length - offset;
+      if (currentLogBytes > 0 && currentLogBytes + remaining > maxBytes) {
+        await rotate();
+        rotated = true;
+      }
+
+      const available = currentLogBytes === 0 ? maxBytes : maxBytes - currentLogBytes;
+      const take = Math.min(remaining, available);
+      await fsp.appendFile(livePath, data.subarray(offset, offset + take));
+      currentLogBytes += take;
+      offset += take;
+    }
+
+    return { rotated, segmentCount, currentLogBytes };
+  }
+
+  function enqueueDiskAppend(data) {
+    const run = appendQueue.then(() => appendDisk(data));
+    appendQueue = run.catch(() => {});
+    return run;
+  }
+
   async function append(chunk) {
     if (closed) throw new Error("createStdioCapture: append after close");
     const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
     ring.append(data);
-    if (!canWriteDisk() || data.length === 0) {
+    const shouldWriteDisk = canWriteDisk() && data.length > 0;
+    if (!shouldWriteDisk) {
       return { rotated: false, segmentCount, currentLogBytes };
     }
-    await ensureDir();
-    let rotated = false;
-    // Rotate BEFORE writing if this chunk would push us past the cap and the
-    // live log is non-empty. (If the log is empty, a single oversized chunk
-    // still lands in the live log; it will rotate on the next append.)
-    if (currentLogBytes > 0 && currentLogBytes + data.length > maxBytes) {
-      await rotate();
-      rotated = true;
-    }
-    await fsp.appendFile(livePath, data);
-    currentLogBytes += data.length;
-    return { rotated, segmentCount, currentLogBytes };
+    return enqueueDiskAppend(data);
   }
 
   function snapshot() {
@@ -190,6 +209,7 @@ export function createStdioCapture({
   async function close() {
     if (closed) return;
     closed = true;
+    await appendQueue;
     // No long-lived fd — appendFile opens/closes per call — so nothing to flush.
   }
 
