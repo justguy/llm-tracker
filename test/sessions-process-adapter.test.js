@@ -162,6 +162,69 @@ test("stop sequence: graceful SIGINT exit skips SIGKILL", async () => {
   assert.deepEqual(child.killCalls, ["SIGINT"]);
 });
 
+test("stop sequence: throws and does not emit terminal events when SIGKILL exit is not observed", async () => {
+  const child = makeFakeChild({ exitOn: [] });
+  const { adapter, runtimeStore } = makeAdapter(child, { sigintGraceMs: 1 });
+
+  adapter.start({ sessionId: SESSION_ID, command: "/bin/fake" });
+
+  await assert.rejects(
+    () => adapter.stop(SESSION_ID),
+    /did not exit after SIGKILL/,
+  );
+
+  assert.deepEqual(child.killCalls, ["SIGINT", "SIGKILL"]);
+  assert.deepEqual(runtimeStore.events.map((e) => e.type), [
+    "session.stop.requested",
+    "process.signal_sent",
+    "process.signal_sent",
+  ]);
+});
+
+test("stop sequence: repeated stop calls share the in-flight stop promise", async () => {
+  const child = makeFakeChild({ exitOn: ["SIGKILL"] });
+  const { adapter, runtimeStore } = makeAdapter(child);
+
+  adapter.start({ sessionId: SESSION_ID, command: "/bin/fake" });
+  const first = adapter.stop(SESSION_ID);
+  const second = adapter.stop(SESSION_ID);
+  await Promise.all([first, second]);
+
+  assert.deepEqual(child.killCalls, ["SIGINT", "SIGKILL"]);
+  assert.deepEqual(runtimeStore.events.map((e) => e.type), [
+    "session.stop.requested",
+    "process.signal_sent",
+    "process.signal_sent",
+    "process.exited",
+    "session.stopped",
+  ]);
+
+  await adapter.stop(SESSION_ID);
+  assert.equal(runtimeStore.events.length, 5, "terminal stop is idempotent");
+});
+
+test("stop sequence: append failure rejects instead of reporting successful stop", async () => {
+  const child = makeFakeChild({ exitOn: ["SIGKILL"] });
+  const events = [];
+  const runtimeStore = {
+    events,
+    append(event) {
+      if (event.type === "process.signal_sent") {
+        return Promise.reject(new Error("append boom"));
+      }
+      events.push(event);
+      return Promise.resolve({ ok: true, eventId: "evt_x", rev: events.length });
+    },
+  };
+  const { adapter } = makeAdapter(child, { runtimeStore });
+
+  adapter.start({ sessionId: SESSION_ID, command: "/bin/fake" });
+
+  await assert.rejects(() => adapter.stop(SESSION_ID), /append boom/);
+  assert.deepEqual(child.killCalls, ["SIGINT"]);
+  assert.deepEqual(events.map((e) => e.type), ["session.stop.requested"]);
+});
+
 // --- forceKill --------------------------------------------------------------
 
 test("forceKill: rejects missing userActor", async () => {
@@ -205,6 +268,23 @@ test("forceKill: skips grace, audits actor, emits SIGKILL only", async () => {
 
   const exited = runtimeStore.events[2];
   assert.equal(exited.signal, "SIGKILL");
+});
+
+test("forceKill: throws and does not emit terminal events when SIGKILL exit is not observed", async () => {
+  const child = makeFakeChild({ exitOn: [] });
+  const { adapter, runtimeStore } = makeAdapter(child, { sigintGraceMs: 1 });
+  adapter.start({ sessionId: SESSION_ID, command: "/bin/fake" });
+
+  await assert.rejects(
+    () => adapter.forceKill(SESSION_ID, { userActor: "ui-detail-dock" }),
+    /did not exit after SIGKILL/,
+  );
+
+  assert.deepEqual(child.killCalls, ["SIGKILL"]);
+  assert.deepEqual(runtimeStore.events.map((e) => e.type), [
+    "session.stop.requested",
+    "process.signal_sent",
+  ]);
 });
 
 // --- writeStdin -------------------------------------------------------------

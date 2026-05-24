@@ -261,6 +261,39 @@ test("computeAttentionDedupeKey collapses absent optionals to empty segments (no
   assert.equal(partial, "quiet||||ses_x|");
 });
 
+test("computeAttentionDedupeKey rejects malformed optional identity fields", () => {
+  for (const field of ["projectSlug", "taskId", "jobId", "sessionId", "evidenceRef"]) {
+    assert.throws(
+      () => computeAttentionDedupeKey({ kind: "quiet", [field]: null }),
+      new RegExp(`${field} must be a non-empty string`),
+    );
+    assert.throws(
+      () => computeAttentionDedupeKey({ kind: "quiet", [field]: 42 }),
+      new RegExp(`${field} must be a non-empty string`),
+    );
+    assert.throws(
+      () => computeAttentionDedupeKey({ kind: "quiet", [field]: "" }),
+      new RegExp(`${field} must be a non-empty string`),
+    );
+  }
+});
+
+test("computeAttentionDedupeKey escapes delimiter-bearing segments", () => {
+  const a = computeAttentionDedupeKey({
+    kind: "blocked",
+    projectSlug: "a|b",
+    taskId: "c",
+  });
+  const b = computeAttentionDedupeKey({
+    kind: "blocked",
+    projectSlug: "a",
+    taskId: "b|c",
+  });
+  assert.notEqual(a, b);
+  assert.equal(a, "blocked|a%7Cb|c|||");
+  assert.equal(b, "blocked|a|b%7Cc|||");
+});
+
 test("computeAttentionDedupeKey throws on missing or unknown kind", () => {
   assert.throws(() => computeAttentionDedupeKey({}), /kind required/);
   assert.throws(

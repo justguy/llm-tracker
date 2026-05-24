@@ -52,8 +52,8 @@ import { appendFileSync } from "node:fs";
 /**
  * @typedef {object} ProcessSessionAdapterDeps
  * @property {{ append: (event: object) => any }} runtimeStore
- *   The runtime store sink. Must expose `append(event)`. The adapter does not
- *   await the result; the store is responsible for its own ordering.
+ *   The runtime store sink. Must expose `append(event)`. Stop paths await
+ *   appends so audit sequencing failures are visible to callers.
  * @property {string} workspace
  *   Workspace path. Stamped into every emitted event's `workspace` field.
  * @property {(prefix: "evt"|"ses"|"job"|"skr"|"ctx"|"att") => string} makeRuntimeId
@@ -160,7 +160,7 @@ export class ProcessSessionAdapter {
       ? sigintGraceMs
       : 5000;
 
-    /** @type {Map<string, { child: any, lastOutputAt: Date | null, logPath: string | null, captureToLog: boolean, exited: boolean, exitInfo: { code: number | null, signal: string | null } | null }>} */
+    /** @type {Map<string, { child: any, lastOutputAt: Date | null, logPath: string | null, captureToLog: boolean, exited: boolean, exitInfo: { code: number | null, signal: string | null } | null, stopPromise: Promise<void> | null, stoppedEmitted: boolean }>} */
     this.children = new Map();
   }
 
@@ -169,7 +169,7 @@ export class ProcessSessionAdapter {
    * injected, validate before append (validator throws on rejection).
    *
    * @param {Record<string, any>} event
-   * @returns {void}
+   * @returns {Promise<any>}
    */
   _emit(event) {
     if (this.validateRuntimeEvent) {
@@ -181,7 +181,7 @@ export class ProcessSessionAdapter {
     }
     const { id, ...rest } = event;
     void id;
-    this.runtimeStore.append(rest);
+    return Promise.resolve(this.runtimeStore.append(rest));
   }
 
   /**
@@ -231,6 +231,8 @@ export class ProcessSessionAdapter {
       captureToLog,
       exited: false,
       exitInfo: null,
+      stopPromise: null,
+      stoppedEmitted: false,
     };
     this.children.set(sessionId, state);
 
@@ -326,8 +328,19 @@ export class ProcessSessionAdapter {
     if (!state) {
       throw new Error(`ProcessSessionAdapter.stop: unknown sessionId '${sessionId}'`);
     }
+    if (state.stoppedEmitted) return;
+    if (state.stopPromise) return state.stopPromise;
 
-    this._emit({
+    state.stopPromise = this._stopSequence(sessionId, state);
+    try {
+      await state.stopPromise;
+    } finally {
+      if (!state.stoppedEmitted) state.stopPromise = null;
+    }
+  }
+
+  async _stopSequence(sessionId, state) {
+    await this._emit({
       ...baseEvent({
         type: "session.stop.requested",
         workspace: this.workspace,
@@ -337,21 +350,25 @@ export class ProcessSessionAdapter {
     });
 
     // Step 2: SIGINT.
-    this._sendSignal(state, sessionId, "SIGINT");
+    await this._sendSignal(state, sessionId, "SIGINT");
 
     // Step 3: wait for exit or grace expiry.
     const exitedInGrace = await this._waitForExit(state, this.sigintGraceMs);
 
     // Step 4: escalate to SIGKILL when SIGINT didn't take.
     if (!exitedInGrace) {
-      this._sendSignal(state, sessionId, "SIGKILL", { reason: "sigint_grace_expired" });
-      // Wait without a deadline: SIGKILL is uninterruptible by userspace, so
-      // exit is inevitable. A small upper bound guards against pathological
-      // hosts but defaults to the grace window for symmetry.
-      await this._waitForExit(state, this.sigintGraceMs);
+      await this._sendSignal(state, sessionId, "SIGKILL", { reason: "sigint_grace_expired" });
+      // A small upper bound guards against pathological hosts where no exit
+      // event arrives even after SIGKILL.
+      const exitedAfterKill = await this._waitForExit(state, this.sigintGraceMs);
+      if (!exitedAfterKill) {
+        throw new Error(
+          `ProcessSessionAdapter.stop: child did not exit after SIGKILL for sessionId '${sessionId}'`,
+        );
+      }
     }
 
-    this._emitExitAndStopped(state, sessionId);
+    await this._emitExitAndStopped(state, sessionId);
   }
 
   /**
@@ -374,8 +391,19 @@ export class ProcessSessionAdapter {
     if (!state) {
       throw new Error(`ProcessSessionAdapter.forceKill: unknown sessionId '${sessionId}'`);
     }
+    if (state.stoppedEmitted) return;
+    if (state.stopPromise) return state.stopPromise;
 
-    this._emit({
+    state.stopPromise = this._forceKillSequence(sessionId, state, userActor);
+    try {
+      await state.stopPromise;
+    } finally {
+      if (!state.stoppedEmitted) state.stopPromise = null;
+    }
+  }
+
+  async _forceKillSequence(sessionId, state, userActor) {
+    await this._emit({
       ...baseEvent({
         type: "session.stop.requested",
         workspace: this.workspace,
@@ -386,13 +414,18 @@ export class ProcessSessionAdapter {
       actor: userActor,
     });
 
-    this._sendSignal(state, sessionId, "SIGKILL", {
+    await this._sendSignal(state, sessionId, "SIGKILL", {
       reason: "force_kill_requested",
       actor: userActor,
     });
 
-    await this._waitForExit(state, this.sigintGraceMs);
-    this._emitExitAndStopped(state, sessionId);
+    const exited = await this._waitForExit(state, this.sigintGraceMs);
+    if (!exited) {
+      throw new Error(
+        `ProcessSessionAdapter.forceKill: child did not exit after SIGKILL for sessionId '${sessionId}'`,
+      );
+    }
+    await this._emitExitAndStopped(state, sessionId);
   }
 
   /**
@@ -427,15 +460,15 @@ export class ProcessSessionAdapter {
 
   /**
    * Send `signal` to the child and emit a `process.signal_sent` runtime event.
-   * Swallows `kill()` errors so emission cannot fail mid-escalation: the
-   * downstream `process.exited` observation is the source of truth, and a
-   * signal-send error here just means the child already gone.
+   * Swallows `kill()` errors: the downstream `process.exited` observation is
+   * the source of truth, and a signal-send error here usually means the child
+   * is already gone. Runtime-store append failures still propagate.
    *
    * @param {any} state
    * @param {string} sessionId
    * @param {EscalationSignal} signal
    * @param {{ reason?: string, actor?: string }} [extras]
-   * @returns {void}
+   * @returns {Promise<any>}
    */
   _sendSignal(state, sessionId, signal, extras) {
     const pid = state.child ? state.child.pid : undefined;
@@ -459,7 +492,7 @@ export class ProcessSessionAdapter {
     if (typeof pid === "number") evt.pid = pid;
     if (extras && extras.reason) evt.reason = extras.reason;
     if (extras && extras.actor) evt.actor = extras.actor;
-    this._emit(evt);
+    return this._emit(evt);
   }
 
   /**
@@ -499,14 +532,14 @@ export class ProcessSessionAdapter {
 
   /**
    * Emit `process.exited` (with whatever exit info we observed) followed by
-   * `session.stopped`. Idempotent: subsequent calls are no-ops because the
-   * caller (stop / forceKill) only runs after the exit observer fires.
+   * `session.stopped`. Idempotent: subsequent calls are no-ops.
    *
    * @param {any} state
    * @param {string} sessionId
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  _emitExitAndStopped(state, sessionId) {
+  async _emitExitAndStopped(state, sessionId) {
+    if (state.stoppedEmitted) return;
     /** @type {Record<string, any>} */
     const exited = {
       ...baseEvent({
@@ -520,9 +553,9 @@ export class ProcessSessionAdapter {
       if (state.exitInfo.code !== null) exited.code = state.exitInfo.code;
       if (state.exitInfo.signal !== null) exited.signal = state.exitInfo.signal;
     }
-    this._emit(exited);
+    await this._emit(exited);
 
-    this._emit({
+    await this._emit({
       ...baseEvent({
         type: "session.stopped",
         workspace: this.workspace,
@@ -530,5 +563,6 @@ export class ProcessSessionAdapter {
         ts: this.now().toISOString(),
       }),
     });
+    state.stoppedEmitted = true;
   }
 }

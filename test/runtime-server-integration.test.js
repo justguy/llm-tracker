@@ -102,6 +102,35 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     assert.equal(legacyInitial.type, "SNAPSHOT");
     assert.ok(legacyInitial.projects);
 
+    const layoutGet = await fetch(`${base}/api/layouts/session-hub`);
+    assert.equal(layoutGet.status, 200);
+    const layoutGetBody = await layoutGet.json();
+    assert.equal(layoutGetBody.layout.version, 1);
+    assert.equal(layoutGetBody.layout.global.cardSizeDefault, "normal");
+
+    const layoutPut = await fetch(`${base}/api/layouts/session-hub`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({
+        version: 1,
+        global: { cardSizeDefault: "compact" },
+        views: { hub: { groupBy: "project" } },
+      }),
+    });
+    assert.equal(layoutPut.status, 200);
+    const layoutPutBody = await layoutPut.json();
+    assert.equal(layoutPutBody.layout.global.cardSizeDefault, "compact");
+
+    const layoutPatch = await fetch(`${base}/api/layouts/session-hub`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ views: { hub: { groupBy: "urgency" } } }),
+    });
+    assert.equal(layoutPatch.status, 200);
+    const layoutPatchBody = await layoutPatch.json();
+    assert.equal(layoutPatchBody.layout.global.cardSizeDefault, "compact");
+    assert.equal(layoutPatchBody.layout.views.hub.groupBy, "urgency");
+
     const eventPromise = waitForMessage(runtimeWs);
     const createRes = await postJson(base, "/api/sessions", {
       name: "prod-smoke",

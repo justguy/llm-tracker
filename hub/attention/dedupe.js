@@ -17,7 +17,8 @@ import { ATTENTION_KINDS } from "./types.js";
  *
  * Optional fields collapse to "" (empty segment); positions are fixed so two
  * items that differ only in which optional field is set still produce
- * distinct keys.
+ * distinct keys. Present optional fields must be non-empty strings and are
+ * URI-encoded before joining so delimiter-bearing values cannot collide.
  *
  * @param {object} input
  * @param {AttentionKind} input.kind
@@ -41,5 +42,20 @@ export function computeAttentionDedupeKey(input) {
       `computeAttentionDedupeKey: kind '${kind}' not in ATTENTION_KINDS`,
     );
   }
-  return `${kind}|${projectSlug ?? ""}|${taskId ?? ""}|${jobId ?? ""}|${sessionId ?? ""}|${evidenceRef ?? ""}`;
+  return [
+    kind,
+    optionalSegment("projectSlug", projectSlug),
+    optionalSegment("taskId", taskId),
+    optionalSegment("jobId", jobId),
+    optionalSegment("sessionId", sessionId),
+    optionalSegment("evidenceRef", evidenceRef),
+  ].join("|");
+}
+
+function optionalSegment(field, value) {
+  if (value === undefined) return "";
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`computeAttentionDedupeKey: ${field} must be a non-empty string when present`);
+  }
+  return encodeURIComponent(value);
 }
