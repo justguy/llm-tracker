@@ -213,6 +213,25 @@ test("requires at least one swimlane and priority", () => {
   assert.equal(ok, false);
 });
 
+test("validateProject rejects legacy allowed_paths outside repo-relative POSIX scope", () => {
+  const p = validProject();
+  p.tasks[0].allowed_paths = ["/etc/passwd", "src\\**", "C:Users/me/secrets"];
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/0") && e.includes("repo-relative")),
+    `expected absolute path error, got: ${errors.join("; ")}`
+  );
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/1") && e.includes("POSIX-style")),
+    `expected POSIX path error, got: ${errors.join("; ")}`
+  );
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/2") && e.includes("Windows-drive")),
+    `expected Windows-drive path error, got: ${errors.join("; ")}`
+  );
+});
+
 test("accepts task.repos and task.verify additions (sh-5-07 wiring)", () => {
   const p = validProject();
   p.tasks[0].repos = {

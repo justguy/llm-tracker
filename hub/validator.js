@@ -2,7 +2,7 @@ import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { EFFORT_VALUES, REFERENCE_PATTERN_SOURCE } from "./references.js";
 import { STATUS_VALUES, TASK_OUTCOME_VALUES } from "./status-vocabulary.js";
-import { validateAllTaskExtensions } from "./validator/task-extensions.js";
+import { validateAllTaskExtensions, validateAllowedPaths } from "./validator/task-extensions.js";
 
 const schema = {
   type: "object",
@@ -202,6 +202,8 @@ export function validateProject(data) {
         errors.push(`/tasks/${i}/parent_id: "${parentId}" is not a task id in this project`);
       }
     }
+
+    validateAllowedPaths(t.allowed_paths, `/tasks/${i}/allowed_paths`, errors);
   }
 
   const parentById = new Map(

@@ -130,8 +130,10 @@ Ordered by array index. Hub owns the order.
 | `definition_of_done` | array of strings \| null                   |          | Optional completion contract for future execution / verify flows. |
 | `constraints`    | array of strings \| null                       |          | Optional execution guardrails.                        |
 | `expected_changes` | array of strings \| null                     |          | Optional hint about files, modules, or artifacts likely to change. |
-| `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
+| `allowed_paths`  | array of strings \| null                       |          | Optional repo-relative POSIX filesystem scope for execution tooling. |
 | `approval_required_for` | array of strings \| null                |          | Optional approval categories; ranking penalizes these relative to equally-ready work. |
+| `repos`          | object \| null                                 |          | Optional Session Hub repo/worktree scope with per-repo `allowed_paths`. |
+| `verify`         | object \| null                                 |          | Optional task-level verify spec consumed by verify/checklist surfaces and future job verify packs. |
 | `context`        | object (freeform)                              |          | Tags, files touched, notes — shallow-merged on patch. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
@@ -276,7 +278,7 @@ Design rule:
 - `GET /api/projects/:slug/tasks/:taskId/why` returns a capped rationale pack: why the task matters now, what blocks it, what it unblocks, and recent task history.
 - `GET /api/projects/:slug/decisions?limit=20` returns recent decision notes derived from task comments in deterministic order.
 - `GET /api/projects/:slug/tasks/:taskId/execute` returns the action pack: readiness, explicit contract fields, references, snippets, and recent task history.
-- `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks plus tracker-backed evidence sources.
+- `GET /api/projects/:slug/tasks/:taskId/verify` returns the sign-off pack: deterministic checks, including `task.verify.items`, plus tracker-backed evidence sources.
 - `GET /api/projects/:slug/search?q=<query>` runs semantic local-model search through `@huggingface/transformers` + `Xenova/all-MiniLM-L6-v2`.
 - `GET /api/projects/:slug/fuzzy-search?q=<query>` runs deterministic fuzzy lexical matching without embeddings.
 - `GET /api/projects/:slug/blockers` returns two deterministic views: blocked tasks and the tasks currently blocking others.

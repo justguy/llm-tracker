@@ -34,7 +34,9 @@ function summarizeTaskForBrief(task, context) {
     definition_of_done: stringArray(task.definition_of_done),
     constraints: stringArray(task.constraints),
     expected_changes: stringArray(task.expected_changes),
-    allowed_paths: stringArray(task.allowed_paths)
+    allowed_paths: stringArray(task.allowed_paths),
+    repos: task.repos || null,
+    verify: task.verify || null
   };
 }
 

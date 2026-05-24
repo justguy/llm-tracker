@@ -205,11 +205,34 @@ Tasks are ordered by array index. Hub owns the order.
 | `definition_of_done` | array of strings \| null                   |          | Optional completion contract for future verify flows. |
 | `constraints`    | array of strings \| null                       |          | Optional execution guardrails.                        |
 | `expected_changes` | array of strings \| null                     |          | Optional modules, files, or artifacts expected to change. |
-| `allowed_paths`  | array of strings \| null                       |          | Optional filesystem scope for future execution tooling. |
+| `allowed_paths`  | array of strings \| null                       |          | Optional repo-relative POSIX filesystem scope for execution tooling. |
 | `approval_required_for` | array of strings \| null                |          | Optional approval categories that make the task less ready than peers. |
+| `repos`          | object \| null                                 |          | Optional cross-repo scope: `{ primary, secondary[] }`, where each repo ref has `root`, optional `worktree`, optional `branch`, and optional repo-relative POSIX `allowed_paths[]`. |
+| `verify`         | object \| null                                 |          | Optional task-level verify spec: `{ items, notes? }`. Items are merged into job verify packs before profile and workspace defaults. |
 | `context`        | object (freeform)                              |          | Shallow-merged per key on patch. Set a key to `null` in the patch to delete it. Direct file edits do **not** bypass the merge — see §4.3b. |
 | `updatedAt`      | ISO string \| null                             |          | **Hub-owned.**                                        |
 | `rev`            | integer \| null                                |          | **Hub-owned.**                                        |
+
+### 4.3a Task Repos And Verify
+
+`task.repos` is additive and optional. Missing fields are valid; present-but-invalid values fail validation on patch and full writes.
+
+- `repos.primary` is optional. When present, it is a repo ref.
+- `repos.secondary` is optional, max 16 repo refs.
+- A repo ref requires non-empty `root` up to 1024 chars. `root` may be absolute or workspace-relative, but cannot contain NUL.
+- `worktree` follows the same string/NUL/length rules as `root`.
+- `branch` is optional, max 256 chars, and cannot contain NUL.
+- `allowed_paths` on repo refs, and legacy task-level `allowed_paths`, are repo-relative POSIX paths: no leading `/`, no `..` segment, no NUL, no backslashes, and no Windows-drive prefix.
+
+`task.verify` is additive and optional. When present, it must contain `items` with at most 128 entries. Verify item ids must be unique within the task and match `^[a-z0-9][a-z0-9_.:-]{0,63}$`; every item requires a boolean `required`.
+
+Supported verify item kinds:
+
+- `command`: `{ kind, id, required, cmd, cwd?, timeoutSec?, expectExit? }`; `cmd` is non-empty and up to 4096 chars, `cwd` is repo-relative POSIX, `timeoutSec` is 1..3600, and `expectExit` defaults to 0 when omitted by verify-pack composition.
+- `lint`: `{ kind, id, required, tool, args? }`; `tool` matches `^[a-zA-Z0-9_.:-]+$`, `args` has at most 128 strings.
+- `skill_run`: `{ kind, id, required, skillId }`; `skillId` matches `^[a-z0-9][a-z0-9_.:-]{0,127}$`.
+- `human_approval`: `{ kind, id, required, prompt }`; `prompt` is non-empty and up to 2000 chars.
+- `dod_check`: `{ kind, id, required, ref }`; `ref` is non-empty and up to 256 chars.
 
 Task tree rules:
 
@@ -680,8 +703,8 @@ llm-tracker verify <slug> <taskId>
 
 The pack includes:
 
-- explicit verification checks derived from `definition_of_done`, `expected_changes`, `allowed_paths`, and dependency state
-- real evidence sources only: task state, recent history, references, and extracted snippets
+- explicit verification checks derived from `definition_of_done`, `expected_changes`, `allowed_paths`, `task.verify.items`, and dependency state
+- real evidence sources only: task state, task verify spec, recent history, references, and extracted snippets
 - no guessed git diff or semantic inference
 
 ---

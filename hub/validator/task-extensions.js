@@ -13,7 +13,7 @@ addFormats(ajv);
 const compiled = ajv.compile(schema);
 
 const NUL = "\u0000";
-const WIN_DRIVE_RE = /^[A-Za-z]:[\\/]/;
+const WIN_DRIVE_RE = /^[A-Za-z]:/;
 
 function formatAjvError(err) {
   const path = err.instancePath || "/";
@@ -67,9 +67,20 @@ function checkRepoRelativePath(value, loc, errors) {
     errors.push(`${loc}: must be repo-relative; Windows-drive paths rejected`);
     return;
   }
-  const segments = value.split(/[\\/]+/);
+  if (value.includes("\\")) {
+    errors.push(`${loc}: must be repo-relative POSIX-style path; backslashes rejected`);
+    return;
+  }
+  const segments = value.split("/");
   if (segments.some((s) => s === "..")) {
     errors.push(`${loc}: must be repo-relative; must not contain ".." segment`);
+  }
+}
+
+export function validateAllowedPaths(paths, loc, errors) {
+  if (!Array.isArray(paths)) return;
+  for (let i = 0; i < paths.length; i++) {
+    checkRepoRelativePath(paths[i], `${loc}/${i}`, errors);
   }
 }
 
@@ -79,9 +90,7 @@ function validateRepoRef(ref, loc, errors) {
   if (typeof ref.worktree === "string") checkNoNul(ref.worktree, `${loc}/worktree`, errors);
   if (typeof ref.branch === "string") checkNoNul(ref.branch, `${loc}/branch`, errors);
   if (Array.isArray(ref.allowed_paths)) {
-    for (let i = 0; i < ref.allowed_paths.length; i++) {
-      checkRepoRelativePath(ref.allowed_paths[i], `${loc}/allowed_paths/${i}`, errors);
-    }
+    validateAllowedPaths(ref.allowed_paths, `${loc}/allowed_paths`, errors);
   }
 }
 

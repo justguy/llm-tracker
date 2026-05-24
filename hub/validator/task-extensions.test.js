@@ -109,6 +109,24 @@ test("allowed_paths Windows drive rejected", () => {
   );
 });
 
+test("allowed_paths Windows drive without slash rejected", () => {
+  bad(
+    validateTaskExtensions({
+      repos: { primary: { root: "r", allowed_paths: ["C:Users/me/secrets"] } }
+    }),
+    "Windows-drive"
+  );
+});
+
+test("allowed_paths backslashes rejected as non-POSIX", () => {
+  bad(
+    validateTaskExtensions({
+      repos: { primary: { root: "r", allowed_paths: ["src\\**"] } }
+    }),
+    "POSIX-style"
+  );
+});
+
 test("allowed_paths .. segment rejected", () => {
   bad(
     validateTaskExtensions({
@@ -127,10 +145,42 @@ test("allowed_paths NUL byte rejected", () => {
   );
 });
 
+test("allowed_paths rejects documented v0.5 examples", () => {
+  for (const pattern of [
+    "/Users/me/secrets/**",
+    "../outside/**",
+    "src/../../outside/**",
+    "C:\\Users\\me\\secrets"
+  ]) {
+    const res = validateTaskExtensions({
+      repos: { primary: { root: "r", allowed_paths: [pattern] } }
+    });
+    assert.equal(res.ok, false, `expected ${pattern} to fail`);
+  }
+});
+
 test("unknown property in TaskRepoRef rejected", () => {
   bad(
     validateTaskExtensions({ repos: { primary: { root: "r", whatever: 1 } } }),
     "whatever"
+  );
+});
+
+test("worktree follows root NUL and length constraints", () => {
+  bad(
+    validateTaskExtensions({ repos: { primary: { root: "r", worktree: "a\u0000b" } } }),
+    "NUL"
+  );
+  bad(
+    validateTaskExtensions({ repos: { primary: { root: "r", worktree: "x".repeat(1025) } } }),
+    "1024"
+  );
+});
+
+test("branch rejects NUL byte", () => {
+  bad(
+    validateTaskExtensions({ repos: { primary: { root: "r", branch: "main\u0000dev" } } }),
+    "NUL"
   );
 });
 
@@ -203,6 +253,14 @@ test("verify item duplicate ids rejected", () => {
   );
 });
 
+test("verify present without items fails", () => {
+  bad(validateTaskExtensions({ verify: { notes: "missing items" } }), "items");
+});
+
+test("verify.notes accepts long strings without an extra validator cap", () => {
+  ok(validateTaskExtensions({ verify: { items: [], notes: "x".repeat(5000) } }));
+});
+
 test("verify command.cmd over 4096 fails", () => {
   const cmd = "x".repeat(4097);
   bad(
@@ -247,6 +305,25 @@ test("verify command.cwd .. rejected", () => {
       verify: { items: [{ kind: "command", id: "c1", required: true, cmd: "x", cwd: "../outside" }] }
     }),
     '".." segment'
+  );
+});
+
+test("verify command.cwd rejects NUL and Windows-drive paths", () => {
+  bad(
+    validateTaskExtensions({
+      verify: {
+        items: [{ kind: "command", id: "c1", required: true, cmd: "x", cwd: "a\u0000b" }]
+      }
+    }),
+    "NUL"
+  );
+  bad(
+    validateTaskExtensions({
+      verify: {
+        items: [{ kind: "command", id: "c2", required: true, cmd: "x", cwd: "C:repo" }]
+      }
+    }),
+    "Windows-drive"
   );
 });
 
