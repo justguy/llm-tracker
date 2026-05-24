@@ -22,3 +22,4 @@
 
 - [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat`, `fix`, `perf`, `revert`, `docs`, `refactor`, `build`, `ci`, `chore`, `test`)
 - [ ] I have NOT hand-edited `CHANGELOG.md` (release-please owns it)
+- [ ] If this PR touches Session Hub work, it follows the precedence order in [`docs/session-hub/precedence.md`](../docs/session-hub/precedence.md)

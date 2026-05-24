@@ -10,6 +10,7 @@ coverage/
 
 # Project-local scratch
 initial prompt.txt
+.hoplon/
 
 # Repo-local tracker: track the durable file + layout README, ignore runtime churn
 .llm-tracker/.runtime/

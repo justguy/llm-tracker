@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>LLM Tracker — Redesign Exploration</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; }
+  * { box-sizing: border-box; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 6px; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="variants/variant-a.jsx"></script>
+<script type="text/babel" src="variants/variant-a2.jsx"></script>
+<script type="text/babel" src="variants/variant-b.jsx"></script>
+<script type="text/babel" src="variants/variant-c.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+function Intro() {
+  return (
+    <div style={{
+      padding: '0 60px 40px', maxWidth: 900,
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: 11, letterSpacing: 2, color: 'rgba(60,50,40,0.6)',
+        marginBottom: 12,
+      }}>LLM·TRACKER · REDESIGN · 3 DIRECTIONS</div>
+      <div style={{
+        fontSize: 44, fontWeight: 600, letterSpacing: -1,
+        color: 'rgba(20,18,14,0.95)', marginBottom: 16,
+        lineHeight: 1.1,
+      }}>
+        Making the human interface simpler,<br/>without dimming the LLMs.
+      </div>
+      <div style={{
+        fontSize: 15, lineHeight: 1.6, color: 'rgba(60,50,40,0.85)',
+        maxWidth: 720,
+      }}>
+        The current UI is Bloomberg‑terminal dense. You asked to keep functionality intuitive
+        while calming the surface. Since <em>the humans</em> are the UI's real audience
+        (the LLMs talk through MCP, CLI, and HTTP), each direction pulls the human view
+        toward its own kind of clarity. All three preserve bracketed
+        <span style={{ fontFamily: '"JetBrains Mono", monospace', margin: '0 4px' }}>[ACTIONS]</span>
+        as the action DNA.
+      </div>
+
+      <div style={{
+        marginTop: 28,
+        display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16,
+        fontSize: 13, color: 'rgba(60,50,40,0.85)',
+      }}>
+        <Principle n="A" title="Calmed terminal"
+          desc="Keep monospace data, but add real typographic hierarchy. Collapse 14 header buttons into 3 clusters + ⌘K. One warm ink accent, green for status only." />
+        <Principle n="B" title="Modern minimal"
+          desc="Sans UI chrome, mono only for IDs / tags / paths. Left rail for lane nav; priority columns become cards. No modals — everything inline. Light & airy." />
+        <Principle n="C" title="Focus stream"
+          desc="Rethinks the interaction: agents work one task at a time, so the board becomes a focused task page with a live agent activity rail. Dark, calm, cinematic." />
+      </div>
+    </div>
+  );
+}
+
+function Principle({ n, title, desc }) {
+  return (
+    <div style={{
+      padding: 16, background: 'rgba(255,255,255,0.6)',
+      border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6,
+    }}>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11, color: 'rgba(60,50,40,0.5)', marginBottom: 6 }}>VARIANT {n}</div>
+      <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>{title}</div>
+      <div style={{ lineHeight: 1.5, color: 'rgba(60,50,40,0.75)', fontSize: 13 }}>{desc}</div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <DesignCanvas>
+      <div style={{ padding: '20px 0 0' }}>
+        <Intro />
+
+        <DCSection
+          title="Variant A2 — Refined (recommended)"
+          subtitle="Variant A, with your edits: shrunk scratchpad, Variant B's 94% hero + status grid, and the green Recommended Next callout."
+        >
+          <DCArtboard label="1440 × 900 · light · REFINED" width={1440} height={900}>
+            <VariantA2 />
+          </DCArtboard>
+          <div style={{ width: 340, padding: '20px 4px', fontSize: 13, lineHeight: 1.55, color: 'rgba(40,30,20,0.8)' }}>
+            <Note label="SCRATCHPAD">
+              Collapsed to a single-line NOTE row with truncation + [EXPAND] / [EDIT]. Reclaims ~60px for the board.
+            </Note>
+            <Note label="HERO STATUS">
+              Dropped in Variant B's big 94% headline + status grid. Size does the work — you read progress without parsing.
+            </Note>
+            <Note label="NEXT CALLOUT">
+              Green panel from Variant B, using A's warm palette. The [PICK] CTA is now the most visible action on the page — which matches how agents actually use the tool.
+            </Note>
+            <Note label="KEPT">
+              Bracket DNA, monospace data, swimlane × priority grid, expand/collapse lane pattern. Nothing about the board itself changed.
+            </Note>
+          </div>
+        </DCSection>
+
+        <DCSection
+          title="Variant A — Calmed terminal (original)"
+          subtitle="The terminal, but legible. Same DNA, cleaner hierarchy, fewer things shouting at once."
+        >
+          <DCArtboard label="1440 × 900 · light" width={1440} height={900}>
+            <VariantA />
+          </DCArtboard>
+          <div style={{ width: 340, padding: '20px 4px', fontSize: 13, lineHeight: 1.55, color: 'rgba(40,30,20,0.8)' }}>
+            <Note label="HEADER">
+              14 buttons → 3 labelled clusters (<em>agent</em> / <em>history</em> / ⌘K) + overflow. ⌘K replaces [FILTER], [FUZZY], and most nav.
+            </Note>
+            <Note label="HIERARCHY">
+              Size + weight do the work color was doing. Project name grows; statuses shrink; mono is reserved for IDs, paths, counts.
+            </Note>
+            <Note label="CARD">
+              Three tiers: id+title, summary, status+assignee+tags. Actions ([READ][WHY][EXEC][VERIFY]) live on a separator below, revealed on hover.
+            </Note>
+            <Note label="COLOR">
+              Single warm‑ink accent for actionable items; green only for "done" status. No more orange‑on‑orange chrome.
+            </Note>
+          </div>
+        </DCSection>
+
+        <DCSection
+          title="Variant B — Modern minimal"
+          subtitle="If you showed this to a product manager, they wouldn't flinch. Mono preserved for data integrity."
+        >
+          <DCArtboard label="1440 × 900 · light" width={1440} height={900}>
+            <VariantB />
+          </DCArtboard>
+          <div style={{ width: 340, padding: '20px 4px', fontSize: 13, lineHeight: 1.55, color: 'rgba(40,30,20,0.8)' }}>
+            <Note label="NAV SHIFT">
+              Swimlanes move to a persistent <strong>left rail</strong>. The main board shows only the active lane's 4 priority columns — never a long scroll of collapsed rows.
+            </Note>
+            <Note label="HERO SUMMARY">
+              Big 94% headline, status grid, and "Recommended Next" card above the board. The summary row earns its height by being useful at a glance.
+            </Note>
+            <Note label="TYPE">
+              Inter for UI, JetBrains Mono for IDs, assignees, paths, counts, and [BRACKETED] verbs. Two fonts; two clear jobs.
+            </Note>
+            <Note label="TASK CARD">
+              Rounded, generously padded. Status pill top‑right. Actions below a hairline divider. No border‑left accent — hierarchy is enough.
+            </Note>
+          </div>
+        </DCSection>
+
+        <DCSection
+          title="Variant C — Focus stream"
+          subtitle="Agents work one task at a time. This UI rotates around that reality."
+        >
+          <DCArtboard label="1440 × 900 · dark" width={1440} height={900}>
+            <VariantC />
+          </DCArtboard>
+          <div style={{ width: 340, padding: '20px 4px', fontSize: 13, lineHeight: 1.55, color: 'rgba(40,30,20,0.8)' }}>
+            <Note label="LAYOUT">
+              3 columns: lane/priority nav · focused task · live agent stream. No modal overlays — the task <em>is</em> the page.
+            </Note>
+            <Note label="AGENT STREAM">
+              The right rail is what makes the tool feel alive: who's doing what, right now. <em>"claude‑opus‑4‑6 completed T‑012"</em> scrolls in live.
+            </Note>
+            <Note label="VERBS ON TOP">
+              [READ][WHY][EXEC][VERIFY] are the focus task's primary buttons, sized up. The agent workflow from the README shows through the UI literally.
+            </Note>
+            <Note label="DARK PALETTE">
+              Same amber DNA, toned down. Green for completion, amber for "next", soft backgrounds to let content breathe.
+            </Note>
+          </div>
+        </DCSection>
+
+        <DCSection
+          title="Next steps"
+          subtitle="Ideas for where to take this once you pick a direction."
+        >
+          <div style={{ width: 1000, padding: '20px 4px', fontSize: 13.5, lineHeight: 1.6, color: 'rgba(40,30,20,0.85)' }}>
+            <ol style={{ paddingLeft: 20, margin: 0 }}>
+              <li style={{ marginBottom: 10 }}><strong>Pick a direction</strong> (or mix — e.g. B's hero + A's board + C's agent rail).</li>
+              <li style={{ marginBottom: 10 }}><strong>Drill into the task drawer.</strong> [WHY] / [EXEC] / [VERIFY] each unfold into their own content shape; we should mock the inline-expand states.</li>
+              <li style={{ marginBottom: 10 }}><strong>Agent identity.</strong> The stream in Variant C implies a lightweight agent profile system — avatar glyph, color per model, tenure in project.</li>
+              <li style={{ marginBottom: 10 }}><strong>Empty states.</strong> A fresh‑init project with 0 tasks needs its own moment — that's the first thing a user sees after <code>npx llm‑tracker init</code>.</li>
+              <li><strong>Keyboard map.</strong> Whichever direction wins, let's document the full keyboard set (j/k, g/g, /, ⌘K, n for next, p for pick) and show it inline somewhere.</li>
+            </ol>
+          </div>
+        </DCSection>
+      </div>
+    </DesignCanvas>
+  );
+}
+
+function Note({ label, children }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: 10, letterSpacing: 1.2,
+        color: 'rgba(60,50,40,0.55)', marginBottom: 4,
+      }}>— {label}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

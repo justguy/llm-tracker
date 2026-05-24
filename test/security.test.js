@@ -252,21 +252,23 @@ test("websocket rejects cross-origin upgrade with 403", async () => {
     const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
     assert.equal(started.status, 0, started.stderr || started.stdout);
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
-      headers: { Origin: "http://evil.example.com" }
-    });
-    const outcome = await new Promise((resolve) => {
-      ws.once("open", () => {
-        ws.close();
-        resolve({ status: "open" });
+    for (const path of ["/ws", "/runtime/ws"]) {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, {
+        headers: { Origin: "http://evil.example.com" }
       });
-      ws.once("unexpected-response", (_req, res) => {
-        resolve({ status: "rejected", code: res.statusCode });
+      const outcome = await new Promise((resolve) => {
+        ws.once("open", () => {
+          ws.close();
+          resolve({ status: "open" });
+        });
+        ws.once("unexpected-response", (_req, res) => {
+          resolve({ status: "rejected", code: res.statusCode });
+        });
+        ws.once("error", (err) => resolve({ status: "error", message: err.message }));
       });
-      ws.once("error", (err) => resolve({ status: "error", message: err.message }));
-    });
-    assert.equal(outcome.status, "rejected");
-    assert.equal(outcome.code, 403);
+      assert.equal(outcome.status, "rejected", path);
+      assert.equal(outcome.code, 403, path);
+    }
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });
@@ -285,14 +287,16 @@ test("websocket allows same-origin upgrade", async () => {
     const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
     assert.equal(started.status, 0, started.stderr || started.stdout);
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
-      headers: { Origin: `http://127.0.0.1:${port}` }
-    });
-    await new Promise((resolve, reject) => {
-      ws.once("open", resolve);
-      ws.once("error", reject);
-    });
-    ws.close();
+    for (const path of ["/ws", "/runtime/ws"]) {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, {
+        headers: { Origin: `http://127.0.0.1:${port}` }
+      });
+      await new Promise((resolve, reject) => {
+        ws.once("open", resolve);
+        ws.once("error", reject);
+      });
+      ws.close();
+    }
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });
@@ -313,23 +317,25 @@ test("websocket requires bearer token when LLM_TRACKER_TOKEN is set", async () =
     });
     assert.equal(started.status, 0, started.stderr || started.stdout);
 
-    const unauth = new WebSocket(`ws://127.0.0.1:${port}/ws`);
-    const unauthResult = await new Promise((resolve) => {
-      unauth.once("open", () => resolve({ status: "open" }));
-      unauth.once("unexpected-response", (_req, res) => resolve({ status: "rejected", code: res.statusCode }));
-      unauth.once("error", (err) => resolve({ status: "error", message: err.message }));
-    });
-    assert.equal(unauthResult.status, "rejected");
-    assert.equal(unauthResult.code, 401);
+    for (const path of ["/ws", "/runtime/ws"]) {
+      const unauth = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+      const unauthResult = await new Promise((resolve) => {
+        unauth.once("open", () => resolve({ status: "open" }));
+        unauth.once("unexpected-response", (_req, res) => resolve({ status: "rejected", code: res.statusCode }));
+        unauth.once("error", (err) => resolve({ status: "error", message: err.message }));
+      });
+      assert.equal(unauthResult.status, "rejected", path);
+      assert.equal(unauthResult.code, 401, path);
 
-    const good = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
-      headers: { Authorization: "Bearer wsauth" }
-    });
-    await new Promise((resolve, reject) => {
-      good.once("open", resolve);
-      good.once("error", reject);
-    });
-    good.close();
+      const good = new WebSocket(`ws://127.0.0.1:${port}${path}`, {
+        headers: { Authorization: "Bearer wsauth" }
+      });
+      await new Promise((resolve, reject) => {
+        good.once("open", resolve);
+        good.once("error", reject);
+      });
+      good.close();
+    }
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

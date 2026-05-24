@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>llm-tracker — launch card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #1a1a1a; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  * { box-sizing: border-box; }
+  .card {
+    width: 1200px; height: 627px;
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    overflow: hidden;
+    font-family: Inter, system-ui, sans-serif;
+    position: relative;
+  }
+
+  /* ── LEFT: friendly ─────────────────────────────────── */
+  .left {
+    background: radial-gradient(ellipse at 30% 40%, #ffe4b8 0%, #f3c98a 40%, #d89a52 100%);
+    position: relative;
+    padding: 40px 44px;
+    display: flex; flex-direction: column;
+    color: #3a2612;
+    overflow: hidden;
+  }
+  .left::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(circle at 70% 85%, rgba(255,255,255,0.3), transparent 50%);
+    pointer-events: none;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 18px;
+  }
+  .brand img {
+    width: 36px; height: 36px;
+    display: block;
+    border-radius: 6px;
+  }
+  .brand .wordmark {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px; font-weight: 600;
+    letter-spacing: -0.2px;
+    color: #2a1a08;
+    white-space: nowrap;
+  }
+  .brand .wordmark .dim {
+    color: rgba(58,38,18,0.55);
+    font-weight: 400;
+  }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; letter-spacing: 2.5px;
+    color: rgba(58,38,18,0.7);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .headline {
+    font-size: 52px; font-weight: 700; letter-spacing: -1.6px;
+    line-height: 1.0;
+    color: #2a1a08;
+    margin: 0 0 14px;
+  }
+  .headline .accent {
+    color: #b84a1a;
+    font-style: italic;
+    font-weight: 700;
+  }
+  .sub {
+    font-size: 16px; line-height: 1.4;
+    color: rgba(58,38,18,0.82);
+    max-width: 460px;
+    margin: 0;
+  }
+  .bullets {
+    list-style: none; padding: 0; margin: 14px 0 0;
+    max-width: 460px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .bullets li {
+    font-size: 13px; line-height: 1.3;
+    color: rgba(58,38,18,0.85);
+    padding-left: 16px; position: relative;
+  }
+  .bullets li::before {
+    content: '▸'; position: absolute; left: 0;
+    color: #b84a1a; font-size: 10px; top: 2px;
+  }
+  .bullets li b { font-weight: 600; color: #2a1a08; }
+
+  .quotes {
+    display: flex; flex-direction: column; gap: 10px;
+    margin-top: 14px;
+  }
+  .quote {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 12px;
+    line-height: 1.35;
+    color: rgba(58,38,18,0.78);
+    max-width: 360px;
+    border-left: 2px solid rgba(184,74,26,0.5);
+    padding: 2px 0 2px 10px;
+  }
+  .quote .attr {
+    display: block;
+    font-style: normal;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    color: rgba(58,38,18,0.55);
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .robot-wrap {
+    position: absolute;
+    bottom: -10px; right: -40px;
+    width: 240px; height: 240px;
+    pointer-events: none;
+  }
+  .robot-wrap img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 18px 20px rgba(40,20,0,0.35)); }
+  /* soft ground shadow */
+  .robot-wrap::before {
+    content: ''; position: absolute;
+    bottom: 30px; left: 30%; width: 40%; height: 16px;
+    background: radial-gradient(ellipse, rgba(40,20,0,0.45), transparent 70%);
+    filter: blur(6px);
+  }
+
+  .byline {
+    margin-top: auto;
+    padding-top: 16px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px; color: rgba(58,38,18,0.75);
+    white-space: nowrap;
+  }
+  .byline .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, #b84a1a, #e08040);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 12px;
+    font-family: Inter, sans-serif;
+  }
+
+  /* ── RIGHT: terminal UI ─────────────────────────────── */
+  .right {
+    background: #0f1013;
+    padding: 28px 36px;
+    display: flex; flex-direction: column; gap: 14px;
+    position: relative;
+    overflow: hidden;
+    color: #e9ebef;
+  }
+  .right::before {
+    /* subtle scanline */
+    content: ''; position: absolute; inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 3px);
+    pointer-events: none;
+  }
+  .window-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #262a33;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ff5f57; }
+  .dot.y { background: #febc2e; }
+  .dot.g { background: #28c840; }
+  .wb-title {
+    margin-left: 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; color: #6b707c; letter-spacing: 1.5px;
+    white-space: nowrap;
+  }
+  .wb-rev {
+    margin-left: auto;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px; color: #f0b23a; letter-spacing: 1.5px;
+    padding: 2px 7px; border: 1px solid #262a33;
+    white-space: nowrap;
+  }
+  .next-cell .label, .cta span, .footer-url { white-space: nowrap; }
+  .cta { white-space: nowrap; }
+
+  /* mini UI preview inside terminal */
+  .ui {
+    background: #16181d;
+    border: 1px solid #262a33;
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ui-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding-bottom: 10px; border-bottom: 1px solid #1f232b;
+  }
+  .proj {
+    font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #e9ebef;
+  }
+  .proj-sub { font-family: "JetBrains Mono", monospace; font-size: 10px; color: #6b707c; letter-spacing: 1px; }
+  .pct {
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .pct .big { font-size: 30px; font-weight: 600; letter-spacing: -1px; color: #e9ebef; line-height: 1; }
+  .pct .pc { font-size: 14px; color: #6b707c; }
+  .pct .lbl { font-size: 11px; color: #a3a8b3; }
+  .bar { height: 4px; background: #1f232b; display: flex; }
+  .bar .fill { background: #5cbd6a; width: 87.5%; }
+
+  .next-cell {
+    background: rgba(92,189,106,0.12);
+    border: 1px solid rgba(92,189,106,0.35);
+    padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .next-cell .label {
+    font-family: "JetBrains Mono", monospace; font-size: 9px;
+    color: #5cbd6a; letter-spacing: 1.5px; font-weight: 600;
+  }
+  .next-cell .title {
+    font-size: 13px; font-weight: 600; color: #e9ebef; line-height: 1.3;
+  }
+  .next-cell .actions { display: flex; gap: 6px; margin-top: 4px; }
+  .br {
+    font-family: "JetBrains Mono", monospace; font-size: 10px;
+    padding: 3px 7px; border: 1px solid #262a33; color: #a3a8b3;
+    letter-spacing: 0.3px;
+  }
+  .br.ok { color: #5cbd6a; border-color: rgba(92,189,106,0.5); background: rgba(92,189,106,0.1); }
+  .br.amber { color: #f0b23a; border-color: rgba(240,178,58,0.5); background: rgba(240,178,58,0.1); }
+
+  /* CTA */
+  .cta-row {
+    margin-top: auto;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px;
+  }
+  .cta {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 17px; font-weight: 600;
+    color: #0f1013;
+    background: #f0b23a;
+    padding: 14px 22px;
+    letter-spacing: 1px;
+    display: inline-flex; align-items: center; gap: 10px;
+  }
+  .cta .arrow { font-size: 22px; }
+  .footer-url {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px; color: #6b707c; letter-spacing: 0.5px;
+  }
+  .footer-url .at { color: #f0b23a; }
+
+  /* agent activity line */
+  .activity {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; color: #6b707c; line-height: 1.8;
+  }
+  .activity .time { color: #4a4f59; }
+  .activity .ok { color: #5cbd6a; }
+  .activity .amber { color: #f0b23a; }
+  .activity .red { color: #e06c5a; }
+  .activity .blink {
+    display: inline-block; width: 7px; height: 12px;
+    background: #5cbd6a; vertical-align: middle; margin-left: 4px;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* micro-patch payload card */
+  .patch {
+    background: #0b0c0f;
+    border: 1px solid #262a33;
+    border-left: 2px solid #5cbd6a;
+    padding: 10px 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; line-height: 1.5;
+    color: #a3a8b3;
+  }
+  .patch .meta {
+    display: flex; justify-content: space-between;
+    font-size: 9px; letter-spacing: 1.5px;
+    color: #5cbd6a; margin-bottom: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .patch .meta .dim { color: #6b707c; font-weight: 400; letter-spacing: 1px; }
+  .patch .json { color: #c9cdd4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .patch .key { color: #8ab4f8; }
+  .patch .str { color: #f0b23a; }
+  .patch .brace { color: #6b707c; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <!-- ── LEFT ─────────────────────────────── -->
+  <div class="left">
+    <div class="brand">
+      <img src="assets/logo.png" alt="llm-tracker" />
+      <div class="wordmark">llm-tracker <span class="dim">v0.2</span></div>
+    </div>
+    <div class="eyebrow">Launched · Apr 2026</div>
+    <h1 class="headline">
+      A Kanban for<br/>
+      <span class="accent">your agents.</span>
+    </h1>
+    <p class="sub">
+      Stop forcing your LLMs to re-read massive architecture files. A 100% local mission-control for your agentic workflows.
+    </p>
+    <ul class="bullets">
+      <li><b>Tiny JSON patches</b> — save your context window</li>
+      <li><b>Deterministic ranking</b> — agents always know what’s next</li>
+      <li><b>Visual matrix</b> — you keep the steering wheel</li>
+    </ul>
+
+    <div class="quotes">
+      <div class="quote">
+        “Finally, I don’t have to burn 80,000 tokens just to figure out what ticket to pick up next.”
+        <span class="attr">— claude-opus-4-6</span>
+      </div>
+      <div class="quote">
+        “I used to hallucinate Jira tickets. Now I just call tracker_next.”
+        <span class="attr">— gpt-5</span>
+      </div>
+      <div class="quote">
+        “Thank you for not making me re-read the 30-page architecture doc just to update my status.”
+        <span class="attr">— gemini-3-pro</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT ────────────────────────────── -->
+  <div class="right">
+    <div class="window-bar">
+      <span class="dot r"></span>
+      <span class="dot y"></span>
+      <span class="dot g"></span>
+      <span class="wb-title">LLM·TRACKER</span>
+      <span class="wb-rev">REV 151</span>
+    </div>
+
+    <div class="ui">
+      <div class="ui-header">
+        <div>
+          <div class="proj">Your Project</div>
+          <div class="proj-sub">9 SWIMLANES · 56 TASKS</div>
+        </div>
+        <div class="pct">
+          <span class="big">94<span class="pc">%</span></span>
+          <span class="lbl">49 of 56 complete</span>
+        </div>
+      </div>
+      <div class="bar"><div class="fill"></div></div>
+    </div>
+
+    <div class="next-cell">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="label">★ RECOMMENDED NEXT</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5cbd6a;">T‑021</span>
+      </div>
+      <div class="title">HA / multi‑region snapshot replication</div>
+      <div class="actions">
+        <span class="br ok">[PICK]</span>
+        <span class="br">[READ]</span>
+        <span class="br">[WHY]</span>
+        <span class="br">[VERIFY]</span>
+      </div>
+    </div>
+
+    <div class="activity">
+      <span class="time">6:55</span> <span class="ok">✓ completed</span> T‑012 · claude-opus-4-6<br/>
+      <span class="time">6:42</span> <span class="amber">◆ picked</span> T‑021 · codex-cli<br/>
+      <span class="time">6:15</span> <span class="red">⚠ rejected</span> T‑042 · missing dep T‑021<span class="blink"></span>
+    </div>
+
+    <div class="patch">
+      <div class="meta">
+        <span>→ PATCH APPLIED</span>
+        <span class="dim">84 BYTES · CONTEXT SAVED</span>
+      </div>
+      <div class="json"><span class="brace">{</span> <span class="key">"tasks"</span>: <span class="brace">{</span> <span class="key">"T-021"</span>: <span class="brace">{</span> <span class="key">"status"</span>: <span class="str">"in_progress"</span> <span class="brace">}}}</span></div>
+    </div>
+
+    <div class="cta-row">
+      <div class="cta">
+        <span>$ npm i -g llm-tracker</span>
+      </div>
+      <div class="footer-url">
+        <span class="at">★</span> 100% local · open source
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

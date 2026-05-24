@@ -1,0 +1,537 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://llm-tracker.local/schema/runtime-events.json",
+  "title": "RuntimeEvent",
+  "description": "Discriminated union of every RuntimeEvent variant from TDD v0.5 §6.6. Base shape is strict; per-type payloads are strict for the variants that appear in §24 examples and the most common §6.6 events, and base-only for the remaining types (later sh-1-XX tasks tighten them as they touch them).",
+
+  "definitions": {
+    "runtimeEventId": {
+      "type": "string",
+      "pattern": "^evt_[0-9a-hjkmnp-tv-z]{26}$",
+      "description": "Canonical evt_ ULID (TDD §6.10)."
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^ses_[0-9a-hjkmnp-tv-z]{26}$",
+      "description": "Canonical ses_ ULID (TDD §6.10). NOTE: TDD §24 example uses 'sess_001' (4-letter prefix). §6.10 is authoritative — runtime uses 'ses_'."
+    },
+    "jobId": {
+      "type": "string",
+      "pattern": "^job_[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "skillRunId": {
+      "type": "string",
+      "pattern": "^skr_[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "contextPackId": {
+      "type": "string",
+      "pattern": "^ctx_[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "attentionItemId": {
+      "type": "string",
+      "pattern": "^att_[0-9a-hjkmnp-tv-z]{26}$"
+    },
+
+    "sessionTier": {
+      "type": "string",
+      "enum": ["dumb_terminal", "mcp_tracked", "codex_app_server", "hybrid", "manual"]
+    },
+
+    "runtimeSource": {
+      "type": "string",
+      "enum": ["ui", "cli", "mcp", "http", "adapter", "watcher", "system"]
+    },
+
+    "runtimeEventType": {
+      "type": "string",
+      "enum": [
+        "session.started",
+        "session.status",
+        "session.warning",
+        "session.warning_cleared",
+        "session.output",
+        "session.stopped",
+        "session.stdio_capture_changed",
+        "session.token_rotated",
+        "session.token_audit",
+        "job.started",
+        "job.checkpoint",
+        "job.completed",
+        "job.rollover_requested",
+        "skill.run.started",
+        "skill.run.finished",
+        "repo.change",
+        "repo.burst",
+        "verify.command.started",
+        "verify.command.completed",
+        "verify.human_approval.requested",
+        "verify.human_approval.resolved",
+        "conflict.ack",
+        "attention.ack",
+        "attention.snoozed",
+        "attention.cleared",
+        "human.override",
+        "session.sandbox_changed",
+        "session.model_changed",
+        "session.task_attached",
+        "session.task_unbound",
+        "job.queued",
+        "job.unblocked",
+        "sandbox.escape_requested",
+        "sandbox.escape_resolved",
+        "session.ask",
+        "session.interrupt",
+        "task.new_from_launcher"
+      ]
+    },
+
+    "RuntimeEventBase": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "$ref": "#/definitions/runtimeEventType" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "SessionWarning": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "quiet_terminal",
+            "missing_heartbeat",
+            "approval_needed",
+            "file_conflict",
+            "context_high",
+            "skill_gate_missing",
+            "disconnected",
+            "stdio_capture_oversized"
+          ]
+        },
+        "minutes": { "type": "number" },
+        "message": { "type": "string" },
+        "source": { "type": "string" },
+        "actionId": { "type": "string" },
+        "conflictId": { "type": "string" },
+        "percent": { "type": "number" },
+        "skillId": { "type": "string" },
+        "sinceMs": { "type": "number" },
+        "rotatedSegments": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "SessionStartedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "session"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.started" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "session": {
+          "type": "object",
+          "required": ["id", "name", "tier"],
+          "properties": {
+            "id":          { "$ref": "#/definitions/sessionId" },
+            "name":        { "type": "string", "minLength": 1 },
+            "tier":        { "$ref": "#/definitions/sessionTier" },
+            "projectSlug": { "type": "string", "minLength": 1 },
+            "taskId":      { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "SessionStatusEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "sessionId", "status"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.status" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "starting",
+            "active",
+            "quiet",
+            "idle",
+            "waiting_for_human",
+            "waiting_for_approval",
+            "blocked",
+            "context_high",
+            "done",
+            "stopping",
+            "stopped",
+            "resuming",
+            "rolled_over",
+            "archived",
+            "unknown"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "SessionWarningEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "sessionId", "warning"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.warning" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "warning": { "$ref": "#/definitions/SessionWarning" }
+      },
+      "additionalProperties": true
+    },
+
+    "SessionWarningClearedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "sessionId", "warningKind"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.warning_cleared" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "warningKind": {
+          "type": "string",
+          "enum": [
+            "quiet_terminal",
+            "missing_heartbeat",
+            "approval_needed",
+            "file_conflict",
+            "context_high",
+            "skill_gate_missing",
+            "disconnected",
+            "stdio_capture_oversized"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "SessionOutputEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "sessionId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.output" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "stream": { "type": "string", "enum": ["stdout", "stderr", "structured"] },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "preview": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "SessionStoppedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "sessionId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.stopped" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "reason": { "type": "string" },
+        "exitCode": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
+
+    "SessionStdioCaptureChangedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "sessionId", "capture"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.stdio_capture_changed" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "capture": {
+          "type": "object",
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "path": { "type": "string" },
+            "maxBytes": { "type": "integer", "minimum": 0 },
+            "rotatedSegments": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "JobStartedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId", "sessionId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "job.started" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "jobId":       { "$ref": "#/definitions/jobId" },
+        "sessionId":   { "$ref": "#/definitions/sessionId" },
+        "projectSlug": { "type": "string", "minLength": 1 },
+        "taskId":      { "type": "string", "minLength": 1 },
+        "profileId":   { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["code", "prd", "review", "planning", "closeout", "custom"]
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "JobCheckpointEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "job.checkpoint" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "jobId":     { "$ref": "#/definitions/jobId" },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "summary":   { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "starting", "running", "blocked", "verifying", "completed", "cancelled", "rolled_over"]
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "JobCompletedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId", "status"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "job.completed" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "jobId":     { "$ref": "#/definitions/jobId" },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "status": {
+          "type": "string",
+          "enum": ["completed", "cancelled", "rolled_over"]
+        },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "JobRolloverRequestedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "job.rollover_requested" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "jobId":     { "$ref": "#/definitions/jobId" },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "reason":    { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "SkillRunStartedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "skillId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "skill.run.started" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "skillRunId": { "$ref": "#/definitions/skillRunId" },
+        "skillId":    { "type": "string", "minLength": 1 },
+        "jobId":      { "$ref": "#/definitions/jobId" },
+        "sessionId":  { "$ref": "#/definitions/sessionId" }
+      },
+      "additionalProperties": true
+    },
+
+    "SkillRunFinishedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "skillId", "status"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "skill.run.finished" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "skillRunId": { "$ref": "#/definitions/skillRunId" },
+        "skillId":    { "type": "string", "minLength": 1 },
+        "jobId":      { "$ref": "#/definitions/jobId" },
+        "sessionId":  { "$ref": "#/definitions/sessionId" },
+        "status":     { "type": "string", "enum": ["succeeded", "failed", "skipped", "overridden"] },
+        "summary":    { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "RepoChangeEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "projectSlug", "repoRoot", "path", "event", "activeSessionIds", "possibleSessionIds", "attribution", "relatedTaskIds"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "repo.change" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "projectSlug": { "type": "string", "minLength": 1 },
+        "repoRoot":    { "type": "string", "minLength": 1 },
+        "path":        { "type": "string", "minLength": 1 },
+        "event":       { "type": "string", "enum": ["add", "change", "unlink"] },
+        "activeSessionIds":   { "type": "array", "items": { "$ref": "#/definitions/sessionId" } },
+        "possibleSessionIds": { "type": "array", "items": { "$ref": "#/definitions/sessionId" } },
+        "attribution": { "type": "string", "enum": ["worktree", "single_active_session", "ambiguous", "unknown"] },
+        "relatedTaskIds":     { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "outsideAllowedPaths": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+
+    "RepoBurstEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "projectSlug", "repoRoot", "fileCount", "samplePaths", "activeSessionIds", "attribution", "reason"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "repo.burst" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "projectSlug": { "type": "string", "minLength": 1 },
+        "repoRoot":    { "type": "string", "minLength": 1 },
+        "fileCount":   { "type": "integer", "minimum": 0 },
+        "samplePaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "activeSessionIds": { "type": "array", "items": { "$ref": "#/definitions/sessionId" } },
+        "attribution": { "type": "string", "enum": ["ambiguous", "unknown", "mixed"] },
+        "reason":      { "type": "string", "enum": ["maxBatchSize_exceeded", "watcher_storm"] }
+      },
+      "additionalProperties": true
+    },
+
+    "GenericRuntimeEvent": {
+      "description": "Catch-all for known event types whose payload contract is not yet tightened (later sh-1-XX tasks will replace these with strict variants as they touch them). Base shape is enforced; extra payload keys are accepted.",
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "session.token_rotated",
+            "session.token_audit",
+            "verify.command.started",
+            "verify.command.completed",
+            "verify.human_approval.requested",
+            "verify.human_approval.resolved",
+            "conflict.ack",
+            "attention.ack",
+            "attention.snoozed",
+            "attention.cleared",
+            "human.override",
+            "session.sandbox_changed",
+            "session.model_changed",
+            "session.task_attached",
+            "session.task_unbound",
+            "job.queued",
+            "job.unblocked",
+            "sandbox.escape_requested",
+            "sandbox.escape_resolved",
+            "session.ask",
+            "session.interrupt",
+            "task.new_from_launcher"
+          ]
+        },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    }
+  },
+
+  "oneOf": [
+    { "$ref": "#/definitions/SessionStartedEvent" },
+    { "$ref": "#/definitions/SessionStatusEvent" },
+    { "$ref": "#/definitions/SessionWarningEvent" },
+    { "$ref": "#/definitions/SessionWarningClearedEvent" },
+    { "$ref": "#/definitions/SessionOutputEvent" },
+    { "$ref": "#/definitions/SessionStoppedEvent" },
+    { "$ref": "#/definitions/SessionStdioCaptureChangedEvent" },
+    { "$ref": "#/definitions/JobStartedEvent" },
+    { "$ref": "#/definitions/JobCheckpointEvent" },
+    { "$ref": "#/definitions/JobCompletedEvent" },
+    { "$ref": "#/definitions/JobRolloverRequestedEvent" },
+    { "$ref": "#/definitions/SkillRunStartedEvent" },
+    { "$ref": "#/definitions/SkillRunFinishedEvent" },
+    { "$ref": "#/definitions/RepoChangeEvent" },
+    { "$ref": "#/definitions/RepoBurstEvent" },
+    { "$ref": "#/definitions/GenericRuntimeEvent" }
+  ]
+}

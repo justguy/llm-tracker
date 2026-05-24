@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>llm-tracker — launch carousel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #1a1a1a; font-family: Inter, system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+
+  /* gallery layout */
+  .gallery {
+    display: flex; flex-direction: column;
+    align-items: center; padding: 40px 0; gap: 32px;
+    min-height: 100vh;
+  }
+  .gallery-header {
+    color: #e9ebef; font-family: "JetBrains Mono", monospace;
+    font-size: 13px; letter-spacing: 2px;
+    display: flex; gap: 24px; align-items: baseline;
+  }
+  .gallery-header .dim { color: #6b707c; }
+
+  /* ── SLIDE BASE ─────────────────────────────── */
+  .slide {
+    width: 1080px; height: 1350px;
+    position: relative;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .slide .chip {
+    position: absolute;
+    top: 40px; right: 48px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px; letter-spacing: 2px;
+    color: rgba(0,0,0,0.45);
+    z-index: 2;
+  }
+  .slide.dark .chip { color: rgba(255,255,255,0.35); }
+
+  .brandmark {
+    position: absolute;
+    top: 32px; left: 48px;
+    display: flex; align-items: center; gap: 12px;
+    z-index: 2;
+  }
+  .brandmark img { width: 44px; height: 44px; display: block; border-radius: 8px; }
+  .brandmark .wm {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 16px; font-weight: 600;
+    letter-spacing: -0.2px;
+    white-space: nowrap;
+  }
+  .slide.warm .brandmark .wm { color: #2a1a08; }
+  .slide.dark .brandmark .wm { color: #e9ebef; }
+  .slide.warm .brandmark .wm .dim { color: rgba(58,38,18,0.55); font-weight: 400; }
+  .slide.dark .brandmark .wm .dim { color: #6b707c; font-weight: 400; }
+
+  /* warm background palette */
+  .slide.warm {
+    background: radial-gradient(ellipse at 30% 30%, #ffe4b8 0%, #f3c98a 45%, #d89a52 100%);
+    color: #2a1a08;
+  }
+  .slide.warm::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(circle at 80% 90%, rgba(255,255,255,0.25), transparent 55%);
+    pointer-events: none;
+  }
+  .slide.dark {
+    background: #0f1013;
+    color: #e9ebef;
+  }
+  .slide.dark::before {
+    content: ''; position: absolute; inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.013) 0 1px, transparent 1px 3px);
+    pointer-events: none;
+  }
+
+  /* swipe affordance */
+  .swipe {
+    position: absolute;
+    bottom: 40px; right: 48px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    letter-spacing: 2px;
+    z-index: 2;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .slide.warm .swipe { color: rgba(58,38,18,0.55); }
+  .slide.dark .swipe { color: #6b707c; }
+  .swipe .arrow { font-size: 18px; }
+
+  /* page footer number */
+  .pagenum {
+    position: absolute;
+    bottom: 40px; left: 48px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px; letter-spacing: 2px;
+    z-index: 2;
+  }
+  .slide.warm .pagenum { color: rgba(58,38,18,0.55); }
+  .slide.dark .pagenum { color: #6b707c; }
+  .pagenum b { font-weight: 600; }
+  .slide.warm .pagenum b { color: #2a1a08; }
+  .slide.dark .pagenum b { color: #e9ebef; }
+
+  /* shared type scale */
+  .kicker {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 15px; letter-spacing: 3px;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .slide.warm .kicker { color: rgba(58,38,18,0.7); }
+  .slide.dark .kicker { color: #6b707c; }
+
+  .accent-orange { color: #b84a1a; }
+  .accent-green  { color: #5cbd6a; }
+  .accent-amber  { color: #f0b23a; }
+  .italic { font-style: italic; }
+
+  /* ─────────────────────────────────────────── SLIDE 1: HOOK */
+  .s1 { padding: 160px 80px 120px; justify-content: center; }
+  .s1 .kicker { margin-bottom: 32px; }
+  .s1 h1 {
+    font-size: 168px; font-weight: 700; letter-spacing: -5px;
+    line-height: 0.92;
+    margin: 0;
+    color: #2a1a08;
+  }
+  .s1 h1 .accent {
+    color: #b84a1a;
+    font-style: italic;
+  }
+  .s1 .sub {
+    font-size: 30px; line-height: 1.4;
+    max-width: 760px;
+    margin: 40px 0 0;
+    color: rgba(58,38,18,0.82);
+  }
+  .s1 .decor {
+    position: absolute;
+    bottom: -80px; right: -80px;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(184,74,26,0.18), transparent 65%);
+  }
+
+  /* ─────────────────────────────────────────── SLIDE 2: PAIN + PATCH */
+  .s2 { padding: 140px 80px 120px; gap: 60px; }
+  .s2 .kicker { margin-top: 20px; }
+  .s2 .pain {
+    margin-top: 40px;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 68px; font-weight: 400; font-style: italic;
+    line-height: 1.12;
+    letter-spacing: -1.5px;
+    max-width: 900px;
+    color: #2a1a08;
+  }
+  .s2 .pain .hl { background: rgba(184,74,26,0.15); padding: 0 6px; }
+  .s2 .attr {
+    margin-top: 24px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 16px; letter-spacing: 1px;
+    color: rgba(58,38,18,0.6);
+  }
+  .s2 .vs {
+    margin-top: 40px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 15px; letter-spacing: 3px;
+    color: rgba(58,38,18,0.45);
+    display: flex; align-items: center; gap: 16px;
+  }
+  .s2 .vs::before, .s2 .vs::after {
+    content: ''; flex: 1; max-width: 120px; height: 1px;
+    background: rgba(58,38,18,0.25);
+  }
+  .s2 .patch {
+    background: #0f1013;
+    padding: 32px 36px;
+    font-family: "JetBrains Mono", monospace;
+    color: #c9cdd4;
+    border-left: 4px solid #5cbd6a;
+    box-shadow: 0 12px 32px rgba(40,20,0,0.25);
+  }
+  .s2 .patch .meta {
+    display: flex; justify-content: space-between;
+    font-size: 14px; letter-spacing: 2px;
+    color: #5cbd6a; font-weight: 600;
+    margin-bottom: 16px;
+    white-space: nowrap;
+  }
+  .s2 .patch .meta .dim { color: #6b707c; font-weight: 400; letter-spacing: 1.5px; }
+  .s2 .patch .json { font-size: 22px; line-height: 1.5; }
+  .s2 .patch .key { color: #8ab4f8; }
+  .s2 .patch .str { color: #f0b23a; }
+  .s2 .patch .brace { color: #6b707c; }
+  .s2 .note {
+    margin-top: 22px;
+    font-size: 24px; line-height: 1.45;
+    color: rgba(58,38,18,0.78);
+    max-width: 820px;
+  }
+  .s2 .note b { color: #2a1a08; font-weight: 600; }
+
+  /* ─────────────────────────────────────────── SLIDE 3: THE LOOP */
+  .s3 { padding: 140px 80px 120px; }
+  .s3 .kicker { margin-top: 20px; color: #6b707c; }
+  .s3 h2 {
+    margin: 32px 0 60px;
+    font-size: 92px; font-weight: 700;
+    letter-spacing: -2.5px;
+    line-height: 1.0;
+    color: #e9ebef;
+  }
+  .s3 h2 .g { color: #5cbd6a; }
+  .terminal {
+    background: #16181d;
+    border: 1px solid #262a33;
+    padding: 36px 40px;
+    display: flex; flex-direction: column; gap: 28px;
+  }
+  .terminal .next-cell {
+    background: rgba(92,189,106,0.10);
+    border: 1px solid rgba(92,189,106,0.35);
+    padding: 24px 28px;
+  }
+  .terminal .next-cell .label {
+    font-family: "JetBrains Mono", monospace; font-size: 14px;
+    color: #5cbd6a; letter-spacing: 2.5px; font-weight: 600;
+    display: flex; justify-content: space-between;
+    margin-bottom: 14px;
+    white-space: nowrap;
+  }
+  .terminal .next-cell .tid { color: #a3a8b3; font-weight: 400; }
+  .terminal .next-cell .title {
+    font-size: 32px; font-weight: 600; line-height: 1.2;
+    color: #e9ebef; margin-bottom: 20px;
+    letter-spacing: -0.3px;
+  }
+  .terminal .next-cell .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .br {
+    font-family: "JetBrains Mono", monospace; font-size: 16px;
+    padding: 8px 14px; border: 1px solid #262a33; color: #a3a8b3;
+    letter-spacing: 0.3px;
+  }
+  .br.ok { color: #5cbd6a; border-color: rgba(92,189,106,0.5); background: rgba(92,189,106,0.1); }
+  .activity {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 19px; line-height: 1.9;
+    color: #a3a8b3;
+  }
+  .activity .time { color: #4a4f59; }
+  .activity .ok { color: #5cbd6a; }
+  .activity .amber { color: #f0b23a; }
+  .activity .red { color: #e06c5a; }
+  .activity .blink {
+    display: inline-block; width: 11px; height: 20px;
+    background: #5cbd6a; vertical-align: middle; margin-left: 6px;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .s3 .caption {
+    margin-top: 36px;
+    font-size: 24px; line-height: 1.5;
+    color: #a3a8b3;
+    max-width: 860px;
+  }
+  .s3 .caption b { color: #e9ebef; font-weight: 600; }
+
+  /* ─────────────────────────────────────────── SLIDE 4: SOCIAL PROOF */
+  .s4 { padding: 140px 80px 120px; }
+  .s4 .kicker { margin-top: 20px; }
+  .s4 h2 {
+    margin: 24px 0 60px;
+    font-size: 84px; font-weight: 700;
+    letter-spacing: -2.5px; line-height: 1.0;
+    color: #2a1a08;
+  }
+  .s4 h2 .accent { color: #b84a1a; font-style: italic; }
+  .s4 .quotes { display: flex; flex-direction: column; gap: 44px; }
+  .s4 .quote {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 34px; line-height: 1.32;
+    color: #2a1a08;
+    border-left: 3px solid rgba(184,74,26,0.6);
+    padding: 8px 0 8px 28px;
+    max-width: 900px;
+    letter-spacing: -0.3px;
+  }
+  .s4 .quote .attr {
+    display: block;
+    font-style: normal;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 16px; letter-spacing: 1.5px;
+    color: rgba(58,38,18,0.55);
+    margin-top: 14px;
+  }
+
+  /* ─────────────────────────────────────────── SLIDE 5: CTA */
+  .s5 { padding: 160px 80px 140px; justify-content: space-between; }
+  .s5 .top { display: flex; flex-direction: column; }
+  .s5 .kicker { color: #f0b23a; }
+  .s5 h2 {
+    margin: 36px 0 24px;
+    font-size: 120px; font-weight: 700;
+    letter-spacing: -3.5px;
+    line-height: 0.95;
+    color: #e9ebef;
+  }
+  .s5 h2 .accent { color: #f0b23a; }
+  .s5 .sub {
+    font-size: 28px; line-height: 1.4;
+    max-width: 820px;
+    color: #a3a8b3;
+  }
+  .s5 .cta-block {
+    display: flex; flex-direction: column; gap: 24px;
+    margin-top: 20px;
+  }
+  .s5 .install {
+    background: #f0b23a;
+    color: #0f1013;
+    padding: 32px 40px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 36px; font-weight: 600;
+    letter-spacing: 0.5px;
+    display: inline-flex; align-items: center;
+    width: fit-content;
+    white-space: nowrap;
+    box-shadow: 0 16px 40px rgba(240,178,58,0.25);
+  }
+  .s5 .meta-row {
+    display: flex; gap: 32px; flex-wrap: wrap;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 18px; letter-spacing: 1px;
+    color: #6b707c;
+  }
+  .s5 .meta-row .item { display: flex; align-items: center; gap: 10px; }
+  .s5 .meta-row .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #5cbd6a;
+  }
+  .s5 .meta-row .dot.a { background: #f0b23a; }
+  .s5 .url-block {
+    margin-top: 40px;
+    padding-top: 36px;
+    border-top: 1px solid #262a33;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 22px;
+    color: #a3a8b3;
+    letter-spacing: 0.5px;
+  }
+  .s5 .url-block .lbl { color: #6b707c; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; display: block; margin-bottom: 10px; }
+  .s5 .url-block b { color: #e9ebef; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div class="gallery">
+  <div class="gallery-header">
+    <span>LLM-TRACKER</span>
+    <span class="dim">· LINKEDIN CAROUSEL · 5 SLIDES · 1080×1350</span>
+  </div>
+
+  <!-- ── SLIDE 1 : HOOK ─────────────────────── -->
+  <div class="slide warm s1" data-screen-label="01 Hook">
+    <div class="brandmark">
+      <img src="assets/logo.png" alt="llm-tracker" />
+      <div class="wm">llm-tracker <span class="dim">v0.2</span></div>
+    </div>
+    <span class="chip">LAUNCH · APR 2026</span>
+
+    <div class="kicker">Shipped today</div>
+    <h1>A Kanban<br/>for <span class="accent">your<br/>agents.</span></h1>
+    <p class="sub">A 100% local mission-control for your agentic workflows. Tiny JSON patches. Deterministic ranking. You keep the steering wheel.</p>
+
+    <div class="decor"></div>
+    <span class="pagenum"><b>01</b> / 05</span>
+    <span class="swipe">Swipe <span class="arrow">→</span></span>
+  </div>
+
+  <!-- ── SLIDE 2 : PAIN + PATCH ─────────────── -->
+  <div class="slide warm s2" data-screen-label="02 Pain + Patch">
+    <div class="brandmark">
+      <img src="assets/logo.png" alt="llm-tracker" />
+      <div class="wm">llm-tracker <span class="dim">v0.2</span></div>
+    </div>
+    <span class="chip">THE PROBLEM</span>
+
+    <div class="kicker">Before</div>
+    <p class="pain">
+      “Finally, I don’t have to burn <span class="hl">80,000 tokens</span> just to figure out what ticket to pick up next.”
+    </p>
+    <div class="attr">— claude-opus-4-6</div>
+
+    <div class="vs">AFTER</div>
+
+    <div class="patch">
+      <div class="meta">
+        <span>→ PATCH APPLIED</span>
+        <span class="dim">84 BYTES · CONTEXT SAVED</span>
+      </div>
+      <div class="json">
+        <span class="brace">{</span> <span class="key">"tasks"</span>: <span class="brace">{</span> <span class="key">"T-021"</span>: <span class="brace">{</span> <span class="key">"status"</span>: <span class="str">"in_progress"</span> <span class="brace">}}}</span>
+      </div>
+    </div>
+    <p class="note">
+      That’s the whole update. <b>No re-reading 30-page architecture docs.</b> No context regen. Your agent moves on with 99.9% of its window intact.
+    </p>
+
+    <span class="pagenum"><b>02</b> / 05</span>
+    <span class="swipe">Swipe <span class="arrow">→</span></span>
+  </div>
+
+  <!-- ── SLIDE 3 : THE LOOP ─────────────────── -->
+  <div class="slide dark s3" data-screen-label="03 The Loop">
+    <div class="brandmark">
+      <img src="assets/logo.png" alt="llm-tracker" />
+      <div class="wm">llm-tracker <span class="dim">v0.2</span></div>
+    </div>
+    <span class="chip">THE LOOP</span>
+
+    <div class="kicker">Agents ask. Tracker answers.</div>
+    <h2>One call. <span class="g">The right next task.</span></h2>
+
+    <div class="terminal">
+      <div class="next-cell">
+        <div class="label">
+          <span>★ RECOMMENDED NEXT</span>
+          <span class="tid">T-021</span>
+        </div>
+        <div class="title">HA / multi-region snapshot replication</div>
+        <div class="actions">
+          <span class="br ok">[PICK]</span>
+          <span class="br">[READ]</span>
+          <span class="br">[WHY]</span>
+          <span class="br">[VERIFY]</span>
+        </div>
+      </div>
+      <div class="activity">
+        <span class="time">6:55</span> <span class="ok">✓ completed</span> T‑012 · claude-opus-4-6<br/>
+        <span class="time">6:42</span> <span class="amber">◆ picked</span> T‑021 · codex-cli<br/>
+        <span class="time">6:15</span> <span class="red">⚠ rejected</span> T‑042 · missing dep T‑021<span class="blink"></span>
+      </div>
+    </div>
+    <p class="caption">
+      Deterministic ranking by dependency graph + priority. Blockers are <b>rejected at the edge</b> — your agent never wastes a turn on an invalid pick.
+    </p>
+
+    <span class="pagenum"><b>03</b> / 05</span>
+    <span class="swipe">Swipe <span class="arrow">→</span></span>
+  </div>
+
+  <!-- ── SLIDE 4 : SOCIAL PROOF ─────────────── -->
+  <div class="slide warm s4" data-screen-label="04 Social Proof">
+    <div class="brandmark">
+      <img src="assets/logo.png" alt="llm-tracker" />
+      <div class="wm">llm-tracker <span class="dim">v0.2</span></div>
+    </div>
+    <span class="chip">WHAT AGENTS ARE SAYING</span>
+
+    <div class="kicker">Testimonials, mostly</div>
+    <h2>From the <span class="accent">agents</span><br/>themselves.</h2>
+
+    <div class="quotes">
+      <div class="quote">
+        “Finally, I don’t have to burn 80,000 tokens just to figure out what ticket to pick up next.”
+        <span class="attr">— claude-opus-4-6</span>
+      </div>
+      <div class="quote">
+        “I used to hallucinate Jira tickets. Now I just call <code>tracker_next</code>.”
+        <span class="attr">— gpt-5</span>
+      </div>
+      <div class="quote">
+        “Thank you for not making me re-read the 30-page architecture doc just to update my status.”
+        <span class="attr">— gemini-3-pro</span>
+      </div>
+    </div>
+
+    <span class="pagenum"><b>04</b> / 05</span>
+    <span class="swipe">Swipe <span class="arrow">→</span></span>
+  </div>
+
+  <!-- ── SLIDE 5 : CTA ──────────────────────── -->
+  <div class="slide dark s5" data-screen-label="05 CTA">
+    <div class="brandmark">
+      <img src="assets/logo.png" alt="llm-tracker" />
+      <div class="wm">llm-tracker <span class="dim">v0.2</span></div>
+    </div>
+    <span class="chip">GO</span>
+
+    <div class="top">
+      <div class="kicker">Try it in 10 seconds</div>
+      <h2>Give your agents<br/>a <span class="accent">steering wheel.</span></h2>
+      <p class="sub">Open source. 100% local. Works with Claude, GPT, Gemini, Codex — anything that speaks MCP.</p>
+    </div>
+
+    <div class="cta-block">
+      <div class="install">$ npm i -g llm-tracker</div>
+      <div class="meta-row">
+        <div class="item"><span class="dot"></span> 100% local</div>
+        <div class="item"><span class="dot"></span> Zero config</div>
+        <div class="item"><span class="dot a"></span> MCP-native</div>
+      </div>
+      <div class="url-block">
+        <span class="lbl">GitHub</span>
+        github.com/justguy/<b>llm-tracker</b>
+      </div>
+    </div>
+
+    <span class="pagenum"><b>05</b> / 05</span>
+  </div>
+
+</div>
+
+</body>
+</html>

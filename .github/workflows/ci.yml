@@ -16,9 +16,12 @@ jobs:
         os: [ubuntu-latest]
         node-version: ["18", "20", "22"]
         include:
-          # Platform smoke: one LTS node on macOS + Windows
+          # macOS: cover Node 18 AND 20 (DoD: hub/** tests on {macOS, Linux} x {18, 20})
+          - os: macos-latest
+            node-version: "18"
           - os: macos-latest
             node-version: "20"
+          # Platform smoke: one LTS node on Windows
           - os: windows-latest
             node-version: "20"
     steps:

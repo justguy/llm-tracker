@@ -6,6 +6,7 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync,
 import { cmdBlockers } from "./commands/blockers.js";
 import { cmdBrief } from "./commands/brief.js";
 import { cmdChanged } from "./commands/changed.js";
+import { cmdConfig } from "./commands/config.js";
 import { cmdDecisions } from "./commands/decisions.js";
 import { cmdExecute } from "./commands/execute.js";
 import { cmdFuzzy } from "./commands/fuzzy.js";
@@ -329,7 +330,7 @@ async function cmdRun(args, { daemonized = false } = {}) {
 
   ensureWorkspaceReady(workspace);
   const { startHub } = await import("../hub/server.js");
-  await startHub({ workspace, port, uiDir: join(PKG_ROOT, "ui") });
+  await startHub({ workspace, port, uiDir: join(PKG_ROOT, "ui"), configFlag: args.flags.config });
 
   if (daemonized) {
     process.on("exit", () => removeDaemonMeta(workspace));
@@ -364,11 +365,14 @@ async function cmdDaemonStart(args) {
   writeFileSync(logFile, `\n[${new Date().toISOString()}] starting daemon on :${port}\n`, { flag: "a" });
   const logFd = openSync(logFile, "a");
 
+  const childArgs = [__filename, "__run-hub", "--path", workspace, "--port", String(port)];
+  if (args.flags.config) childArgs.push("--config", String(args.flags.config));
+
   let child;
   try {
     child = spawn(
       process.execPath,
-      [__filename, "__run-hub", "--path", workspace, "--port", String(port)],
+      childArgs,
       {
         cwd: process.cwd(),
         detached: true,
@@ -579,6 +583,7 @@ async function main() {
   if (cmd === "execute") return cmdExecute(args, { resolveWorkspace, httpRequest });
   if (cmd === "verify") return cmdVerify(args, { resolveWorkspace, httpRequest });
   if (cmd === "blockers") return cmdBlockers(args, { resolveWorkspace, httpRequest });
+  if (cmd === "config") return cmdConfig(args, { resolveWorkspace });
   if (cmd === "changed") return cmdChanged(args, { resolveWorkspace, httpRequest });
   if (cmd === "search") return cmdSearch(args, { resolveWorkspace, httpRequest });
   if (cmd === "fuzzy" || cmd === "fuzzy-search") return cmdFuzzy(args, { resolveWorkspace, httpRequest });
@@ -597,9 +602,9 @@ async function main() {
 
 Usage:
   llm-tracker init [--path <dir>]                       Create a workspace (default ~/.llm-tracker)
-  llm-tracker [--path <dir>] [--port N]                Start the hub in the foreground (default)
-  llm-tracker [--path <dir>] [--port N] --daemon       Start the hub in the background
-  llm-tracker daemon start [--path <dir>] [--port N]   Start the background daemon
+  llm-tracker [--path <dir>] [--port N] [--config <file>]                Start the hub in the foreground (default)
+  llm-tracker [--path <dir>] [--port N] [--config <file>] --daemon       Start the hub in the background
+  llm-tracker daemon start [--path <dir>] [--port N] [--config <file>]   Start the background daemon
   llm-tracker daemon stop [--path <dir>]               Stop the background daemon
   llm-tracker daemon restart [--path <dir>] [--port N] Restart the background daemon
   llm-tracker daemon status [--path <dir>]             Show daemon status
@@ -613,6 +618,7 @@ Usage:
   llm-tracker execute <slug> <taskId> [--json]         Print a deterministic execution pack (requires hub)
   llm-tracker verify <slug> <taskId> [--json]          Print a deterministic verification pack (requires hub)
   llm-tracker blockers <slug> [--json]                 Print structurally blocked tasks (requires hub)
+  llm-tracker config session-hub [--format json|yaml]  Print the resolved workspace session-hub config (defaults + overrides)
   llm-tracker changed <slug> [<fromRev>] [--json]      Print changed tasks since a rev (requires hub)
   llm-tracker search <slug> <query> [--json] [--limit N] Semantic task search with local embeddings (requires hub)
   llm-tracker fuzzy|fuzzy-search <slug> <query> [--json] [--limit N]  Fuzzy lexical task search (requires hub)

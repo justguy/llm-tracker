@@ -16,7 +16,19 @@ import express from "express";
 import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
 import { buildTrackerErrorBody } from "./error-payload.js";
+import { registerSessionsRoutes } from "./api/sessions.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
+import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
+import { loadWorkspaceConfig } from "./config/loader.js";
+import { atomicWriteJson } from "./runtime/atomic.js";
+import { validateRuntimeEvent } from "./runtime/events.js";
+import { makeRuntimeId } from "./runtime/ids.js";
+import { makePaths } from "./runtime/paths.js";
+import { RuntimeProjection } from "./runtime/projection.js";
+import { appendJsonlLine } from "./runtime/snapshots.js";
+import { RuntimeStore } from "./runtime/store.js";
+import { rebuildRuntimeFromDisk, wrapSnapshot } from "./runtime/startup.js";
+import { RuntimeBroadcaster } from "./runtime/ws.js";
 import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
 import { Store, slugFromFile } from "./store.js";
 
@@ -168,7 +180,61 @@ function snapshot(store) {
   return projects;
 }
 
-export async function startHub({ workspace, port, uiDir, host, token } = {}) {
+function fileSizeOrZero(filePath) {
+  try {
+    return statSync(filePath).size;
+  } catch (err) {
+    if (err && err.code === "ENOENT") return 0;
+    throw err;
+  }
+}
+
+export async function startHub({ workspace, port, uiDir, host, token, configFlag } = {}) {
+  const workspaceConfig = await loadWorkspaceConfig({ workspaceRoot: workspace, configFlag });
+  const runtimeConfig = workspaceConfig.resolved.sessionHub.runtimeStore;
+  const runtimeProjection = new RuntimeProjection();
+  const runtimeStartup = await rebuildRuntimeFromDisk({ workspaceRoot: workspace, projection: runtimeProjection });
+  const runtimePaths = makePaths({ workspaceRoot: workspace });
+  const runtimeBroadcaster = new RuntimeBroadcaster();
+  let lastRuntimeEventId = null;
+
+  const runtimeSnapshot = () => ({
+    ...runtimeProjection.toSnapshots(),
+    rev: runtimeProjection.rev,
+    startup: runtimeStartup
+  });
+
+  const writeRuntimeSnapshots = async () => {
+    const snapshots = runtimeProjection.toSnapshots();
+    const watermark = {
+      jsonlOffset: fileSizeOrZero(runtimePaths.runtimeEvents),
+      lastEventId: lastRuntimeEventId,
+      rev: runtimeProjection.rev
+    };
+    await Promise.all([
+      atomicWriteJson(runtimePaths.sessionsSnapshot, wrapSnapshot(snapshots.sessions, watermark)),
+      atomicWriteJson(runtimePaths.jobsSnapshot, wrapSnapshot(snapshots.jobs, watermark)),
+      atomicWriteJson(runtimePaths.skillRunsSnapshot, wrapSnapshot(snapshots.skillRuns, watermark))
+    ]);
+  };
+
+  const runtimeStore = new RuntimeStore({
+    workspaceRoot: workspace,
+    snapshotDebounceMs: runtimeConfig.snapshotDebounceMs,
+    snapshotMaxAgeMs: runtimeConfig.snapshotMaxAgeMs,
+    snapshotMaxEventsPending: runtimeConfig.snapshotMaxEventsPending,
+    flushOnShutdown: runtimeConfig.flushOnShutdown,
+    writeSnapshots: writeRuntimeSnapshots,
+    onAppend: async (event) => {
+      validateRuntimeEvent(event);
+      await appendJsonlLine(runtimePaths.runtimeEvents, event);
+      runtimeProjection.apply(event);
+      lastRuntimeEventId = event.id;
+      runtimeBroadcaster.handleAppend(event);
+    }
+  });
+  runtimeStore.rev = runtimeProjection.rev;
+
   const store = new Store(workspace);
   const app = express();
   const uiSessions = new Map();
@@ -374,6 +440,14 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     res.json(projectPayload(req.params.slug, entry));
   });
   registerIntelligenceRoutes(app, { workspace, store });
+  registerWorkspaceConfigRoutes(app, { workspace });
+  registerSessionsRoutes(app, {
+    runtimeStore,
+    projection: runtimeProjection,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace
+  });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {
     const r = await store.createOrReplace(req.params.slug, req.body || {});
@@ -720,7 +794,8 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     }
     done(true);
   };
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws", verifyClient: verifyWsClient });
+  const wss = new WebSocketServer({ noServer: true });
+  const runtimeWss = new WebSocketServer({ noServer: true });
   const sockets = new Set();
   let shuttingDown = false;
 
@@ -736,8 +811,47 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     }
   }
 
+  function rejectUpgrade(socket, statusCode, message) {
+    try {
+      socket.write(
+        `HTTP/1.1 ${statusCode} ${message || "WebSocket rejected"}\r\n` +
+          "Connection: close\r\n" +
+          "\r\n"
+      );
+    } catch {}
+    try {
+      socket.destroy();
+    } catch {}
+  }
+
+  httpServer.on("upgrade", (req, socket, head) => {
+    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+    const target = pathname === "/ws" ? wss : pathname === "/runtime/ws" ? runtimeWss : null;
+    if (!target) {
+      rejectUpgrade(socket, 404, "not found");
+      return;
+    }
+    verifyWsClient({ req }, (ok, code = 401, message = "websocket rejected") => {
+      if (!ok) {
+        rejectUpgrade(socket, code, message);
+        return;
+      }
+      target.handleUpgrade(req, socket, head, (ws) => {
+        target.emit("connection", ws, req);
+      });
+    });
+  });
+
   wss.on("connection", (ws) => {
     ws.send(JSON.stringify({ type: "SNAPSHOT", projects: snapshot(store) }));
+  });
+
+  runtimeWss.on("connection", (ws) => {
+    runtimeBroadcaster.subscribe(ws, runtimeSnapshot).catch(() => {
+      try {
+        ws.close();
+      } catch {}
+    });
   });
 
   const trackersDir = join(workspace, "trackers");
@@ -1001,7 +1115,18 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   }, 300);
   linkedTargetsPollTimer.unref?.();
 
-  const shutdown = async () => {
+  const closeWsServer = async (server) => {
+    try {
+      for (const client of server.clients) {
+        try {
+          client.terminate();
+        } catch {}
+      }
+      await new Promise((resolve) => server.close(() => resolve()));
+    } catch {}
+  };
+
+  const closeHub = async ({ exit = false } = {}) => {
     if (shuttingDown) return;
     shuttingDown = true;
 
@@ -1015,13 +1140,10 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
       await patchesWatcher.close();
     } catch {}
     try {
-      for (const client of wss.clients) {
-        try {
-          client.terminate();
-        } catch {}
-      }
-      await new Promise((resolve) => wss.close(() => resolve()));
+      await runtimeStore.shutdown();
     } catch {}
+    await closeWsServer(wss);
+    await closeWsServer(runtimeWss);
     try {
       if (typeof httpServer.closeIdleConnections === "function") {
         httpServer.closeIdleConnections();
@@ -1044,7 +1166,16 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
 
     await new Promise((resolve) => httpServer.close(() => resolve()));
     clearTimeout(forceTimer);
+    if (!exit) {
+      process.off("SIGINT", shutdown);
+      process.off("SIGTERM", shutdown);
+      return;
+    }
     process.exit(0);
+  };
+
+  const shutdown = async () => {
+    await closeHub({ exit: true });
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
@@ -1052,6 +1183,7 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
   await new Promise((resolve, reject) => {
     const onError = async (err) => {
       httpServer.off("listening", onListening);
+      clearInterval(uiSessionSweepTimer);
       clearInterval(linkedTargetsPollTimer);
       try {
         await watcher.close();
@@ -1060,7 +1192,13 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
         await patchesWatcher.close();
       } catch {}
       try {
+        await runtimeStore.shutdown();
+      } catch {}
+      try {
         wss.close();
+      } catch {}
+      try {
+        runtimeWss.close();
       } catch {}
       reject(err);
     };
@@ -1092,5 +1230,16 @@ export async function startHub({ workspace, port, uiDir, host, token } = {}) {
     httpServer.listen(port, bindHost);
   });
 
-  return { httpServer, wss, store, watcher };
+  return {
+    httpServer,
+    wss,
+    runtimeWss,
+    store,
+    watcher,
+    patchesWatcher,
+    runtimeStore,
+    runtimeProjection,
+    runtimeBroadcaster,
+    close: () => closeHub({ exit: false })
+  };
 }

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>LLM Tracker — Session Hub</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; }
+  * { box-sizing: border-box; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 6px; }
+  code { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+
+  @keyframes pulse {
+    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1.2); }
+  }
+  @keyframes cardEnter {
+    from { opacity: 0; transform: translateY(4px) scale(0.995); }
+    to   { opacity: 1; transform: translateY(0)   scale(1); }
+  }
+  @keyframes cardGrow {
+    from { opacity: 0; transform: scale(0.985); filter: brightness(1.05); }
+    to   { opacity: 1; transform: scale(1);    filter: brightness(1); }
+  }
+  @keyframes dropHint {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(184,74,26,0.0); }
+    50%      { box-shadow: 0 0 0 4px rgba(184,74,26,0.18); }
+  }
+  @keyframes dragGhost {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Smooth size + layout transitions on session card wrappers */
+  .sh-card-wrap {
+    transition:
+      background 200ms cubic-bezier(0.32, 0.72, 0, 1),
+      border-color 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .sh-card-content {
+    animation: cardGrow 240ms cubic-bezier(0.32, 0.72, 0, 1);
+    transform-origin: top left;
+  }
+
+  /* Drop target states */
+  .sh-drop-target {
+    position: relative;
+    transition: background 180ms ease, outline 180ms ease;
+  }
+  .sh-drop-target.is-over {
+    outline: 2px dashed #b84a1a;
+    outline-offset: -3px;
+    background: #f6e3d6 !important;
+    animation: dropHint 1.6s ease-in-out infinite;
+  }
+  .sh-drop-target.is-over::after {
+    content: 'drop to attach';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; letter-spacing: 1px;
+    color: #b84a1a; font-weight: 600;
+    background: rgba(255,255,255,0.65);
+    pointer-events: none;
+    animation: dragGhost 180ms ease-out;
+  }
+  .sh-draggable {
+    cursor: grab;
+  }
+  .sh-draggable:active {
+    cursor: grabbing;
+  }
+  .sh-dragging {
+    opacity: 0.4;
+  }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="variants/session-hub-shared.jsx"></script>
+<script type="text/babel" src="variants/session-hub-preflight.jsx"></script>
+<script type="text/babel" src="variants/session-hub-global.jsx"></script>
+<script type="text/babel" src="variants/session-hub-triage.jsx"></script>
+<script type="text/babel" src="variants/session-hub-board.jsx"></script>
+<script type="text/babel" src="variants/session-hub-brief.jsx"></script>
+<script type="text/babel" src="variants/session-hub-modals.jsx"></script>
+<script type="text/babel" src="variants/session-hub-prototype.jsx"></script>
+
+<script type="text/babel">
+function Intro() {
+  return (
+    <div style={{
+      padding: '0 60px 32px', maxWidth: 1100,
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: 11, letterSpacing: 2, color: 'rgba(60,50,40,0.6)',
+        marginBottom: 12,
+      }}>LLM·TRACKER · SESSION HUB · v0.4</div>
+      <div style={{
+        fontSize: 40, fontWeight: 600, letterSpacing: -1,
+        color: 'rgba(20,18,14,0.95)', marginBottom: 16,
+        lineHeight: 1.1,
+      }}>
+        Tightened: triage promoted, Brief renamed, approval semantics split.
+      </div>
+      <div style={{
+        fontSize: 15, lineHeight: 1.65, color: 'rgba(60,50,40,0.85)',
+        maxWidth: 920,
+      }}>
+        Four views now: <strong>BOARD</strong> · <strong>HUB</strong> · <strong>TRIAGE</strong> · <strong>RUN SESSION</strong>. Each does one thing well. Attention strip carries per-session inline actions across all of them, and every state badge has a why-popover with source, event id, and clear condition.
+      </div>
+
+      <div style={{
+        marginTop: 26,
+        display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16,
+      }}>
+        <FlowPanel n="A" title="Four views, one cockpit">
+          <p><strong>BOARD</strong> — swimlanes × tasks. <code>[+ RUN SESSION]</code> launches Run Session with the task <em>locked</em>.</p>
+          <p><strong>HUB</strong> — every session, grouped by project. Size each card SM / MED / LG inline. Default view.</p>
+          <p><strong>TRIAGE</strong> — “what needs me, now”. Dense rows grouped NOW / SOON / WATCH / PAUSED, with per-session inline actions and <code>[▸ why]</code> evidence drill-down.</p>
+          <p><strong>RUN SESSION</strong> — unified launch flow. Preflight banner gates real conditions (active job, rev drift, worktree conflict, profile mismatch); fail → <code>[OVERRIDE]</code>.</p>
+        </FlowPanel>
+
+        <FlowPanel n="B" title="Attention model: semantically split">
+          <p>Approval, conflict, and out-of-allowed-paths are no longer one bucket. Triage taxonomy:</p>
+          <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+            <li><strong style={{ color: '#a83838' }}>approval_needed</strong> · structured event from adapter</li>
+            <li><strong style={{ color: '#a83838' }}>sandbox_escape_requested</strong> · explicit escape request</li>
+            <li><strong style={{ color: '#3a5a7d' }}>context_high</strong> · from session heartbeat</li>
+            <li><strong style={{ color: '#a8741a' }}>quiet</strong> / <strong style={{ color: '#a8741a' }}>no_heartbeat</strong> · derived</li>
+            <li><strong style={{ color: '#a83838' }}>blocked_on_dep</strong> · structured</li>
+            <li><strong style={{ color: '#a8741a' }}>worktree_conflict</strong> / <strong style={{ color: '#a8741a' }}>outside_allowed_paths</strong> · watcher/git evidence</li>
+          </ul>
+          <p>Click <code>[▸ why]</code> in Triage to see the source, event id, when it clears, and what happens if ignored.</p>
+        </FlowPanel>
+
+        <FlowPanel n="C" title="Run Session is the funnel">
+          <p>Single screen. Three pieces:</p>
+          <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+            <li><strong>Preflight banner</strong> — the checks that would fail at launch (active job, rev drift, conflicts, capability mismatch).</li>
+            <li><strong>Left:</strong> task picker (locks when from board), evidence toggles, runtime picker with a <strong>capability matrix</strong> per agent tier.</li>
+            <li><strong>Right:</strong> editable prompt preview — emphasizes <code>tracker_session_*</code> / <code>tracker_job_*</code> / <code>tracker_skill_*</code> reporting tools. Direct <code>tracker_task_set_status</code> is allowed but de-emphasized; hub warns if used to mark complete without verify evidence.</li>
+          </ul>
+        </FlowPanel>
+
+        <FlowPanel n="D" title="Trust seams visible everywhere">
+          <p>Every card shows: capability tier badge, <strong>stdio capture state</strong> (<code>OFF</code> / <code>LIVE</code> / <code>CAPTURED</code> with secret-risk hint), sandbox mode, source-labelled state.</p>
+          <p>Global <code>[RESTART…]</code> opens the restart matrix instead of acting blind; presets include <strong>Restart selected</strong>, <strong>Restart all QUIET sessions</strong>, <strong>Restart with new model</strong>, <strong>Restart with stricter sandbox</strong>, and <strong>Rollover</strong>. Each shows the equivalent CLI.</p>
+        </FlowPanel>
+      </div>
+    </div>
+  );
+}
+
+function FlowPanel({ n, title, children }) {
+  return (
+    <div style={{
+      padding: 18, background: 'rgba(255,255,255,0.7)',
+      border: '1px solid rgba(0,0,0,0.07)',
+      fontSize: 13, lineHeight: 1.55,
+      color: 'rgba(60,50,40,0.82)',
+    }}>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'rgba(60,50,40,0.5)', marginBottom: 6, letterSpacing: 1 }}>{n}</div>
+      <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 8, lineHeight: 1.3, color: 'rgba(20,18,14,0.95)' }}>{title}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <DesignCanvas>
+      <div style={{ padding: '20px 0 0' }}>
+        <Intro />
+
+        <DCSection
+          title="Interactive prototype"
+          subtitle="Land on HUB with ses-K2WX expanded. Click [TRIAGE] to see urgency-grouped rows with [▸ why] evidence drill-down. Or [BOARD] → [+ RUN SESSION] to see the unified Run Session screen with preflight banner, locked task, capability matrix, and a prompt that pushes session/job/skill tools.">
+          <DCArtboard id="hub-prototype" label="Hub · Board · Triage · Run Session" width={1440} height={1900}>
+            <SessionHubPrototype />
+          </DCArtboard>
+        </DCSection>
+
+        <div style={{
+          padding: '40px 60px 80px', maxWidth: 980,
+          fontFamily: 'Inter, system-ui, sans-serif',
+        }}>
+          <div style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: 11, letterSpacing: 2, color: 'rgba(60,50,40,0.6)',
+            marginBottom: 12,
+          }}>OPEN</div>
+          <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 12, lineHeight: 1.25 }}>
+            Questions for you
+          </div>
+          <ul style={{ fontSize: 14, lineHeight: 1.7, color: 'rgba(60,50,40,0.85)', paddingLeft: 20 }}>
+            <li><strong>Drag tasks onto sessions</strong> — on <code>BOARD</code> the unstarted task card now has a <code>⠦ drag</code> handle. Drop on any session card in the rail to open the Attach modal (preflight + confirm). Drop on the <code>[+]</code> tile to start a fresh session for it.</li>
+            <li><strong>Smooth resize</strong> — clicking <code>[SM]</code> / <code>[MED]</code> / <code>[LG]</code> fades + scales content via CSS keyframes; grid reflow itself stays snappy.</li>
+            <li><strong>What's still TBD</strong> — animated grid reflow (FLIP), richer attach modal for in-flight successor cases, key-modifier UX (<kbd>alt</kbd>-drag for preview-only).</li>
+          </ul>
+        </div>
+      </div>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

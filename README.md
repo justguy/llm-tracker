@@ -573,9 +573,9 @@ The hub is a local service. It ships three layers that matter if another process
 
 - **Loopback binding** — by default the listener binds to `127.0.0.1`, so other hosts on the LAN cannot reach it. Override with `LLM_TRACKER_HOST=0.0.0.0` if you consciously want LAN access.
 - **Cross-origin guard** — every mutating request (`POST` / `PUT` / `PATCH` / `DELETE`) must either have no `Origin` header (trusted CLI / `curl` / MCP context) or carry an origin that exactly matches the hub origin serving that request. Loopback origins are always allowed too. Anything else returns `403`, so browser CSRF stays blocked even if you deliberately expose the hub on a LAN IP.
-- **WebSocket guard** — `/ws` uses the same origin policy. Cross-origin browser upgrades are rejected with `403`, so a malicious page cannot subscribe to tracker broadcasts from another site.
+- **WebSocket guard** — `/ws` and `/runtime/ws` use the same origin policy. Cross-origin browser upgrades are rejected with `403`, so a malicious page cannot subscribe to tracker or runtime broadcasts from another site.
 - **Optional bearer token** — set `LLM_TRACKER_TOKEN=<secret>` before starting the hub and every mutating request must include `Authorization: Bearer <secret>` (or `X-LLM-Tracker-Token: <secret>`). The CLI picks the token up from the same env var automatically. The browser UI gets a short-lived HttpOnly same-origin session cookie when it loads `index.html`, so the raw secret is never injected into page JavaScript.
-- **WebSocket auth when tokenized** — when `LLM_TRACKER_TOKEN` is set, `/ws` also requires `Authorization: Bearer <secret>` (or `X-LLM-Tracker-Token`) unless the request carries the UI's short-lived same-origin session cookie.
+- **WebSocket auth when tokenized** — when `LLM_TRACKER_TOKEN` is set, `/ws` and `/runtime/ws` also require `Authorization: Bearer <secret>` (or `X-LLM-Tracker-Token`) unless the request carries the UI's short-lived same-origin session cookie.
 
 Body-size hardening:
 
@@ -619,7 +619,11 @@ The hub runs on Windows, but a few paths need extra care:
 - **Paths** — Windows absolute paths (`C:\Users\...`) work everywhere an absolute path is expected.
 - **LAN access** — if you override `LLM_TRACKER_HOST`, open the UI through the real host or IP you bound for. Browser writes remain same-origin only; a page loaded from some other site still gets `403`.
 
-CI currently targets Linux and macOS. Windows-specific behavior is documented but not yet gated by CI — expect the Linux/macOS matrix to be the canonical coverage until a Windows runner lands.
+CI targets Linux and macOS across Node LTS versions, plus a Windows Node 20 smoke job for platform regressions.
+
+## Session Hub work — precedence
+
+If you are executing Session Hub tasks (the runtime/session layer described in `llm_tracker_session_hub_PRD_v0.5.md` / `_TDD_v0.5.md` / `_EXECUTOR_ADDENDUM.md`), follow the precedence order in [`docs/session-hub/precedence.md`](./docs/session-hub/precedence.md): safety/trust rules → existing tracker semantics → v0.4 PRD/TDD model → addendum → provider-specific. For stdio capture, retention, and secrets handling, use [`docs/session-hub/capture-and-secrets.md`](./docs/session-hub/capture-and-secrets.md). Use these whenever sources disagree before changing code.
 
 ## License
 

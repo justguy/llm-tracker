@@ -1,0 +1,248 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://llm-tracker.dev/schema/workspace.schema.json",
+  "title": "LLM Tracker workspace configuration",
+  "description": "STRICT schema (SH-0-07). Each block under sessionHub enforces its known keys and forbids unknown keys (additionalProperties: false). Enums and types match TDD v0.5 §25 verbatim. Critically, sessionHub.trustedLocalMode.neverAutoApproveTerminalPrompts is non-overridable (const: true); any config flipping it to false fails validation at load time.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sessionHub": {
+      "type": "object",
+      "description": "Session Hub configuration block. All keys come from TDD v0.5 §25.",
+      "additionalProperties": false,
+      "properties": {
+        "activity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "heartbeatEveryMinutes": { "type": "integer", "minimum": 0 },
+            "missingHeartbeatAfterMinutes": { "type": "integer", "minimum": 0 },
+            "dumbTerminalQuietAfterMinutes": { "type": "integer", "minimum": 0 },
+            "dumbTerminalQuietEscalateAfterMinutes": { "type": "integer", "minimum": 0 },
+            "appServerDisconnectedWarningAfterSeconds": { "type": "integer", "minimum": 0 },
+            "contextHighPercent": { "type": "integer", "minimum": 0, "maximum": 100 }
+          }
+        },
+
+        "stdio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "liveTail": { "type": "boolean" },
+            "captureToDisk": { "type": "boolean" },
+            "promptOnFirstCapture": { "type": "boolean" },
+            "memoryRingBytes": { "type": "integer", "minimum": 0 },
+            "maxBytes": { "type": "integer", "minimum": 0 },
+            "rotatedSegments": { "type": "integer", "minimum": 0 }
+          }
+        },
+
+        "runtimeStore": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "eventLogMode": { "type": "string", "enum": ["single", "split"] },
+            "snapshotDebounceMs": { "type": "integer", "minimum": 0 },
+            "snapshotMaxAgeMs": { "type": "integer", "minimum": 0 },
+            "snapshotMaxEventsPending": { "type": "integer", "minimum": 0 },
+            "flushOnShutdown": { "type": "boolean" },
+            "splitWhenLogExceedsMb": { "type": "integer", "minimum": 0 },
+            "splitWhenColdRebuildExceedsMs": { "type": "integer", "minimum": 0 }
+          }
+        },
+
+        "worktrees": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "recommendOnSharedWorktree": { "type": "boolean" },
+            "recommendOnTaskSessionStart": { "type": "boolean" },
+            "autoCreateWithoutConfirmation": { "type": "boolean" },
+            "allowTrustedAutoCreateOnLaunch": { "type": "boolean" },
+            "defaultNamingPattern": { "type": "string", "minLength": 1 }
+          }
+        },
+
+        "notifications": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attentionPushWs": { "type": "boolean" },
+            "desktopNotificationsDefault": { "type": "boolean" },
+            "humanApprovalStyle": {
+              "type": "string",
+              "enum": ["attention_item", "desktop_notification"]
+            }
+          }
+        },
+
+        "completionGates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "uiCompleteMode": {
+              "type": "string",
+              "enum": ["block_required_missing", "warn_only", "off"]
+            },
+            "allowHumanOverride": { "type": "boolean" },
+            "overrideRequiresReason": { "type": "boolean" },
+            "warnOnDirectTrackerCompleteWithMissingGates": { "type": "boolean" }
+          }
+        },
+
+        "crossProjectQueue": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "scope": { "type": "string", "enum": ["workspace"] },
+            "requireHumanConfirmForMultiLaunch": { "type": "boolean" },
+            "maxInitialLaunches": { "type": "integer", "minimum": 0 }
+          }
+        },
+
+        "trustedLocalMode": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "neverAutoApproveTerminalPrompts": {
+              "type": "boolean",
+              "const": true,
+              "description": "Non-overridable safety flag (TDD §23.2 #20). Schema rejects any value other than true."
+            },
+            "autoCreateWorktreeOnLaunch": { "type": "boolean" },
+            "autoRolloverOnContextHigh": { "type": "boolean" },
+            "autoRunVerifyCommands": { "type": "boolean" },
+            "autoApproveProviderRequests": { "type": "boolean" },
+            "autoLaunchCrossProjectQueue": { "type": "boolean" },
+            "autoArchiveStoppedSessions": { "type": "boolean" },
+            "stdioCaptureToDiskDefault": { "type": "boolean" },
+            "allowDirectContextInjectionOnUserLaunch": { "type": "boolean" },
+            "allowStdinInjectionOnUserAction": { "type": "boolean" },
+            "allowSessionRestartOnUserAction": { "type": "boolean" },
+            "allowVerifyCommandRunOnUserAction": { "type": "boolean" },
+            "allowWorktreeCreationFromUI": { "type": "boolean" },
+            "allowProviderReviewFromUI": { "type": "boolean" },
+            "requireConfirmationForCrossProjectLaunch": { "type": "boolean" }
+          }
+        },
+
+        "providers": {
+          "type": "object",
+          "description": "Map of provider id -> provider config. Provider ids match [A-Za-z0-9_]+.",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z0-9_]+$": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["generic_pty", "structured_provider"]
+                },
+                "command": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "mcpContract": { "type": "boolean" },
+                "transportPreference": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["stdio", "unix", "websocket"]
+                  }
+                },
+                "preferGeneratedSchema": { "type": "boolean" },
+                "schemaVendorPath": { "type": "string", "minLength": 1 },
+                "fallbackProvider": { "type": "string", "minLength": 1 },
+                "authMode": {
+                  "type": "string",
+                  "enum": ["external_codex_auth", "hub_session_token", "none"]
+                },
+                "hubSessionTokenEnv": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
+
+        "watcher": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "backend": { "type": "string", "enum": ["chokidar", "node_fs_watch"] },
+            "usePolling": { "type": "boolean" },
+            "atomic": { "type": "boolean" },
+            "awaitWriteFinish": { "type": "boolean" },
+            "coalesceMs": { "type": "integer", "minimum": 0 },
+            "maxBatchSize": { "type": "integer", "minimum": 0 },
+            "ignore": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+
+        "processLifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stopSignal": { "type": "string", "minLength": 1 },
+            "sigintGraceMs": { "type": "integer", "minimum": 0 },
+            "forceKillSignal": { "type": "string", "minLength": 1 }
+          }
+        },
+
+        "modelSwap": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultMode": {
+              "type": "string",
+              "enum": ["successor_restart", "live_when_capable"]
+            },
+            "showLiveSwapWhenCapable": { "type": "boolean" },
+            "liveSwapKeepCtxDefault": { "type": "boolean" }
+          }
+        },
+
+        "untaskedSessions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allowed": { "type": "boolean" },
+            "unboundAttentionAfterMinutes": { "type": "integer", "minimum": 0 },
+            "unboundAutoArchiveAfterHours": { "type": "integer", "minimum": 0 }
+          }
+        },
+
+        "attach": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requireConfirmation": { "type": "boolean" },
+            "contextOverflowWarnPercent": { "type": "number", "minimum": 0, "maximum": 1 },
+            "autoStartQueuedOnCompletionGraceSec": { "type": "integer", "minimum": 0 }
+          }
+        },
+
+        "launcher": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "singleFunnel": { "type": "boolean" },
+            "allowAddTaskInline": { "type": "boolean" },
+            "globalNewSessionPicker": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["pick_task", "untasked", "attach_existing"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

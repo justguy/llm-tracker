@@ -50,11 +50,13 @@
     "express": "^4.19.2",
     "htm": "^3.1.1",
     "preact": "^10.22.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "yaml": "^2.9.0"
   },
   "files": [
     "bin",
     "hub",
+    "schema",
     "ui",
     "workspace-template",
     "img",
