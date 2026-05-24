@@ -1,4 +1,6 @@
 // hub/sessions/registry.js — SH-2-01 (TDD v0.5 §6.1, §6.2, §6.6, §23.2 #29)
+//                            SH-2-21 (addendum §7 — ProviderThreadRef +
+//                                    ProviderCapabilities on input surface)
 //
 // SessionRegistry — domain service over the runtime layer for session-shaped
 // CRUD. Reads flow from RuntimeProjection; mutations flow through
@@ -24,15 +26,19 @@
 //     absorbs `id, name, tier, projectSlug, taskId, status, statusSource,
 //     startedAt, warnings`. The other v0.7 inputs (sandbox, ctxMax,
 //     activeJobId, agent, provider, model, cwd, repoRoot, worktreePath,
-//     branch) ride through the event payload (`session.*` has
-//     `additionalProperties: true` in the schema) and are absorbed by
-//     subsequent tasks that extend the projection: SH-2-17/18 (provider
-//     adapters), SH-2-21 (ProviderThreadRef), SH-2-24 (sandbox field). The
-//     registry exposes them as inputs today so the create-side contract is
-//     stable; read-side fidelity grows as the projection lights up.
+//     branch, providerThread, providerCapabilities) ride through the event
+//     payload (`session.*` has `additionalProperties: true` in the schema)
+//     and are absorbed by subsequent tasks that extend the projection:
+//     SH-2-17/18 (provider adapters absorb providerThread /
+//     providerCapabilities via `session.provider.*` events), SH-2-24
+//     (sandbox field). The registry exposes them as inputs today so the
+//     create-side contract is stable; read-side fidelity grows as the
+//     projection lights up.
 //   - Computing `now: {...}` or `spark: number[]`. Those are derived per
 //     render by SessionTimelineService (SH-4A-02). The registry refuses to
 //     accept them on input so they cannot be written into an event.
+
+import { validateProviderCapabilities } from "../providers/capabilities.js";
 
 /**
  * @typedef {"dumb_terminal" | "mcp_tracked" | "codex_app_server" | "hybrid" | "manual"} SessionTier
@@ -107,7 +113,93 @@ const V07_OPTIONAL_INPUT_FIELDS = Object.freeze([
   "repoRoot",
   "worktreePath",
   "branch",
+  // v0.7 addendum §7: runtime-only ProviderThreadRef + ProviderCapabilities.
+  // Ride through the event payload (additionalProperties: true) — never
+  // written into durable tracker JSON. Projection absorption is deferred to
+  // SH-2-17/SH-2-18 (provider adapters that drive `session.provider.*`).
+  "providerThread",
+  "providerCapabilities",
 ]);
+
+/**
+ * Allowed transports on a ProviderThreadRef (addendum §7).
+ * @type {readonly ("stdio"|"unix"|"websocket"|"pty"|"manual")[]}
+ */
+const PROVIDER_THREAD_TRANSPORTS = Object.freeze([
+  "stdio",
+  "unix",
+  "websocket",
+  "pty",
+  "manual",
+]);
+
+/**
+ * Optional string-typed fields on ProviderThreadRef (addendum §7). When
+ * present each must be a non-empty string.
+ * @type {readonly string[]}
+ */
+const PROVIDER_THREAD_OPTIONAL_STRING_FIELDS = Object.freeze([
+  "threadId",
+  "turnId",
+  "processHandleId",
+  "providerSessionId",
+  "cwd",
+  "repoRoot",
+  "worktreePath",
+  "branch",
+  "model",
+  "resumedFromThreadId",
+  "forkedFromThreadId",
+  "schemaVersion",
+]);
+
+const PROVIDER_THREAD_ALL_KEYS = new Set([
+  "providerId",
+  "transport",
+  ...PROVIDER_THREAD_OPTIONAL_STRING_FIELDS,
+]);
+
+/**
+ * Validate the shape of a ProviderThreadRef (addendum §7). Throws TypeError
+ * with a field-pointed message when the ref is not an object, missing
+ * required fields, carries a bad transport, has an unknown key, or has a
+ * non-string optional field.
+ *
+ * The "no unknown keys" rule is stricter than the addendum implies; it
+ * prevents typos from silently flowing through the schema's
+ * `additionalProperties: true` and getting absorbed by SH-2-17/18 as
+ * surprises.
+ *
+ * @param {unknown} ref
+ * @returns {void}
+ */
+export function assertValidProviderThreadRef(ref) {
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) {
+    throw new TypeError("ProviderThreadRef must be an object");
+  }
+  const r = /** @type {Record<string, unknown>} */ (ref);
+  if (typeof r.providerId !== "string" || r.providerId.length === 0) {
+    throw new TypeError("ProviderThreadRef.providerId required (non-empty string)");
+  }
+  if (typeof r.transport !== "string" || !PROVIDER_THREAD_TRANSPORTS.includes(/** @type {any} */ (r.transport))) {
+    throw new TypeError(
+      `ProviderThreadRef.transport must be one of ${PROVIDER_THREAD_TRANSPORTS.join("|")}`,
+    );
+  }
+  for (const key of Object.keys(r)) {
+    if (!PROVIDER_THREAD_ALL_KEYS.has(key)) {
+      throw new TypeError(`ProviderThreadRef: unknown key '${key}'`);
+    }
+  }
+  for (const f of PROVIDER_THREAD_OPTIONAL_STRING_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(r, f)) {
+      const v = r[f];
+      if (typeof v !== "string" || v.length === 0) {
+        throw new TypeError(`ProviderThreadRef.${f} must be a non-empty string when present`);
+      }
+    }
+  }
+}
 
 /**
  * SessionRegistry-shaped error. Carries a stable `code` so HTTP / CLI / WS
@@ -257,6 +349,28 @@ function assertV07FieldShapes(input) {
       }
     }
   }
+  if (Object.prototype.hasOwnProperty.call(input, "providerThread")) {
+    try {
+      assertValidProviderThreadRef(input.providerThread);
+    } catch (cause) {
+      throw makeError(
+        /** @type {Error} */ (cause).message,
+        "INVALID_PROVIDER_THREAD",
+        { field: "providerThread" },
+      );
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "providerCapabilities")) {
+    try {
+      validateProviderCapabilities(input.providerCapabilities);
+    } catch (cause) {
+      throw makeError(
+        /** @type {Error} */ (cause).message,
+        "INVALID_PROVIDER_CAPABILITIES",
+        { field: "providerCapabilities" },
+      );
+    }
+  }
 }
 
 /**
@@ -348,6 +462,8 @@ export class SessionRegistry {
    * @param {string}  [input.repoRoot]
    * @param {string}  [input.worktreePath]
    * @param {string}  [input.branch]
+   * @param {object}  [input.providerThread]        ProviderThreadRef (addendum §7); runtime-only, rides through event payload, never persisted to tracker JSON
+   * @param {object}  [input.providerCapabilities]  ProviderCapabilities (addendum §5); runtime-only, same persistence rules as providerThread
    * @returns {Promise<{ sessionId: string; rev: number; eventId: string; session: object | null }>}
    */
   async create(input) {
