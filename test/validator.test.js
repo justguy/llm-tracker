@@ -212,3 +212,59 @@ test("requires at least one swimlane and priority", () => {
   const { ok } = validateProject(p);
   assert.equal(ok, false);
 });
+
+test("accepts task.repos and task.verify additions (sh-5-07 wiring)", () => {
+  const p = validProject();
+  p.tasks[0].repos = {
+    primary: { root: "/abs/repo", allowed_paths: ["src/**"] },
+    secondary: [{ root: "../sibling" }]
+  };
+  p.tasks[0].verify = {
+    items: [
+      { kind: "command", id: "lt.test", required: true, cmd: "npm test" },
+      { kind: "skill_run", id: "lt.closeout", required: false, skillId: "tracker-closeout-sweep" }
+    ]
+  };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("validateProject rejects absolute allowed_paths via task-extensions wiring", () => {
+  const p = validProject();
+  p.tasks[0].repos = { primary: { root: "r", allowed_paths: ["/etc/passwd"] } };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/repos/primary/allowed_paths/0") && e.includes("repo-relative")),
+    `expected a repo-relative error on tasks[0], got: ${errors.join("; ")}`
+  );
+});
+
+test("validateProject rejects duplicate verify-item ids via task-extensions wiring", () => {
+  const p = validProject();
+  p.tasks[0].verify = {
+    items: [
+      { kind: "command", id: "dup", required: true, cmd: "a" },
+      { kind: "lint", id: "dup", required: false, tool: "eslint" }
+    ]
+  };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/verify/items/1/id") && e.includes('duplicate verify-item id "dup"')),
+    `expected a duplicate-id error on tasks[0], got: ${errors.join("; ")}`
+  );
+});
+
+test("validateProject rejects bad verify-item id pattern via task-extensions wiring", () => {
+  const p = validProject();
+  p.tasks[0].verify = {
+    items: [{ kind: "command", id: "BadID", required: true, cmd: "true" }]
+  };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0") && e.includes("pattern")),
+    `expected a pattern error on tasks[0], got: ${errors.join("; ")}`
+  );
+});

@@ -2,6 +2,7 @@ import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { EFFORT_VALUES, REFERENCE_PATTERN_SOURCE } from "./references.js";
 import { STATUS_VALUES, TASK_OUTCOME_VALUES } from "./status-vocabulary.js";
+import { validateAllTaskExtensions } from "./validator/task-extensions.js";
 
 const schema = {
   type: "object",
@@ -221,6 +222,9 @@ export function validateProject(data) {
       current = parentById.get(current);
     }
   }
+
+  const ext = validateAllTaskExtensions(data.tasks);
+  if (!ext.ok) errors.push(...ext.errors);
 
   return errors.length === 0 ? { ok: true, errors: [] } : { ok: false, errors };
 }
