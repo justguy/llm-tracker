@@ -30,6 +30,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import {
+  WARNING_KINDS,
+  DEPRECATED_WARNING_KINDS,
+  assertValidWarning,
+} from "../sessions/warnings.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const schemaPath = path.resolve(here, "..", "..", "schema", "runtime-events.schema.json");
 const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
@@ -209,3 +215,142 @@ function throwFromErrors(errors, event) {
 }
 
 export { schema as runtimeEventsSchema };
+
+// --- SH-2-02: SessionWarning event factories ------------------------------
+//
+// These build `session.warning` and `session.warning_cleared` runtime events
+// from a validated SessionWarning (TDD §8.3). The factories run
+// `assertValidWarning` first so callers get a field-pointed §8.3 error before
+// AJV gets a chance to emit its more schema-shaped (and less actionable)
+// messages. After the per-kind lint, the event is validated against the
+// runtime-events schema as a defence-in-depth check.
+//
+// `source` defaults to `"system"` because the hub's emit sites
+// (ActivityMonitor, sandbox watcher, etc.) are all hub-internal — when an
+// adapter or HTTP caller wants to surface a warning they pass their own
+// `source`. The event `id` is intentionally left undefined when the caller
+// doesn't provide one; the RuntimeStore stamps the canonical `evt_` id at
+// append time (same pattern SessionRegistry uses).
+
+/**
+ * Build a `session.warning` runtime event.
+ *
+ * Validates the supplied `warning` against §8.3 first (rejects unknown /
+ * deprecated kinds and per-kind missing/wrong-typed fields before AJV runs),
+ * then runs the schema's variant validator as a defence-in-depth check.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {object} input.warning            SessionWarning per TDD §8.3
+ * @param {string} input.workspace
+ * @param {string} [input.source="system"]  RuntimeEvent.source (default "system")
+ * @param {string} [input.ts]               ISO-8601 timestamp (default now)
+ * @param {string} [input.id]               event id (omit so RuntimeStore stamps it)
+ * @param {string} [input.idempotencyKey]
+ * @returns {object} the validated runtime event
+ */
+export function createSessionWarningEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionWarningEvent: input must be an object");
+  }
+  const { sessionId, warning, workspace, source = "system", ts, id, idempotencyKey } = input;
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("createSessionWarningEvent: sessionId required (non-empty string)");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionWarningEvent: workspace required (non-empty string)");
+  }
+  // §8.3 lint runs first so the rejection message points at the deprecated
+  // kind / missing field instead of an AJV "additionalProperties" complaint.
+  assertValidWarning(warning);
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.warning",
+    source,
+    workspace,
+    sessionId,
+    warning,
+  };
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  // validateRuntimeEvent requires `id`. When the caller omitted it (so the
+  // store can stamp the canonical id at append time), validate with a
+  // placeholder id and strip it before returning so the returned event is
+  // append-ready.
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
+/**
+ * Build a `session.warning_cleared` runtime event.
+ *
+ * Asserts `warningKind` is one of the 8 allowed kinds and explicitly NOT a
+ * deprecated kind (per §23.1). Same id/ts/source defaults as
+ * createSessionWarningEvent.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {string} input.warningKind         one of WARNING_KINDS
+ * @param {string} input.workspace
+ * @param {string} [input.source="system"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object} the validated runtime event
+ */
+export function createSessionWarningClearedEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionWarningClearedEvent: input must be an object");
+  }
+  const { sessionId, warningKind, workspace, source = "system", ts, id, idempotencyKey } = input;
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("createSessionWarningClearedEvent: sessionId required (non-empty string)");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionWarningClearedEvent: workspace required (non-empty string)");
+  }
+  if (typeof warningKind !== "string") {
+    throw new Error("createSessionWarningClearedEvent: warningKind required (string)");
+  }
+  if (DEPRECATED_WARNING_KINDS.includes(warningKind)) {
+    const replacement = warningKind === "quiet" ? "quiet_terminal" : warningKind;
+    const err = new Error(
+      `createSessionWarningClearedEvent: warningKind '${warningKind}' is deprecated; use '${replacement}' (TDD §23.1)`,
+    );
+    /** @type {any} */ (err).details = { field: "/warningKind", deprecated: warningKind };
+    throw err;
+  }
+  if (!WARNING_KINDS.includes(warningKind)) {
+    throw new Error(
+      `createSessionWarningClearedEvent: warningKind '${warningKind}' not in ${WARNING_KINDS.join("|")}`,
+    );
+  }
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.warning_cleared",
+    source,
+    workspace,
+    sessionId,
+    warningKind,
+  };
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
