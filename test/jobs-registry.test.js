@@ -428,6 +428,113 @@ test("JobRegistry.unblock: emits job.unblocked only when the job is blocked", as
   }
 });
 
+// SH-5-16: extended unblock signature carries reason / previousReason / user.
+
+test("JobRegistry.unblock: reason / previousReason / user ride through into the job.unblocked event", async () => {
+  const env = startEnv();
+  try {
+    const created = await env.registry.create(validJob());
+    await env.registry.checkpoint(created.jobId, { status: "blocked", summary: "awaiting api review" });
+
+    const r = await env.registry.unblock(created.jobId, {
+      reason: "manual override by maintainer",
+      previousReason: "awaiting api review",
+      user: "u_alice",
+    });
+    assert.equal(r.job.status, "running");
+
+    const evts = env.appendedEvents.filter((e) => e.type === "job.unblocked");
+    assert.equal(evts.length, 1);
+    assert.equal(evts[0].reason, "manual override by maintainer");
+    assert.equal(evts[0].previousReason, "awaiting api review");
+    assert.equal(evts[0].user, "u_alice");
+    assert.equal(evts[0].sessionId, SES);
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.unblock: predecessor still active → emits secondary job.checkpoint(status=queued)", async () => {
+  const env = startEnv();
+  try {
+    // Set up: predecessor running, successor queued behind it.
+    const pred = await env.registry.create(validJob({ taskId: "t-pred" }));
+    const succ = await env.registry.create(
+      validJob({ taskId: "t-succ", predecessorJobId: pred.jobId }),
+    );
+    // Successor is queued; drive it to blocked via checkpoint.
+    await env.registry.checkpoint(succ.jobId, { status: "blocked", summary: "ext dep" });
+    assert.equal(env.registry.get(succ.jobId).status, "blocked");
+    assert.equal(env.registry.get(pred.jobId).status, "running");
+
+    const eventsBefore = env.appendedEvents.length;
+    const r = await env.registry.unblock(succ.jobId, { reason: "re-queue behind pred" });
+    // Two events appended in total: job.unblocked + follow-up job.checkpoint.
+    assert.equal(env.appendedEvents.length - eventsBefore, 2);
+    const tail = env.appendedEvents.slice(eventsBefore);
+    assert.equal(tail[0].type, "job.unblocked");
+    assert.equal(tail[1].type, "job.checkpoint");
+    assert.equal(tail[1].status, "queued");
+    assert.equal(tail[1].jobId, succ.jobId);
+    assert.match(tail[1].summary, /auto-requeue/);
+
+    // Final projection state reflects the queued status, not running.
+    assert.equal(r.job.status, "queued");
+    assert.equal(env.registry.get(succ.jobId).status, "queued");
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.unblock: predecessor terminal → only the job.unblocked event is appended", async () => {
+  const env = startEnv();
+  try {
+    const pred = await env.registry.create(validJob({ taskId: "t-pred" }));
+    const succ = await env.registry.create(
+      validJob({ taskId: "t-succ", predecessorJobId: pred.jobId }),
+    );
+    await env.registry.checkpoint(succ.jobId, { status: "blocked" });
+    await env.registry.complete(pred.jobId, { status: "completed" });
+
+    const eventsBefore = env.appendedEvents.length;
+    const r = await env.registry.unblock(succ.jobId);
+    assert.equal(env.appendedEvents.length - eventsBefore, 1);
+    assert.equal(env.appendedEvents[env.appendedEvents.length - 1].type, "job.unblocked");
+    assert.equal(r.job.status, "running");
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.unblock: validates reason / previousReason / user shapes", async () => {
+  const env = startEnv();
+  try {
+    const created = await env.registry.create(validJob());
+    await env.registry.checkpoint(created.jobId, { status: "blocked" });
+
+    await assert.rejects(
+      env.registry.unblock(created.jobId, { reason: "" }),
+      /reason must be a non-empty string/,
+    );
+    await assert.rejects(
+      env.registry.unblock(created.jobId, { reason: "x".repeat(2001) }),
+      /reason must be a non-empty string ≤2000 chars/,
+    );
+    await assert.rejects(
+      env.registry.unblock(created.jobId, { previousReason: 7 }),
+      /previousReason must be a non-empty string/,
+    );
+    await assert.rejects(
+      env.registry.unblock(created.jobId, { user: "" }),
+      /user must be a non-empty string/,
+    );
+    // None of the bad-input attempts should have appended an event.
+    assert.equal(env.appendedEvents.filter((e) => e.type === "job.unblocked").length, 0);
+  } finally {
+    env.close();
+  }
+});
+
 // --- listBySession ----------------------------------------------------------
 
 test("JobRegistry.listBySession: filters projection jobs by sessionId", async () => {

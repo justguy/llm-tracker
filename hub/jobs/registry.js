@@ -16,7 +16,11 @@
 //     carrying `predecessorJobId` (TDD §23.2 #35, JobQueuedEvent in §6.6).
 //   - Emitting one event per status transition (`job.checkpoint`,
 //     `job.completed`, `job.rollover_requested`, `job.unblocked`) so the
-//     append-only log is authoritative.
+//     append-only log is authoritative. `unblock(reason, previousReason,
+//     user)` (SH-5-16) may emit a follow-up `job.checkpoint` with
+//     `status: "queued"` when the unblocked job's predecessor is still active
+//     — keeps the projection's queued/running invariant without touching the
+//     §6.6 schema.
 //   - Guarding terminal state: once a job lands in `completed | cancelled |
 //     rolled_over`, no further transitions are accepted.
 //   - Deriving `successorJobId` on read by scanning `predecessorJobId`
@@ -424,11 +428,25 @@ export class JobRegistry {
   }
 
   /**
-   * Transition a `blocked` job back to `running`. Mirrors `JobUnblockedEvent`
+   * Transition a `blocked` job back to `running` (or `queued` when a
+   * non-terminal predecessor still owns the slot). Mirrors `JobUnblockedEvent`
    * in §6.6 / the projection's handleJobUnblocked.
    *
+   * SH-5-16 extension: accepts `reason`, `previousReason`, and `user` as
+   * optional audit fields that ride through into the `job.unblocked` payload.
+   * The companion §23.2 #35 requirement — "running (or queued if the
+   * predecessor is still active)" — is expressed by emitting a second event
+   * (`job.checkpoint` with `status: "queued"`) when the predecessor is still
+   * around; the projection's handleJobCheckpoint passes the status through
+   * unchanged, so the projection invariant holds without a schema change.
+   *
    * @param {string} jobId
-   * @param {{ source?: string; idempotencyKey?: string }} [input]
+   * @param {object} [input]
+   * @param {string} [input.reason]
+   * @param {string} [input.previousReason]
+   * @param {string} [input.user]
+   * @param {string} [input.source="system"]
+   * @param {string} [input.idempotencyKey]
    * @returns {Promise<{ rev: number; eventId: string; job: object | null }>}
    */
   async unblock(jobId, input = {}) {
@@ -440,14 +458,74 @@ export class JobRegistry {
         { jobId, status: existing.status },
       );
     }
-    const { source = "system", idempotencyKey } = input || {};
-    return this.#appendEvent({
+    if (input && typeof input !== "object") {
+      throw makeError("unblock: input must be an object", "INVALID_INPUT");
+    }
+    const { reason, previousReason, user, source = "system", idempotencyKey } = input || {};
+    if (
+      reason !== undefined &&
+      (typeof reason !== "string" || reason.length === 0 || reason.length > 2000)
+    ) {
+      throw makeError(
+        "unblock: reason must be a non-empty string ≤2000 chars when present",
+        "INVALID_INPUT",
+        { field: "reason" },
+      );
+    }
+    if (
+      previousReason !== undefined &&
+      (typeof previousReason !== "string" || previousReason.length === 0)
+    ) {
+      throw makeError(
+        "unblock: previousReason must be a non-empty string when present",
+        "INVALID_INPUT",
+        { field: "previousReason" },
+      );
+    }
+    if (user !== undefined && (typeof user !== "string" || user.length === 0)) {
+      throw makeError(
+        "unblock: user must be a non-empty string when present",
+        "INVALID_INPUT",
+        { field: "user" },
+      );
+    }
+
+    // First event: job.unblocked — projection.handleJobUnblocked flips status
+    // to 'running'. This is the authoritative audit record carrying reason /
+    // previousReason / user.
+    const unblockResult = await this.#appendEvent({
       type: "job.unblocked",
       source,
       jobId,
       sessionId: existing.sessionId,
+      ...(reason ? { reason } : {}),
+      ...(previousReason ? { previousReason } : {}),
+      ...(user ? { user } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
+
+    // §23.2 #35 / SH-5-16 DoD: "running (or queued if the predecessor is
+    // still active)". When the predecessor is non-terminal we follow up with
+    // a job.checkpoint that flips the projection back to queued. Done as a
+    // secondary event (rather than a schema change) per the brief.
+    const predecessorId = existing.predecessorJobId;
+    if (predecessorId) {
+      const predecessor = this.projection.jobs.get(predecessorId);
+      if (predecessor && !TERMINAL_JOB_STATUS.includes(/** @type {any} */ (predecessor.status))) {
+        await this.#appendEvent({
+          type: "job.checkpoint",
+          source,
+          jobId,
+          sessionId: existing.sessionId,
+          status: "queued",
+          summary: "auto-requeue: predecessor still active after unblock",
+        });
+      }
+    }
+
+    // Return projection record re-derived through this.get so callers see the
+    // final (possibly queued) status.
+    return { rev: unblockResult.rev, eventId: unblockResult.eventId, job: this.get(jobId) };
   }
 
   /**

@@ -11,6 +11,7 @@
 //   POST   /api/jobs/:jobId/complete            — JobCompleteResult union
 //   POST   /api/jobs/:jobId/cancel              — emit job.completed (cancelled)
 //   POST   /api/jobs/:jobId/rollover            — emit job.rollover_requested
+//   POST   /api/jobs/:jobId/unblock             — emit job.unblocked (SH-5-16)
 //   GET    /api/jobs/:jobId/context-pack        — 501 stub (SH-8-02)
 //
 // The `/complete` route implements the JobCompleteResult union (§11.5.1):
@@ -27,6 +28,11 @@ const CHECKPOINT_ALLOWED_FIELDS = new Set(["status", "summary", "idempotencyKey"
 const COMPLETE_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
 const CANCEL_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
 const ROLLOVER_ALLOWED_FIELDS = new Set(["reason", "idempotencyKey"]);
+// SH-5-16: /unblock accepts reason + previousReason. `user` is intentionally
+// NOT accepted from the body — there is no auth surface yet and we don't want
+// callers to spoof identity. The registry has a `user` parameter so future
+// auth wiring can pass it through server-side once an identity layer lands.
+const UNBLOCK_ALLOWED_FIELDS = new Set(["reason", "previousReason", "idempotencyKey"]);
 
 const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "handoff"]);
 
@@ -53,9 +59,10 @@ export function registerJobsRoutes(app, deps) {
     typeof jobRegistry.checkpoint !== "function" ||
     typeof jobRegistry.complete !== "function" ||
     typeof jobRegistry.cancel !== "function" ||
-    typeof jobRegistry.requestRollover !== "function"
+    typeof jobRegistry.requestRollover !== "function" ||
+    typeof jobRegistry.unblock !== "function"
   ) {
-    throw new Error("registerJobsRoutes: jobRegistry (with list/get/checkpoint/complete/cancel/requestRollover) required");
+    throw new Error("registerJobsRoutes: jobRegistry (with list/get/checkpoint/complete/cancel/requestRollover/unblock) required");
   }
 
   // --- GET /api/jobs ------------------------------------------------------
@@ -194,6 +201,33 @@ export function registerJobsRoutes(app, deps) {
     try {
       const result = await jobRegistry.requestRollover(jobId, {
         ...(bodyOrErr.reason !== undefined ? { reason: bodyOrErr.reason } : {}),
+        ...(bodyOrErr.idempotencyKey !== undefined ? { idempotencyKey: bodyOrErr.idempotencyKey } : {}),
+        source: "http",
+      });
+      return res.status(200).json({ rev: result.rev, eventId: result.eventId, job: result.job });
+    } catch (err) {
+      return mapRegistryError(res, err);
+    }
+  });
+
+  // --- POST /api/jobs/:jobId/unblock --------------------------------------
+  // SH-5-16. Manual override of the `blocked` status (per TDD §12.8). Emits a
+  // JobUnblockedEvent; if the predecessor is still active, the registry also
+  // emits a follow-up job.checkpoint that flips status to `queued`.
+  app.post("/api/jobs/:jobId/unblock", async (req, res) => {
+    const { jobId } = req.params;
+    if (!isJobId(jobId)) {
+      return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
+    }
+    const bodyOrErr = requireObjectBody(req, res);
+    if (bodyOrErr === undefined) return;
+    const unknown = rejectUnknownFields(bodyOrErr, UNBLOCK_ALLOWED_FIELDS);
+    if (unknown) return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+
+    try {
+      const result = await jobRegistry.unblock(jobId, {
+        ...(bodyOrErr.reason !== undefined ? { reason: bodyOrErr.reason } : {}),
+        ...(bodyOrErr.previousReason !== undefined ? { previousReason: bodyOrErr.previousReason } : {}),
         ...(bodyOrErr.idempotencyKey !== undefined ? { idempotencyKey: bodyOrErr.idempotencyKey } : {}),
         source: "http",
       });

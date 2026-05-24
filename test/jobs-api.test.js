@@ -351,6 +351,127 @@ test("POST /api/jobs/:id/rollover — emits job.rollover_requested; job is NOT t
   }
 });
 
+// --- POST /:id/unblock ------------------------------------------------------
+// SH-5-16: /unblock route. Mirrors the registry-level cases but through HTTP.
+
+test("POST /api/jobs/:id/unblock — happy path on a blocked job → 200 { rev, eventId, job:running }", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    await app.jobRegistry.checkpoint(created.jobId, { status: "blocked" });
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/unblock`, {});
+    assert.equal(r.status, 200);
+    assert.equal(typeof r.body.eventId, "string");
+    assert.equal(typeof r.body.rev, "number");
+    assert.equal(r.body.job.id, created.jobId);
+    assert.equal(r.body.job.status, "running");
+
+    const evts = app.appendedEvents.filter((e) => e.type === "job.unblocked");
+    assert.equal(evts.length, 1);
+    assert.equal(evts[0].source, "http");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/unblock — `reason` body field rides through into the job.unblocked event", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    await app.jobRegistry.checkpoint(created.jobId, { status: "blocked", summary: "waiting on review" });
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/unblock`, {
+      reason: "approved by maintainer",
+      previousReason: "waiting on review",
+    });
+    assert.equal(r.status, 200);
+
+    const evt = app.appendedEvents.find((e) => e.type === "job.unblocked");
+    assert.ok(evt, "job.unblocked event was emitted");
+    assert.equal(evt.reason, "approved by maintainer");
+    assert.equal(evt.previousReason, "waiting on review");
+    assert.equal(evt.source, "http");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/unblock — non-blocked job → 409 INVALID_JOB_STATE with current status in details", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    // Job is currently 'running', not 'blocked'.
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/unblock`, {});
+    assert.equal(r.status, 409);
+    assert.equal(r.body.error.code, "INVALID_JOB_STATE");
+    assert.equal(r.body.error.details.status, "running");
+    assert.equal(r.body.error.details.jobId, created.jobId);
+
+    // No event was appended.
+    assert.equal(app.appendedEvents.filter((e) => e.type === "job.unblocked").length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/unblock — body with `user` field → 400 UNKNOWN_FIELDS (no auth surface yet)", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    await app.jobRegistry.checkpoint(created.jobId, { status: "blocked" });
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/unblock`, {
+      reason: "ok",
+      user: "u_alice",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "UNKNOWN_FIELDS");
+    assert.deepEqual(r.body.error.details.unknown, ["user"]);
+
+    // No event was appended (validation short-circuits before registry).
+    assert.equal(app.appendedEvents.filter((e) => e.type === "job.unblocked").length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/unblock — malformed jobId → 400 INVALID_JOB_ID", async () => {
+  const app = await startApp();
+  try {
+    const r = await postJson(app.base, `/api/jobs/not-a-job/unblock`, {});
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_JOB_ID");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/unblock — predecessor still running → returned job.status === 'queued'", async () => {
+  const app = await startApp();
+  try {
+    const pred = await app.jobRegistry.create(validJobInput({ taskId: "t-pred" }));
+    const succ = await app.jobRegistry.create(
+      validJobInput({ taskId: "t-succ", predecessorJobId: pred.jobId }),
+    );
+    // Drive successor to blocked (it starts queued because of predecessor).
+    await app.jobRegistry.checkpoint(succ.jobId, { status: "blocked", summary: "ext dep" });
+
+    const r = await postJson(app.base, `/api/jobs/${succ.jobId}/unblock`, { reason: "manual override" });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.job.status, "queued", "predecessor still active → unblock re-queues");
+
+    // The HTTP layer sees both events emitted (unblock + auto-requeue checkpoint).
+    const tail = app.appendedEvents.slice(-2);
+    assert.equal(tail[0].type, "job.unblocked");
+    assert.equal(tail[1].type, "job.checkpoint");
+    assert.equal(tail[1].status, "queued");
+    assert.equal(tail[1].source, "http");
+  } finally {
+    await app.close();
+  }
+});
+
 // --- GET /:id/context-pack --------------------------------------------------
 
 test("GET /api/jobs/:id/context-pack?kind=start returns 501 NOT_IMPLEMENTED", async () => {
