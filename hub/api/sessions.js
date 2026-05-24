@@ -1,5 +1,6 @@
 // hub/api/sessions.js — sh-1-09 (TDD v0.5 §6.1, §6.6, §6.10)
 //                       + SH-2-07 (TDD v0.5 §19.2 token rotation)
+//                       + SH-2-23 (TDD v0.5 §19.3 stdio capture toggle)
 //
 // Basic CRUD HTTP routes for runtime sessions. All mutations route through
 // `RuntimeStore.append` — handlers NEVER touch `RuntimeProjection.sessions`
@@ -12,12 +13,14 @@
 //   GET   /api/sessions/:id                          — fetch single session by id
 //   PATCH /api/sessions/:id                          — emit session.status event (status update)
 //   POST  /api/sessions/:sessionId/token/rotate      — rotate session token (gated on tokenStore dep)
+//   POST  /api/sessions/:sessionId/stdio/capture     — toggle stdio disk capture (gated on tokenStore dep)
 //
 // Error envelope: `{ error: { code, message, details? } }`.
 
 import { log } from "../logging/index.js";
 import { requireSessionToken } from "./middleware/session-token.js";
 import { hashToken } from "../sessions/auth/tokens.js";
+import { createSessionStdioCaptureChangedEvent } from "../runtime/events.js";
 
 // Allowed body fields on POST. Anything else triggers UNKNOWN_FIELDS (400).
 const POST_ALLOWED_FIELDS = new Set([
@@ -40,6 +43,10 @@ const PATCH_ALLOWED_FIELDS = new Set(["status", "comment"]);
 // an empty body `{}` means "use the caller's current capabilities and the
 // default lifetime". Anything else triggers UNKNOWN_FIELDS (400).
 const ROTATE_ALLOWED_FIELDS = new Set(["capabilities", "lifetimeMinutes"]);
+
+// Allowed body fields on POST /:sessionId/stdio/capture. `captureToDisk` is
+// required (boolean); `reason` optional (non-empty string when present).
+const STDIO_CAPTURE_ALLOWED_FIELDS = new Set(["captureToDisk", "reason"]);
 
 // TDD §6.1 ActivityState enum (mirrors schema SessionStatusEvent.status).
 const ACTIVITY_STATES = new Set([
@@ -465,6 +472,90 @@ export function registerSessionsRoutes(app, deps) {
         capabilities: [...issued.capabilities],
         issuedAt: issued.issuedAt,
         expiresAt: issued.expiresAt,
+        rev: appendResult.rev,
+        eventId: appendResult.eventId,
+      });
+    });
+
+    // --- POST /api/sessions/:sessionId/stdio/capture ----------------------
+    // SH-2-23 (TDD v0.5 §19.3): toggle per-session stdio disk capture. Caller
+    // presents a valid session token (same middleware as rotation). The
+    // handler emits a `session.stdio_capture_changed` runtime event the
+    // rotation module / WS layer can later react to. Idempotent on no-op:
+    // when the requested `captureToDisk` matches the projection's current
+    // value, the endpoint returns 200 without appending an event.
+    app.post("/api/sessions/:sessionId/stdio/capture", tokenMiddleware, async (req, res) => {
+      const { sessionId } = req.params;
+      if (!isSessionIdShape(sessionId)) {
+        return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+      }
+
+      const body = req.body;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
+      }
+
+      const unknown = [];
+      for (const key of Object.keys(body)) {
+        if (!STDIO_CAPTURE_ALLOWED_FIELDS.has(key)) unknown.push(key);
+      }
+      if (unknown.length > 0) {
+        return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+      }
+
+      const { captureToDisk, reason } = body;
+      if (typeof captureToDisk !== "boolean") {
+        return sendError(res, 400, "INVALID_BODY", "`captureToDisk` is required (boolean)");
+      }
+      if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+        return sendError(res, 400, "INVALID_BODY", "`reason` must be a non-empty string when present");
+      }
+
+      // 404 before touching state — don't emit for a phantom session.
+      const session = projection.sessions.get(sessionId);
+      if (!session) {
+        return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+      }
+
+      // No-op detection: capture defaults OFF until a stdio_capture_changed
+      // event lands. The projection (sh-1-05) stamps `stdioCapture` (the full
+      // `capture` object); we read `.enabled` and treat absence as `false`.
+      const currentEnabled = session.stdioCapture && typeof session.stdioCapture === "object"
+        ? session.stdioCapture.enabled === true
+        : false;
+      if (currentEnabled === captureToDisk) {
+        return res.status(200).json({
+          session,
+          rev: projection.rev,
+          noop: true,
+        });
+      }
+
+      let event;
+      try {
+        event = createSessionStdioCaptureChangedEvent({
+          sessionId,
+          captureToDisk,
+          ...(reason !== undefined ? { reason } : {}),
+          workspace,
+          source: "http",
+        });
+      } catch (err) {
+        return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
+          errors: err.errors,
+        });
+      }
+
+      let appendResult;
+      try {
+        appendResult = await runtimeStore.append(event);
+      } catch (err) {
+        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+      }
+
+      const updated = projection.sessions.get(sessionId) || session;
+      res.status(200).json({
+        session: updated,
         rev: appendResult.rev,
         eventId: appendResult.eventId,
       });

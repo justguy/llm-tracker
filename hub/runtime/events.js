@@ -357,3 +357,80 @@ export function createSessionWarningClearedEvent(input) {
   }
   return event;
 }
+
+// --- SH-2-23: Stdio capture toggle event factory --------------------------
+//
+// Builds a `session.stdio_capture_changed` runtime event. The schema variant
+// (SessionStdioCaptureChangedEvent) requires `capture: { enabled: boolean }`
+// — this factory accepts `captureToDisk` (the API/DoD shape) and packs it
+// into the schema-shaped `capture.enabled`. `reason`, when supplied, rides
+// as a top-level extra prop (the schema allows additionalProperties on the
+// base).
+//
+// Same placeholder-id dance as the warning factories above: when the caller
+// omits `id`, validate against a placeholder and strip it before returning so
+// the returned event is append-ready (the RuntimeStore stamps the canonical
+// evt_ id at append time).
+
+/**
+ * Build a `session.stdio_capture_changed` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {boolean} input.captureToDisk      mapped to `capture.enabled`
+ * @param {string} input.workspace
+ * @param {string} [input.reason]            optional rationale (non-empty string)
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object} the validated runtime event
+ */
+export function createSessionStdioCaptureChangedEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionStdioCaptureChangedEvent: input must be an object");
+  }
+  const {
+    sessionId,
+    captureToDisk,
+    workspace,
+    reason,
+    source = "http",
+    ts,
+    id,
+    idempotencyKey,
+  } = input;
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("createSessionStdioCaptureChangedEvent: sessionId required (non-empty string)");
+  }
+  if (typeof captureToDisk !== "boolean") {
+    throw new Error("createSessionStdioCaptureChangedEvent: captureToDisk required (boolean)");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionStdioCaptureChangedEvent: workspace required (non-empty string)");
+  }
+  if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+    throw new Error("createSessionStdioCaptureChangedEvent: reason must be a non-empty string when present");
+  }
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.stdio_capture_changed",
+    source,
+    workspace,
+    sessionId,
+    capture: { enabled: captureToDisk },
+  };
+  if (reason !== undefined) event.reason = reason;
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
