@@ -129,6 +129,24 @@ test("toSessionCapabilities: all-false provider yields all-false session with ex
   }
 });
 
+test("toSessionCapabilities: missing provider flags map to false booleans", () => {
+  const out = toSessionCapabilities({ structuredItems: true });
+  assert.equal(out.structuredEvents, true);
+  assert.equal(out.rawStdio, false);
+  assert.equal(out.stdinWrite, false);
+  assert.equal(out.processLifecycle, false);
+  assert.equal(out.structuredApprovals, false);
+  assert.equal(out.structuredChat, false);
+  assert.equal(out.structuredCommands, false);
+  assert.equal(out.structuredMcpCalls, false);
+  assert.equal(out.explicitTrackerMcp, false);
+  assert.equal(out.appServerChat, false);
+  assert.equal(out.directContextInjection, false);
+  for (const key of EXPECTED_SESSION_KEYS) {
+    assert.equal(typeof out[key], "boolean", `${key} should always be boolean`);
+  }
+});
+
 test("toSessionCapabilities: all-true provider obeys every §5 rule", () => {
   const out = toSessionCapabilities(allTrueProviderCaps());
   // pass-throughs

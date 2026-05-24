@@ -115,7 +115,7 @@ export function defaultProviderCapabilities() {
  * Validate the shape of a ProviderCapabilities object. Throws TypeError
  * with a sharp message if `caps` is not an object, has any unknown key, or
  * has a non-boolean at a known key. Missing known keys are NOT an error —
- * the mapping reads them with `||` semantics — but callers that want a
+ * the mapping treats them as false — but callers that want a
  * complete object should spread over defaultProviderCapabilities() first.
  *
  * @param {unknown} caps
@@ -155,20 +155,21 @@ export function validateProviderCapabilities(caps) {
  */
 export function toSessionCapabilities(providerCaps) {
   validateProviderCapabilities(providerCaps);
+  const enabled = (key) => providerCaps[key] === true;
   return {
-    rawStdio: providerCaps.rawStdio,
-    stdinWrite: providerCaps.stdinWrite,
-    processLifecycle: providerCaps.processLifecycle,
+    rawStdio: enabled("rawStdio"),
+    stdinWrite: enabled("stdinWrite"),
+    processLifecycle: enabled("processLifecycle"),
     structuredEvents:
-      providerCaps.structuredThread ||
-      providerCaps.structuredTurns ||
-      providerCaps.structuredItems,
-    structuredApprovals: providerCaps.structuredApprovals,
-    structuredChat: providerCaps.structuredTurns,
-    structuredCommands: providerCaps.structuredCommandEvents,
+      enabled("structuredThread") ||
+      enabled("structuredTurns") ||
+      enabled("structuredItems"),
+    structuredApprovals: enabled("structuredApprovals"),
+    structuredChat: enabled("structuredTurns"),
+    structuredCommands: enabled("structuredCommandEvents"),
     structuredMcpCalls: false,
     explicitTrackerMcp: false,
-    appServerChat: providerCaps.structuredTurns,
-    directContextInjection: providerCaps.directContextInjection,
+    appServerChat: enabled("structuredTurns"),
+    directContextInjection: enabled("directContextInjection"),
   };
 }
