@@ -1,4 +1,5 @@
 // hub/api/sessions.js — sh-1-09 (TDD v0.5 §6.1, §6.6, §6.10)
+//                       + SH-2-07 (TDD v0.5 §19.2 token rotation)
 //
 // Basic CRUD HTTP routes for runtime sessions. All mutations route through
 // `RuntimeStore.append` — handlers NEVER touch `RuntimeProjection.sessions`
@@ -6,14 +7,17 @@
 // the test fixture) drives projection updates.
 //
 // Routes:
-//   GET   /api/sessions          — list SessionRecord[] + projection rev
-//   POST  /api/sessions          — create session via session.started event
-//   GET   /api/sessions/:id      — fetch single session by id
-//   PATCH /api/sessions/:id      — emit session.status event (status update)
+//   GET   /api/sessions                              — list SessionRecord[] + projection rev
+//   POST  /api/sessions                              — create session via session.started event
+//   GET   /api/sessions/:id                          — fetch single session by id
+//   PATCH /api/sessions/:id                          — emit session.status event (status update)
+//   POST  /api/sessions/:sessionId/token/rotate      — rotate session token (gated on tokenStore dep)
 //
 // Error envelope: `{ error: { code, message, details? } }`.
 
 import { log } from "../logging/index.js";
+import { requireSessionToken } from "./middleware/session-token.js";
+import { hashToken } from "../sessions/auth/tokens.js";
 
 // Allowed body fields on POST. Anything else triggers UNKNOWN_FIELDS (400).
 const POST_ALLOWED_FIELDS = new Set([
@@ -31,6 +35,11 @@ const POST_ALLOWED_FIELDS = new Set([
 
 // Allowed body fields on PATCH. Anything else triggers UNKNOWN_FIELDS (400).
 const PATCH_ALLOWED_FIELDS = new Set(["status", "comment"]);
+
+// Allowed body fields on POST /:sessionId/token/rotate. Both are optional —
+// an empty body `{}` means "use the caller's current capabilities and the
+// default lifetime". Anything else triggers UNKNOWN_FIELDS (400).
+const ROTATE_ALLOWED_FIELDS = new Set(["capabilities", "lifetimeMinutes"]);
 
 // TDD §6.1 ActivityState enum (mirrors schema SessionStatusEvent.status).
 const ACTIVITY_STATES = new Set([
@@ -80,6 +89,10 @@ const POST_OPTIONAL_STRING_FIELDS = [
  * @property {(prefix: string) => string} makeRuntimeId
  * @property {(event: object) => true} validateRuntimeEvent
  * @property {string} workspace
+ * @property {import("../sessions/auth/tokens.js").SessionTokenStore} [tokenStore]
+ *   When provided, mounts POST /api/sessions/:sessionId/token/rotate (SH-2-07).
+ *   When omitted, the rotation route is not registered — existing routes work
+ *   unchanged so older test fixtures don't have to wire token plumbing.
  */
 
 /**
@@ -92,7 +105,14 @@ export function registerSessionsRoutes(app, deps) {
   if (!app || typeof app.get !== "function" || typeof app.post !== "function") {
     throw new Error("registerSessionsRoutes: express app required");
   }
-  const { runtimeStore, projection, makeRuntimeId, validateRuntimeEvent, workspace } = deps || {};
+  const {
+    runtimeStore,
+    projection,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace,
+    tokenStore,
+  } = deps || {};
   if (!runtimeStore || typeof runtimeStore.append !== "function") {
     throw new Error("registerSessionsRoutes: runtimeStore (with append) required");
   }
@@ -314,6 +334,142 @@ export function registerSessionsRoutes(app, deps) {
       eventId: appendResult.eventId,
     });
   });
+
+  // --- POST /api/sessions/:sessionId/token/rotate -------------------------
+  // SH-2-07 (TDD v0.5 §19.2): caller presents current session token via the
+  // requireSessionToken middleware; on success we revoke ALL outstanding
+  // tokens for the session (killing the just-used cleartext) and issue a
+  // fresh one. The handler appends a `session.token_rotated` runtime event
+  // recording the NEW tokenHash — never the cleartext.
+  //
+  // Mounted only when `tokenStore` is wired so the older four routes keep
+  // working in test fixtures that don't carry token plumbing.
+  if (tokenStore && typeof tokenStore.issue === "function" && typeof tokenStore.revoke === "function") {
+    const tokenMiddleware = requireSessionToken({
+      tokenStore,
+      runtimeStore,
+      makeRuntimeId,
+      validateRuntimeEvent,
+      workspace,
+    });
+
+    app.post("/api/sessions/:sessionId/token/rotate", tokenMiddleware, async (req, res) => {
+      const { sessionId } = req.params;
+      if (!isSessionIdShape(sessionId)) {
+        return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+      }
+
+      // Body is optional for rotation — an empty/absent body means "use the
+      // caller's current capabilities and the default lifetime". When
+      // present, it must be a plain JSON object.
+      const rawBody = req.body;
+      const bodyObj =
+        rawBody === undefined || rawBody === null
+          ? {}
+          : typeof rawBody === "object" && !Array.isArray(rawBody)
+            ? rawBody
+            : null;
+      if (bodyObj === null) {
+        return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
+      }
+
+      const unknown = [];
+      for (const key of Object.keys(bodyObj)) {
+        if (!ROTATE_ALLOWED_FIELDS.has(key)) unknown.push(key);
+      }
+      if (unknown.length > 0) {
+        return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+      }
+
+      // Capabilities: when omitted, inherit from the presented token so
+      // rotation preserves effective rights unless the caller narrows them.
+      let capabilities;
+      if ("capabilities" in bodyObj) {
+        const caps = bodyObj.capabilities;
+        if (!Array.isArray(caps) || caps.some((c) => typeof c !== "string" || c.length === 0)) {
+          return sendError(res, 400, "INVALID_BODY", "`capabilities` must be a non-empty string[]");
+        }
+        capabilities = caps;
+      } else {
+        capabilities = [...(req.sessionToken?.capabilities || [])];
+      }
+
+      let lifetimeMinutes;
+      if ("lifetimeMinutes" in bodyObj) {
+        const lt = bodyObj.lifetimeMinutes;
+        if (!Number.isInteger(lt) || lt <= 0) {
+          return sendError(res, 400, "INVALID_BODY", "`lifetimeMinutes` must be a positive integer");
+        }
+        lifetimeMinutes = lt;
+      }
+
+      // 404 if the session doesn't exist — don't append a rotation event for
+      // a phantom session.
+      if (!projection.sessions.get(sessionId)) {
+        return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+      }
+
+      // Revoke FIRST so the just-used (old) token dies immediately, then
+      // issue the new one in the same handler call. Order matters: if issue
+      // ran first and revoke threw, the caller would briefly hold two valid
+      // tokens; this way a failure in issue() just means rotation didn't
+      // happen (callers still have to re-authenticate next request).
+      tokenStore.revoke(sessionId);
+
+      let issued;
+      try {
+        issued = tokenStore.issue({
+          sessionId,
+          capabilities,
+          ...(lifetimeMinutes !== undefined ? { lifetimeMinutes } : {}),
+        });
+      } catch (err) {
+        return sendError(res, 500, "TOKEN_ISSUE_FAILED", err.message || "failed to issue rotated token");
+      }
+
+      // Build the event with placeholder id for schema validation — same
+      // dance as POST/PATCH above. Payload includes sessionId + the NEW
+      // tokenHash. The cleartext is NEVER included in the event.
+      const eventForValidation = {
+        schemaVersion: 1,
+        id: makeRuntimeId("evt"),
+        ts: new Date().toISOString(),
+        type: "session.token_rotated",
+        source: "http",
+        workspace,
+        sessionId,
+        tokenHash: issued.tokenHash,
+      };
+
+      try {
+        validateRuntimeEvent(eventForValidation);
+      } catch (err) {
+        return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
+          errors: err.errors,
+        });
+      }
+
+      const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
+
+      let appendResult;
+      try {
+        appendResult = await runtimeStore.append(eventForAppend);
+      } catch (err) {
+        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+      }
+
+      res.status(200).json({
+        token: issued.token,
+        tokenHash: issued.tokenHash,
+        sessionId: issued.sessionId,
+        capabilities: [...issued.capabilities],
+        issuedAt: issued.issuedAt,
+        expiresAt: issued.expiresAt,
+        rev: appendResult.rev,
+        eventId: appendResult.eventId,
+      });
+    });
+  }
 }
 
 // Inlined to avoid importing SESSION_ID_RE from the runtime layer twice and
