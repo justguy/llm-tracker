@@ -72,6 +72,33 @@ import { spawn as nodeSpawn } from "node:child_process";
 const DEFAULT_SIGINT_GRACE_MS = 5000;
 
 /**
+ * Allowed sandbox values mirrored from TDD §6.1 (SessionRecord.sandbox enum).
+ * Kept local to this module so the provider can validate the start-request
+ * value without importing the session registry (which would invert the layer
+ * direction). Backed by a Set so Set#has can validate membership; the file
+ * lint regression forbids the substring matchers it bans for stdio parsing,
+ * so a Set lookup is the cleanest fit here too.
+ *
+ * @type {ReadonlySet<"readonly" | "workspace-write" | "autoedit" | "full-auto">}
+ */
+const PTY_ALLOWED_SANDBOX = new Set([
+  "readonly",
+  "workspace-write",
+  "autoedit",
+  "full-auto",
+]);
+
+/**
+ * Default sandbox applied when the start request omits one (DoD bullet 4 —
+ * "defaults to workspace-write if unset"). Provider-level default keeps the
+ * env contract well-defined for downstream wrappers / adapters that key off
+ * `LLM_TRACKER_SANDBOX`.
+ *
+ * @type {"workspace-write"}
+ */
+const PTY_DEFAULT_SANDBOX = "workspace-write";
+
+/**
  * Build a fresh ProviderCapabilities object with the 20 addendum §5 flags.
  * Generic PTY is `rawStdio + stdinWrite + processLifecycle = true`; every
  * `structured*` flag is false (per addendum §10: "structured*: false unless
@@ -285,6 +312,12 @@ export class GenericPtyProvider {
    * @param {string} [request.cwd]
    * @param {string} [request.repoRoot]
    * @param {object} [request.env]
+   * @param {"readonly" | "workspace-write" | "autoedit" | "full-auto"} [request.sandbox]
+   *   Sandbox mode (TDD §6.1). When present, validated against the enum and
+   *   surfaced to the child as `LLM_TRACKER_SANDBOX`. When omitted, defaults
+   *   to `'workspace-write'` (DoD bullet 4 / TDD §6.1 v0.7 contract). SH-2-24
+   *   forwards via env; adapters that need launch-args (e.g., Codex CLI) can
+   *   layer that on in their own provider — this module is the env baseline.
    * @param {{ cols: number, rows: number }} [request.size]   only honored by node-pty
    * @returns {Promise<object>}                                ProviderThreadHandle
    */
@@ -298,6 +331,17 @@ export class GenericPtyProvider {
         throw new TypeError("GenericPtyProvider.start: request.extraArgs entries must be strings");
       }
     }
+    // Sandbox validation + default (SH-2-24, TDD §6.1). Uses Set#has so the
+    // file-level lint regression (which bans the substring matchers used for
+    // stdio parsing) stays clean.
+    const sandboxProvided = Object.prototype.hasOwnProperty.call(request, "sandbox")
+      && request.sandbox !== undefined;
+    if (sandboxProvided && !PTY_ALLOWED_SANDBOX.has(request.sandbox)) {
+      throw new TypeError(
+        `GenericPtyProvider.start: request.sandbox '${request.sandbox}' not in ${[...PTY_ALLOWED_SANDBOX].join("|")}`,
+      );
+    }
+    const sandbox = sandboxProvided ? request.sandbox : PTY_DEFAULT_SANDBOX;
 
     const backend = await this._resolveBackend();
     const [head, ...templateRest] = this.commandTemplate.command;
@@ -317,6 +361,17 @@ export class GenericPtyProvider {
     if (request.cwd) threadRef.cwd = request.cwd;
     if (request.repoRoot) threadRef.repoRoot = request.repoRoot;
 
+    // Build the child env. Always include LLM_TRACKER_SANDBOX so downstream
+    // wrappers (e.g., a future Codex-CLI argv builder, or a shell shim) can
+    // key off it. We merge process.env so the child still inherits the
+    // parent's PATH/HOME/etc when no explicit request.env is provided — this
+    // is the standard "extend, don't replace" env pattern.
+    const childEnv = {
+      ...process.env,
+      ...(request.env || {}),
+      LLM_TRACKER_SANDBOX: sandbox,
+    };
+
     /** @type {any} */
     let child;
     /** @type {Error | null} */
@@ -326,15 +381,13 @@ export class GenericPtyProvider {
         const cols = request.size && Number.isInteger(request.size.cols) ? request.size.cols : 80;
         const rows = request.size && Number.isInteger(request.size.rows) ? request.size.rows : 24;
         /** @type {Record<string, any>} */
-        const opts = { name: "xterm-color", cols, rows };
+        const opts = { name: "xterm-color", cols, rows, env: childEnv };
         if (request.cwd) opts.cwd = request.cwd;
-        if (request.env) opts.env = request.env;
         child = backend.pty.spawn(head, args, opts);
       } else {
         /** @type {Record<string, any>} */
-        const opts = { stdio: ["pipe", "pipe", "pipe"] };
+        const opts = { stdio: ["pipe", "pipe", "pipe"], env: childEnv };
         if (request.cwd) opts.cwd = request.cwd;
-        if (request.env) opts.env = request.env;
         child = this.spawn(head, args, opts);
       }
     } catch (err) {
