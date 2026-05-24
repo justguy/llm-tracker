@@ -23,6 +23,10 @@ test("missing repos and verify is valid (additive)", () => {
   ok(validateTaskExtensions({ id: "t1", title: "x" }));
 });
 
+test("repos and verify may be null to clear optional extension fields", () => {
+  ok(validateTaskExtensions({ repos: null, verify: null }));
+});
+
 test("null/non-object task is valid (no-op)", () => {
   ok(validateTaskExtensions(null));
   ok(validateTaskExtensions(undefined));
@@ -50,8 +54,20 @@ test("repos.secondary exceeds 16 entries fails", () => {
   bad(validateTaskExtensions({ repos: { secondary: refs } }), "≤ 16");
 });
 
+test("repos.secondary must be an array when present", () => {
+  bad(validateTaskExtensions({ repos: { secondary: {} } }), "array");
+});
+
 test("TaskRepoRef missing root fails", () => {
   bad(validateTaskExtensions({ repos: { primary: { branch: "main" } } }), "root");
+});
+
+test("TaskRepoRef root and worktree must be non-empty when present", () => {
+  bad(validateTaskExtensions({ repos: { primary: { root: "" } } }), "non-empty");
+  bad(
+    validateTaskExtensions({ repos: { primary: { root: "r", worktree: "" } } }),
+    "non-empty"
+  );
 });
 
 test("root over 1024 chars fails", () => {
@@ -145,6 +161,17 @@ test("allowed_paths NUL byte rejected", () => {
   );
 });
 
+test("allowed_paths URI schemes rejected", () => {
+  for (const pattern of ["https://example.com/src/**", "mailto:ops@example.com", "ftp://example.com/x"]) {
+    bad(
+      validateTaskExtensions({
+        repos: { primary: { root: "r", allowed_paths: [pattern] } }
+      }),
+      "URI schemes"
+    );
+  }
+});
+
 test("allowed_paths rejects documented v0.5 examples", () => {
   for (const pattern of [
     "/Users/me/secrets/**",
@@ -211,6 +238,10 @@ test("verify.items over 128 items fails", () => {
   bad(validateTaskExtensions({ verify: { items } }), "128");
 });
 
+test("verify.items must be an array when present", () => {
+  bad(validateTaskExtensions({ verify: { items: {} } }), "array");
+});
+
 test("verify item missing id fails", () => {
   bad(
     validateTaskExtensions({
@@ -218,6 +249,19 @@ test("verify item missing id fails", () => {
     }),
     "id"
   );
+});
+
+test("verify required string fields reject empty values", () => {
+  for (const item of [
+    { kind: "command", id: "", required: true, cmd: "true" },
+    { kind: "command", id: "c1", required: true, cmd: "" },
+    { kind: "lint", id: "l1", required: true, tool: "" },
+    { kind: "skill_run", id: "s1", required: true, skillId: "" },
+    { kind: "human_approval", id: "h1", required: true, prompt: "" },
+    { kind: "dod_check", id: "d1", required: true, ref: "" }
+  ]) {
+    bad(validateTaskExtensions({ verify: { items: [item] } }), "/items/0");
+  }
 });
 
 test("verify item with bad id pattern fails", () => {
@@ -324,6 +368,17 @@ test("verify command.cwd rejects NUL and Windows-drive paths", () => {
       }
     }),
     "Windows-drive"
+  );
+});
+
+test("verify command.cwd rejects URI schemes", () => {
+  bad(
+    validateTaskExtensions({
+      verify: {
+        items: [{ kind: "command", id: "c1", required: true, cmd: "x", cwd: "https://example.com/repo" }]
+      }
+    }),
+    "URI schemes"
   );
 });
 

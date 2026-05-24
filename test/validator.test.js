@@ -215,7 +215,7 @@ test("requires at least one swimlane and priority", () => {
 
 test("validateProject rejects legacy allowed_paths outside repo-relative POSIX scope", () => {
   const p = validProject();
-  p.tasks[0].allowed_paths = ["/etc/passwd", "src\\**", "C:Users/me/secrets"];
+  p.tasks[0].allowed_paths = ["/etc/passwd", "src\\**", "C:Users/me/secrets", "https://example.com/src/**"];
   const { ok, errors } = validateProject(p);
   assert.equal(ok, false);
   assert.ok(
@@ -229,6 +229,10 @@ test("validateProject rejects legacy allowed_paths outside repo-relative POSIX s
   assert.ok(
     errors.some((e) => e.includes("/tasks/0/allowed_paths/2") && e.includes("Windows-drive")),
     `expected Windows-drive path error, got: ${errors.join("; ")}`
+  );
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/3") && e.includes("URI schemes")),
+    `expected URI scheme path error, got: ${errors.join("; ")}`
   );
 });
 
@@ -244,6 +248,14 @@ test("accepts task.repos and task.verify additions (sh-5-07 wiring)", () => {
       { kind: "skill_run", id: "lt.closeout", required: false, skillId: "tracker-closeout-sweep" }
     ]
   };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("accepts null task.repos and task.verify to clear optional additions", () => {
+  const p = validProject();
+  p.tasks[0].repos = null;
+  p.tasks[0].verify = null;
   const { ok, errors } = validateProject(p);
   assert.equal(ok, true, errors.join("; "));
 });

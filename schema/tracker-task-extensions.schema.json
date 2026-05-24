@@ -111,8 +111,8 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "repos": { "$ref": "#/definitions/TaskRepos" },
-        "verify": { "$ref": "#/definitions/TaskVerify" }
+        "repos": { "oneOf": [{ "$ref": "#/definitions/TaskRepos" }, { "type": "null" }] },
+        "verify": { "oneOf": [{ "$ref": "#/definitions/TaskVerify" }, { "type": "null" }] }
       }
     }
   },

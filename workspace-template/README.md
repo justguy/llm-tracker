@@ -222,7 +222,8 @@ Tasks are ordered by array index. Hub owns the order.
 - A repo ref requires non-empty `root` up to 1024 chars. `root` may be absolute or workspace-relative, but cannot contain NUL.
 - `worktree` follows the same string/NUL/length rules as `root`.
 - `branch` is optional, max 256 chars, and cannot contain NUL.
-- `allowed_paths` on repo refs, and legacy task-level `allowed_paths`, are repo-relative POSIX paths: no leading `/`, no `..` segment, no NUL, no backslashes, and no Windows-drive prefix.
+- `allowed_paths` on repo refs, and legacy task-level `allowed_paths`, are repo-relative POSIX paths: no leading `/`, no `..` segment, no NUL, no backslashes, no Windows-drive prefix, and no URI scheme such as `https://`.
+- When repo refs include `allowed_paths`, task intelligence surfaces use those repo-scoped paths; legacy task-level `allowed_paths` are used only when repo refs omit `allowed_paths`.
 
 `task.verify` is additive and optional. When present, it must contain `items` with at most 128 entries. Verify item ids must be unique within the task and match `^[a-z0-9][a-z0-9_.:-]{0,63}$`; every item requires a boolean `required`.
 

@@ -1,6 +1,7 @@
 import { readHistory } from "./snapshots.js";
 import { normalizeTaskReferences } from "./references.js";
 import { loadReferenceSnippets, SNIPPET_MAX_BYTES, SNIPPET_MAX_COUNT } from "./snippets.js";
+import { effectiveAllowedPaths } from "./task-contract.js";
 import { buildProjectTaskContext, summarizeTask } from "./task-metadata.js";
 
 const BRIEF_HISTORY_LIMIT = 3;
@@ -34,7 +35,7 @@ function summarizeTaskForBrief(task, context) {
     definition_of_done: stringArray(task.definition_of_done),
     constraints: stringArray(task.constraints),
     expected_changes: stringArray(task.expected_changes),
-    allowed_paths: stringArray(task.allowed_paths),
+    allowed_paths: effectiveAllowedPaths(task),
     repos: task.repos || null,
     verify: task.verify || null
   };

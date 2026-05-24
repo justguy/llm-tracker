@@ -47,6 +47,7 @@ const UI_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_SCRATCHPAD_LEN = 5000;
 const MAX_COMMENT_LEN = 500;
 const MAX_BLOCKER_REASON_LEN = 2000;
+const RUN_SESSION_DRAFT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 function isLocalOrigin(origin) {
   if (!origin) return false;
@@ -451,6 +452,12 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     workspace
   });
   const runSessionDraftStore = createDraftStore();
+  const runSessionDraftSweepTimer = setInterval(() => {
+    try {
+      runSessionDraftStore.sweep();
+    } catch {}
+  }, RUN_SESSION_DRAFT_SWEEP_INTERVAL_MS);
+  runSessionDraftSweepTimer.unref?.();
   registerRunSessionRoutes(app, {
     store,
     draftStore: runSessionDraftStore,
@@ -1140,6 +1147,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
 
     clearInterval(uiSessionSweepTimer);
     clearInterval(linkedTargetsPollTimer);
+    clearInterval(runSessionDraftSweepTimer);
 
     try {
       await watcher.close();
@@ -1193,6 +1201,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       httpServer.off("listening", onListening);
       clearInterval(uiSessionSweepTimer);
       clearInterval(linkedTargetsPollTimer);
+      clearInterval(runSessionDraftSweepTimer);
       try {
         await watcher.close();
       } catch {}

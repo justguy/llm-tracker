@@ -33,9 +33,19 @@ function makeProjectionStub(sessions = []) {
   };
 }
 
-async function startMiniApp({ projects = {}, sessions = [] } = {}) {
+function fixedClock(start = 1_700_000_000_000) {
+  let t = start;
+  const now = () => t;
+  now.advance = (ms) => {
+    t += ms;
+    return t;
+  };
+  return now;
+}
+
+async function startMiniApp({ projects = {}, sessions = [], draftStoreOptions = {} } = {}) {
   const store = makeStoreStub(projects);
-  const draftStore = createDraftStore();
+  const draftStore = createDraftStore(draftStoreOptions);
   const projection = makeProjectionStub(sessions);
   const app = express();
   app.use(express.json());
@@ -358,6 +368,23 @@ test("GET /api/run-session/drafts/:id returns 404 for unknown draft", async () =
   }
 });
 
+test("GET /api/run-session/drafts/:id returns 404 for expired drafts", async () => {
+  const now = fixedClock();
+  const app = await startMiniApp({ draftStoreOptions: { now, ttlMs: 1000 } });
+  try {
+    const created = await postJson(app.base, "/api/run-session/draft", {
+      source: "hub_run",
+      mode: "untasked",
+    });
+    now.advance(1000);
+    const r = await getJson(app.base, `/api/run-session/drafts/${created.body.draft.id}`);
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error.code, "UNKNOWN_DRAFT");
+  } finally {
+    await app.close();
+  }
+});
+
 // --- PATCH /api/run-session/drafts/:draftId ----------------------------------
 
 test("PATCH /api/run-session/drafts/:id updates mutable fields", async () => {
@@ -400,6 +427,24 @@ test("PATCH /api/run-session/drafts/:id rejects immutable id mutation", async ()
   }
 });
 
+test("PATCH /api/run-session/drafts/:id rejects non-object body", async () => {
+  const app = await startMiniApp();
+  try {
+    const created = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+    });
+    const r = await patchJson(app.base, `/api/run-session/drafts/${created.body.draft.id}`, [
+      "bad",
+    ]);
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_BODY");
+  } finally {
+    await app.close();
+  }
+});
+
 test("PATCH /api/run-session/drafts/:id returns 404 for unknown draft", async () => {
   const app = await startMiniApp();
   try {
@@ -408,6 +453,26 @@ test("PATCH /api/run-session/drafts/:id returns 404 for unknown draft", async ()
       "/api/run-session/drafts/draft_aaaaaaaaaaaaaaaaaaaaaaaa",
       { runtime: "manual" },
     );
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error.code, "UNKNOWN_DRAFT");
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH /api/run-session/drafts/:id returns 404 for expired drafts", async () => {
+  const now = fixedClock();
+  const app = await startMiniApp({ draftStoreOptions: { now, ttlMs: 1000 } });
+  try {
+    const created = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+    });
+    now.advance(1000);
+    const r = await patchJson(app.base, `/api/run-session/drafts/${created.body.draft.id}`, {
+      runtime: "manual",
+    });
     assert.equal(r.status, 404);
     assert.equal(r.body.error.code, "UNKNOWN_DRAFT");
   } finally {
@@ -507,6 +572,25 @@ test("POST /api/run-session/launch returns 404 for unknown draft", async () => {
   }
 });
 
+test("POST /api/run-session/launch returns 404 for expired drafts", async () => {
+  const now = fixedClock();
+  const app = await startMiniApp({ draftStoreOptions: { now, ttlMs: 1000 } });
+  try {
+    const created = await postJson(app.base, "/api/run-session/draft", {
+      source: "cli",
+      mode: "untasked",
+    });
+    now.advance(1000);
+    const r = await postJson(app.base, "/api/run-session/launch", {
+      draftId: created.body.draft.id,
+    });
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error.code, "UNKNOWN_DRAFT");
+  } finally {
+    await app.close();
+  }
+});
+
 test("POST /api/run-session/launch rejects non-integer expectedTrackerRev", async () => {
   const app = await startMiniApp();
   try {
@@ -520,6 +604,18 @@ test("POST /api/run-session/launch rejects non-integer expectedTrackerRev", asyn
     });
     assert.equal(r.status, 400);
     assert.equal(r.body.error.code, "INVALID_BODY");
+    const negative = await postJson(app.base, "/api/run-session/launch", {
+      draftId: created.body.draft.id,
+      expectedTrackerRev: -1,
+    });
+    assert.equal(negative.status, 400);
+    assert.equal(negative.body.error.code, "INVALID_BODY");
+    const fractional = await postJson(app.base, "/api/run-session/launch", {
+      draftId: created.body.draft.id,
+      expectedTrackerRev: 1.5,
+    });
+    assert.equal(fractional.status, 400);
+    assert.equal(fractional.body.error.code, "INVALID_BODY");
   } finally {
     await app.close();
   }

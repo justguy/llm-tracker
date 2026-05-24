@@ -14,6 +14,7 @@ const compiled = ajv.compile(schema);
 
 const NUL = "\u0000";
 const WIN_DRIVE_RE = /^[A-Za-z]:/;
+const URI_SCHEME_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|(?:mailto|file|data|ssh|git):)/i;
 
 function formatAjvError(err) {
   const path = err.instancePath || "/";
@@ -65,6 +66,10 @@ function checkRepoRelativePath(value, loc, errors) {
   }
   if (WIN_DRIVE_RE.test(value)) {
     errors.push(`${loc}: must be repo-relative; Windows-drive paths rejected`);
+    return;
+  }
+  if (URI_SCHEME_RE.test(value)) {
+    errors.push(`${loc}: must be repo-relative; URI schemes rejected`);
     return;
   }
   if (value.includes("\\")) {
