@@ -11,10 +11,8 @@
 //   - Lint regression: source contains no regex / .includes / .match / .test
 //     / .indexOf — the only ways heuristic parsing on stdio bytes can be
 //     implemented in JS (DoD #5 / TDD §7.2 "Forbidden").
-//   - validateRuntimeEvent integration: today's §6.6 schema enum admits
-//     `session.stopped` but does NOT yet list `session.stop.requested`,
-//     `process.signal_sent`, or `process.exited`. We exercise the validator
-//     on the type the schema admits and document the gap explicitly.
+//   - validateRuntimeEvent integration: every stop-sequence event emitted by
+//     the adapter is accepted by the RuntimeEvent schema.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -479,47 +477,25 @@ function stripJsCommentsAndStrings(src) {
 
 // --- runtime-events validator integration -----------------------------------
 //
-// Today's `schema/runtime-events.schema.json` enum admits `session.stopped`
-// but does NOT list `session.stop.requested`, `process.signal_sent`, or
-// `process.exited` (per TDD §6.6 they are first-class runtime event types;
-// the schema-update task is downstream). We exercise the validator on the
-// type the schema admits, and assert the others CURRENTLY fail with a clear
-// type-enum complaint so a future schema-tightening task makes this test
-// flip from "documents the gap" to "validates the full sequence".
+// Per TDD §23.2 #28, the process stop sequence emits session.stop.requested,
+// process.signal_sent, process.exited, and session.stopped. The adapter emits
+// generic event payloads for these types; this test proves the runtime schema
+// admits the exact events the adapter appends.
 
-test("validateRuntimeEvent: session.stopped event passes today's schema", async () => {
+test("validateRuntimeEvent: process stop sequence events pass the runtime schema", async () => {
   const child = makeFakeChild({ exitOn: ["SIGKILL"] });
-  // Capture events into our own array first; then validate the session.stopped
-  // entry through the real validator.
-  const { adapter, runtimeStore } = makeAdapter(child);
+  const { adapter, runtimeStore } = makeAdapter(child, { validateRuntimeEvent });
   adapter.start({ sessionId: SESSION_ID, command: "/bin/fake" });
   await adapter.stop(SESSION_ID);
 
-  const stopped = runtimeStore.events.find((e) => e.type === "session.stopped");
-  assert.ok(stopped, "session.stopped event was emitted");
-  // The validator needs an `id` field; stamp one to mirror what the store
-  // does at append time.
-  assert.equal(validateRuntimeEvent({ ...stopped, id: makeRuntimeId("evt") }), true);
-});
-
-test("validateRuntimeEvent: documents §6.6 enum gap for process.*/session.stop.requested", () => {
-  // Today the schema enum does NOT list these types. When the schema is
-  // extended (downstream task), this test should flip to a passing assertion.
-  const ts = new Date().toISOString();
-  const make = (type) => ({
-    schemaVersion: 1,
-    id: makeRuntimeId("evt"),
-    ts,
-    type,
-    source: "system",
-    workspace: "/tmp/ws",
-    sessionId: SESSION_ID,
-  });
-  for (const type of ["session.stop.requested", "process.signal_sent", "process.exited"]) {
-    assert.throws(
-      () => validateRuntimeEvent(make(type)),
-      /RuntimeEvent invalid/,
-      `expected ${type} to be rejected by today's §6.6 enum (gap to be closed downstream)`,
-    );
+  assert.deepEqual(runtimeStore.events.map((e) => e.type), [
+    "session.stop.requested",
+    "process.signal_sent",
+    "process.signal_sent",
+    "process.exited",
+    "session.stopped",
+  ]);
+  for (const evt of runtimeStore.events) {
+    assert.equal(validateRuntimeEvent({ ...evt, id: makeRuntimeId("evt") }), true);
   }
 });

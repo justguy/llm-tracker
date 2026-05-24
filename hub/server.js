@@ -18,8 +18,12 @@ import { WebSocketServer } from "ws";
 import { buildTrackerErrorBody } from "./error-payload.js";
 import { registerSessionsRoutes } from "./api/sessions.js";
 import { registerLayoutsRoutes } from "./api/layouts.js";
+import { registerProvidersRoutes } from "./api/providers.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
+import { ProviderBroker } from "./providers/broker.js";
+import { createManualProvider } from "./providers/manual.js";
+import { ProviderRegistry } from "./providers/registry.js";
 import { loadWorkspaceConfig } from "./config/loader.js";
 import { atomicWriteJson } from "./runtime/atomic.js";
 import { validateRuntimeEvent } from "./runtime/events.js";
@@ -31,6 +35,7 @@ import { RuntimeStore } from "./runtime/store.js";
 import { rebuildRuntimeFromDisk, wrapSnapshot } from "./runtime/startup.js";
 import { RuntimeBroadcaster } from "./runtime/ws.js";
 import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
+import { SessionTokenStore } from "./sessions/auth/tokens.js";
 import { Store, slugFromFile } from "./store.js";
 
 // Watcher tuning: ignore obviously-irrelevant paths anywhere in the tree. The
@@ -197,6 +202,10 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   const runtimeStartup = await rebuildRuntimeFromDisk({ workspaceRoot: workspace, projection: runtimeProjection });
   const runtimePaths = makePaths({ workspaceRoot: workspace });
   const runtimeBroadcaster = new RuntimeBroadcaster();
+  const sessionTokenStore = new SessionTokenStore();
+  const providerRegistry = new ProviderRegistry();
+  providerRegistry.register(createManualProvider());
+  const providerBroker = new ProviderBroker({ registry: providerRegistry });
   let lastRuntimeEventId = null;
 
   const runtimeSnapshot = () => ({
@@ -443,12 +452,14 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   registerIntelligenceRoutes(app, { workspace, store });
   registerWorkspaceConfigRoutes(app, { workspace });
   registerLayoutsRoutes(app, { workspaceRoot: workspace });
+  registerProvidersRoutes(app, { broker: providerBroker });
   registerSessionsRoutes(app, {
     runtimeStore,
     projection: runtimeProjection,
     makeRuntimeId,
     validateRuntimeEvent,
-    workspace
+    workspace,
+    tokenStore: sessionTokenStore
   });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {

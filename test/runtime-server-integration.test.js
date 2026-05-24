@@ -131,6 +131,20 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     assert.equal(layoutPatchBody.layout.global.cardSizeDefault, "compact");
     assert.equal(layoutPatchBody.layout.views.hub.groupBy, "urgency");
 
+    const providersRes = await fetch(`${base}/api/providers`);
+    assert.equal(providersRes.status, 200);
+    const providersBody = await providersRes.json();
+    assert.deepEqual(providersBody.providers, [
+      { id: "manual", label: "Manual (advisory)" },
+    ]);
+
+    const manualCapabilitiesRes = await fetch(`${base}/api/providers/manual/capabilities`);
+    assert.equal(manualCapabilitiesRes.status, 200);
+    const manualCapabilitiesBody = await manualCapabilitiesRes.json();
+    assert.equal(manualCapabilitiesBody.providerId, "manual");
+    assert.equal(manualCapabilitiesBody.capabilities.rawStdio, false);
+    assert.equal(manualCapabilitiesBody.capabilities.processLifecycle, false);
+
     const eventPromise = waitForMessage(runtimeWs);
     const createRes = await postJson(base, "/api/sessions", {
       name: "prod-smoke",
@@ -145,6 +159,16 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     assert.equal(eventMsg.type, "runtime.event");
     assert.equal(eventMsg.event.type, "session.started");
     assert.equal(eventMsg.event.session.id, createBody.session.id);
+
+    const rotateMissingTokenRes = await fetch(`${base}/api/sessions/${createBody.session.id}/token/rotate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({}),
+    });
+    assert.equal(rotateMissingTokenRes.status, 401);
+    const rotateMissingTokenBody = await rotateMissingTokenRes.json();
+    assert.equal(rotateMissingTokenBody.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(rotateMissingTokenBody.error.details.reason, "missing");
 
     const listRes = await fetch(`${base}/api/sessions`);
     assert.equal(listRes.status, 200);
