@@ -110,10 +110,36 @@ test("toggle ON appends session.stdio_capture_changed event", { timeout: TEST_TI
     const evt = env.appended.find((e) => e.type === "session.stdio_capture_changed");
     assert.ok(evt, "session.stdio_capture_changed event was appended");
     assert.equal(evt.sessionId, session.id);
+    assert.equal(evt.captureToDisk, true);
     assert.equal(evt.capture.enabled, true);
     assert.equal(evt.reason, "operator-enabled");
     assert.equal(evt.source, "http");
     assert.equal(evt.workspace, env.workspaceRoot);
+  } finally {
+    await env.close();
+  }
+});
+
+test("concurrent same-state toggles serialize no-op detection", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startApp();
+  try {
+    const session = await createSession(env);
+    const t1 = env.tokenStore.issue({ sessionId: session.id });
+    const t2 = env.tokenStore.issue({ sessionId: session.id });
+
+    const [a, b] = await Promise.all([
+      postToggle(env.base, session.id, { captureToDisk: true }, { "X-LT-Session-Token": t1.token }),
+      postToggle(env.base, session.id, { captureToDisk: true }, { "X-LT-Session-Token": t2.token }),
+    ]);
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    const bodies = await Promise.all([a.json(), b.json()]);
+    assert.equal(bodies.filter((body) => body.noop === true).length, 1);
+
+    const events = env.appended.filter((e) => e.type === "session.stdio_capture_changed");
+    assert.equal(events.length, 1, "only one ON event should be appended");
+    assert.equal(events[0].capture.enabled, true);
+    assert.equal(events[0].captureToDisk, true);
   } finally {
     await env.close();
   }
@@ -371,6 +397,7 @@ test("factory: produces a schema-valid event with capture.enabled set", () => {
     workspace: "/tmp/ws",
   });
   assert.equal(evt.type, "session.stdio_capture_changed");
+  assert.equal(evt.captureToDisk, true);
   assert.equal(evt.capture.enabled, true);
   assert.equal(evt.id, undefined, "id is left for RuntimeStore to stamp at append time");
   assert.equal(evt.schemaVersion, 1);

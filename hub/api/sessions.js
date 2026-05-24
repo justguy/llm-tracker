@@ -359,6 +359,20 @@ export function registerSessionsRoutes(app, deps) {
       validateRuntimeEvent,
       workspace,
     });
+    const captureToggleChains = new Map();
+    const runSerializedCaptureToggle = (sessionId, fn) => {
+      const previous = captureToggleChains.get(sessionId) || Promise.resolve();
+      const next = previous.catch(() => {}).then(fn);
+      captureToggleChains.set(sessionId, next);
+      next
+        .finally(() => {
+          if (captureToggleChains.get(sessionId) === next) {
+            captureToggleChains.delete(sessionId);
+          }
+        })
+        .catch(() => {});
+      return next;
+    };
 
     app.post("/api/sessions/:sessionId/token/rotate", tokenMiddleware, async (req, res) => {
       const { sessionId } = req.params;
@@ -511,53 +525,58 @@ export function registerSessionsRoutes(app, deps) {
         return sendError(res, 400, "INVALID_BODY", "`reason` must be a non-empty string when present");
       }
 
-      // 404 before touching state — don't emit for a phantom session.
-      const session = projection.sessions.get(sessionId);
-      if (!session) {
-        return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
-      }
+      return runSerializedCaptureToggle(sessionId, async () => {
+        // 404 before touching state — don't emit for a phantom session.
+        const session = projection.sessions.get(sessionId);
+        if (!session) {
+          return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+        }
 
-      // No-op detection: capture defaults OFF until a stdio_capture_changed
-      // event lands. The projection (sh-1-05) stamps `stdioCapture` (the full
-      // `capture` object); we read `.enabled` and treat absence as `false`.
-      const currentEnabled = session.stdioCapture && typeof session.stdioCapture === "object"
-        ? session.stdioCapture.enabled === true
-        : false;
-      if (currentEnabled === captureToDisk) {
-        return res.status(200).json({
-          session,
-          rev: projection.rev,
-          noop: true,
+        // No-op detection: capture defaults OFF until a stdio_capture_changed
+        // event lands. The projection (sh-1-05) stamps `stdioCapture` (the full
+        // `capture` object); we read `.enabled` and treat absence as `false`.
+        // This runs in a per-session chain so concurrent same-state toggles
+        // re-check after the winner's RuntimeStore.append() updates projection.
+        const currentEnabled =
+          session.stdioCapture && typeof session.stdioCapture === "object"
+            ? session.stdioCapture.enabled === true
+            : false;
+        if (currentEnabled === captureToDisk) {
+          return res.status(200).json({
+            session,
+            rev: projection.rev,
+            noop: true,
+          });
+        }
+
+        let event;
+        try {
+          event = createSessionStdioCaptureChangedEvent({
+            sessionId,
+            captureToDisk,
+            ...(reason !== undefined ? { reason } : {}),
+            workspace,
+            source: "http",
+          });
+        } catch (err) {
+          return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
+            errors: err.errors,
+          });
+        }
+
+        let appendResult;
+        try {
+          appendResult = await runtimeStore.append(event);
+        } catch (err) {
+          return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+        }
+
+        const updated = projection.sessions.get(sessionId) || session;
+        res.status(200).json({
+          session: updated,
+          rev: appendResult.rev,
+          eventId: appendResult.eventId,
         });
-      }
-
-      let event;
-      try {
-        event = createSessionStdioCaptureChangedEvent({
-          sessionId,
-          captureToDisk,
-          ...(reason !== undefined ? { reason } : {}),
-          workspace,
-          source: "http",
-        });
-      } catch (err) {
-        return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
-          errors: err.errors,
-        });
-      }
-
-      let appendResult;
-      try {
-        appendResult = await runtimeStore.append(event);
-      } catch (err) {
-        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
-      }
-
-      const updated = projection.sessions.get(sessionId) || session;
-      res.status(200).json({
-        session: updated,
-        rev: appendResult.rev,
-        eventId: appendResult.eventId,
       });
     });
   }

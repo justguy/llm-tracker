@@ -362,10 +362,10 @@ export function createSessionWarningClearedEvent(input) {
 //
 // Builds a `session.stdio_capture_changed` runtime event. The schema variant
 // (SessionStdioCaptureChangedEvent) requires `capture: { enabled: boolean }`
-// — this factory accepts `captureToDisk` (the API/DoD shape) and packs it
-// into the schema-shaped `capture.enabled`. `reason`, when supplied, rides
-// as a top-level extra prop (the schema allows additionalProperties on the
-// base).
+// — this factory accepts `captureToDisk` (the API/DoD shape), keeps it as a
+// compatibility field, and packs it into the schema-shaped `capture.enabled`.
+// `reason`, when supplied, rides as a top-level extra prop (the schema allows
+// additionalProperties on the base).
 //
 // Same placeholder-id dance as the warning factories above: when the caller
 // omits `id`, validate against a placeholder and strip it before returning so
@@ -421,6 +421,7 @@ export function createSessionStdioCaptureChangedEvent(input) {
     source,
     workspace,
     sessionId,
+    captureToDisk,
     capture: { enabled: captureToDisk },
   };
   if (reason !== undefined) event.reason = reason;

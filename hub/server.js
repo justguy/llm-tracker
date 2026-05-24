@@ -22,6 +22,7 @@ import { registerProvidersRoutes } from "./api/providers.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
 import { ProviderBroker } from "./providers/broker.js";
+import { createGenericPtyProvider } from "./providers/generic-pty.js";
 import { createManualProvider } from "./providers/manual.js";
 import { ProviderRegistry } from "./providers/registry.js";
 import { loadWorkspaceConfig } from "./config/loader.js";
@@ -140,6 +141,38 @@ function rejectOversizedMutableFields(req, res, next) {
   });
 }
 
+function providerLabel(providerId) {
+  const builtIn = {
+    codex_cli: "Codex CLI",
+    claude_code: "Claude Code",
+    kimi: "Kimi",
+    gemini: "Gemini"
+  };
+  if (builtIn[providerId]) return builtIn[providerId];
+  return providerId
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function registerConfiguredGenericPtyProviders(registry, providerConfigs, processLifecycle) {
+  if (!providerConfigs || typeof providerConfigs !== "object") return;
+  for (const [providerId, cfg] of Object.entries(providerConfigs)) {
+    if (!cfg || typeof cfg !== "object") continue;
+    if (cfg.kind !== "generic_pty") continue;
+    registry.register(createGenericPtyProvider({
+      providerId,
+      label: providerLabel(providerId),
+      commandTemplate: {
+        command: cfg.command,
+        mcpContract: cfg.mcpContract === true
+      },
+      sigintGraceMs: processLifecycle?.sigintGraceMs
+    }));
+  }
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -205,6 +238,11 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   const sessionTokenStore = new SessionTokenStore();
   const providerRegistry = new ProviderRegistry();
   providerRegistry.register(createManualProvider());
+  registerConfiguredGenericPtyProviders(
+    providerRegistry,
+    workspaceConfig.resolved.sessionHub.providers,
+    workspaceConfig.resolved.sessionHub.processLifecycle
+  );
   const providerBroker = new ProviderBroker({ registry: providerRegistry });
   let lastRuntimeEventId = null;
 

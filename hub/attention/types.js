@@ -90,7 +90,9 @@
  * @property {string} createdAt
  * @property {string} updatedAt
  * @property {string} dedupeKey
+ * @property {string} [clearCondition]
  * @property {AttentionAction[]} recommendedActions
+ * @property {boolean} [autoArchive]
  * @property {string} [acknowledgedAt]
  * @property {string} [snoozedUntil]
  * @property {string} [clearedAt]
@@ -290,6 +292,12 @@ export function assertValidAttentionItem(item) {
   }
   if (!isNonEmptyString(i.dedupeKey)) {
     throw new Error("AttentionItem.dedupeKey required (non-empty string)");
+  }
+  if (i.clearCondition !== undefined && !isNonEmptyString(i.clearCondition)) {
+    throw new Error("AttentionItem.clearCondition must be a non-empty string when present");
+  }
+  if (i.autoArchive !== undefined && typeof i.autoArchive !== "boolean") {
+    throw new Error("AttentionItem.autoArchive must be a boolean when present");
   }
   if (!Array.isArray(i.recommendedActions)) {
     throw new Error("AttentionItem.recommendedActions must be an array");

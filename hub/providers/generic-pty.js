@@ -187,6 +187,7 @@ export class GenericPtyProvider {
      *   startedAt: string,
      *   listeners: Array<(evt: object) => void>,
      *   spawnError: Error | null,
+     *   commandId: string,
      * }>}
      */
     this.threads = new Map();
@@ -304,6 +305,8 @@ export class GenericPtyProvider {
     const nowDate = this.now();
     const startedAt = nowDate.toISOString();
     const threadId = generatePtyThreadId(nowDate.getTime());
+    const commandId = `${threadId}_command`;
+    const commandText = [head, ...args].join(" ");
 
     /** @type {object} */
     const threadRef = {
@@ -347,12 +350,25 @@ export class GenericPtyProvider {
       stopPromise: null,
       threadRef,
       startedAt,
+      commandId,
+      commandText,
       listeners: [],
       wakers: [],
       spawnError,
     };
 
     const markExited = (code, signal) => {
+      if (state.exited) return;
+      if (!state.spawnError) {
+        this._enqueueEvent(state, {
+          kind: "command.completed",
+          providerId: this.id,
+          threadId,
+          commandId,
+          ...(typeof code === "number" ? { exitCode: code } : {}),
+          ts: this.now().toISOString(),
+        });
+      }
       state.exited = true;
       state.exitInfo = {
         exitCode: typeof code === "number" ? code : null,
@@ -369,16 +385,61 @@ export class GenericPtyProvider {
     // the addendum §8 union has no such kind; the session layer derives
     // `session.stopped` from the runtime store on its own.
     if (child) {
+      const emitStarted = () => {
+        this._enqueueEvent(state, {
+          kind: "thread.started",
+          providerId: this.id,
+          threadRef,
+          ts: startedAt,
+        });
+        this._enqueueEvent(state, {
+          kind: "command.started",
+          providerId: this.id,
+          threadId,
+          commandId,
+          command: commandText,
+          ...(request.cwd ? { cwd: request.cwd } : {}),
+          ts: startedAt,
+        });
+      };
       if (backend.kind === "node-pty" && typeof child.onExit === "function") {
+        emitStarted();
         child.onExit((info) => {
           const code = typeof info?.exitCode === "number" ? info.exitCode : null;
-          const signal = typeof info?.signal === "string" || typeof info?.signal === "number"
-            ? String(info.signal)
-            : null;
+          const signal =
+            typeof info?.signal === "string" || typeof info?.signal === "number" ? String(info.signal) : null;
           markExited(code, signal);
         });
+        if (typeof child.onData === "function") {
+          child.onData((chunk) => this._enqueueCommandOutput(state, "stdout", chunk));
+        }
       } else if (typeof child.on === "function") {
+        if (typeof child.once === "function") {
+          child.once("spawn", emitStarted);
+        } else {
+          emitStarted();
+        }
+        child.on("error", (err) => {
+          const e = err instanceof Error ? err : new Error(String(err));
+          state.spawnError = e;
+          this._enqueueEvent(state, {
+            kind: "provider.error",
+            providerId: this.id,
+            threadId,
+            code: "SPAWN_FAILED",
+            message: e.message,
+            retryable: false,
+            ts: this.now().toISOString(),
+          });
+          markExited(null, null);
+        });
         child.on("exit", (code, signal) => markExited(code, signal));
+        if (child.stdout && typeof child.stdout.on === "function") {
+          child.stdout.on("data", (chunk) => this._enqueueCommandOutput(state, "stdout", chunk));
+        }
+        if (child.stderr && typeof child.stderr.on === "function") {
+          child.stderr.on("data", (chunk) => this._enqueueCommandOutput(state, "stderr", chunk));
+        }
       }
     } else if (spawnError) {
       // No child to observe; mark exited immediately so streamEvents() can
@@ -401,13 +462,6 @@ export class GenericPtyProvider {
         retryable: false,
         ts: startedAt,
       });
-    } else {
-      this._enqueueEvent(state, {
-        kind: "thread.started",
-        providerId: this.id,
-        threadRef,
-        ts: startedAt,
-      });
     }
 
     return {
@@ -423,9 +477,9 @@ export class GenericPtyProvider {
 
   /**
    * Stream ProviderEvents for `threadRef`. The iterator yields the lifecycle
-   * events emitted at start (`thread.started` or `provider.error`) and any
-   * subsequent lifecycle events the provider records (it never parses stdio,
-   * so no `message` / `command.*` / `approval.*` events are produced here).
+   * events emitted at start (`thread.started`, `command.started`, or
+   * `provider.error`) and any subsequent lifecycle / raw stdio events the
+   * provider records. It does not parse stdio into messages or approvals.
    *
    * The iterator completes when the thread has exited AND no buffered events
    * remain. Callers MUST consume the iterator for events to drain; the
@@ -647,6 +701,20 @@ export class GenericPtyProvider {
     }
     if (!state.bufferedEvents) state.bufferedEvents = [];
     state.bufferedEvents.push(event);
+  }
+
+  _enqueueCommandOutput(state, stream, chunk) {
+    if (state.exited || state.spawnError) return;
+    const text = typeof chunk === "string" ? chunk : String(chunk);
+    this._enqueueEvent(state, {
+      kind: "command.output",
+      providerId: this.id,
+      threadId: state.threadRef.threadId,
+      commandId: state.commandId,
+      stream,
+      text,
+      ts: this.now().toISOString(),
+    });
   }
 }
 

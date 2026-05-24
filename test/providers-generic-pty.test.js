@@ -53,6 +53,8 @@ function makeFakeSpawnChild(opts = {}) {
     written: [],
     write(buf) { this.written.push(buf); return true; },
   };
+  /** @type {any} */ (child).stdout = new EventEmitter();
+  /** @type {any} */ (child).stderr = new EventEmitter();
   /** @type {string[]} */
   const killCalls = [];
   /** @type {any} */ (child).killCalls = killCalls;
@@ -64,6 +66,7 @@ function makeFakeSpawnChild(opts = {}) {
     }
     return true;
   };
+  if (opts.emitSpawn !== false) setImmediate(() => child.emit("spawn"));
   return child;
 }
 
@@ -75,6 +78,7 @@ function makeFakePtyChild(opts = {}) {
   const exitOn = Array.isArray(opts.exitOn) ? opts.exitOn : ["SIGKILL"];
   const exitCode = opts.exitCode === undefined ? 0 : opts.exitCode;
   const exitCallbacks = [];
+  const dataCallbacks = [];
   const writes = [];
   const killCalls = [];
   return {
@@ -82,6 +86,10 @@ function makeFakePtyChild(opts = {}) {
     writes,
     killCalls,
     onExit(cb) { exitCallbacks.push(cb); },
+    onData(cb) { dataCallbacks.push(cb); },
+    emitData(text) {
+      for (const cb of dataCallbacks) cb(text);
+    },
     write(text) { writes.push(text); },
     kill(signal) {
       killCalls.push(signal);
@@ -296,13 +304,15 @@ test("streamEvents(): yields thread.started, then completes after exit (node-pty
   await provider.stop(handle);
   await collector;
 
-  // Exactly one event: thread.started. We deliberately do not emit a
-  // thread.exited shape (addendum §8 union has no such kind).
-  assert.equal(events.length, 1);
+  // We deliberately do not emit a thread.exited shape (addendum §8 union has
+  // no such kind); command.completed carries the raw process lifecycle close.
+  assert.equal(events.length, 3);
   assert.equal(events[0].kind, "thread.started");
   assert.equal(events[0].providerId, "codex_cli");
   assert.equal(events[0].threadRef.threadId, handle.threadId);
   assert.equal(events[0].threadRef.transport, "pty");
+  assert.equal(events[1].kind, "command.started");
+  assert.equal(events[2].kind, "command.completed");
 });
 
 test("streamEvents(): spawnError yields a provider.error event (no thread.started)", async () => {
@@ -320,6 +330,55 @@ test("streamEvents(): spawnError yields a provider.error event (no thread.starte
   assert.equal(events[0].code, "SPAWN_FAILED");
   assert.equal(events[0].retryable, false);
   assert.equal(events[0].providerId, "codex_cli");
+});
+
+test("streamEvents(): async child_process spawn error yields provider.error without crashing", async () => {
+  const child = makeFakeSpawnChild({ emitSpawn: false });
+  const { provider } = makeProvider({
+    ptyLoader: async () => { throw new Error("no pty"); },
+    spawn: () => child,
+  });
+  const handle = await provider.start({});
+  const events = [];
+  const collector = (async () => {
+    for await (const e of provider.streamEvents(handle)) {
+      events.push(e);
+    }
+  })();
+
+  child.emit("error", new Error("spawn definitely-missing-session-hub-bin ENOENT"));
+  await collector;
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, "provider.error");
+  assert.equal(events[0].code, "SPAWN_FAILED");
+  assert.match(events[0].message, /ENOENT/);
+});
+
+test("streamEvents(): spawn stdout/stderr are surfaced as raw command.output events", async () => {
+  const child = makeFakeSpawnChild({ exitOn: ["SIGINT"] });
+  const { provider } = makeProvider({
+    ptyLoader: async () => { throw new Error("no pty"); },
+    spawn: () => child,
+  });
+  const handle = await provider.start({});
+  const events = [];
+  const collector = (async () => {
+    for await (const e of provider.streamEvents(handle)) {
+      events.push(e);
+    }
+  })();
+
+  await new Promise((resolve) => child.once("spawn", resolve));
+  child.stdout.emit("data", Buffer.from("hello\n"));
+  child.stderr.emit("data", "warn\n");
+  await provider.stop(handle);
+  await collector;
+
+  assert.deepEqual(
+    events.filter((e) => e.kind === "command.output").map((e) => [e.stream, e.text]),
+    [["stdout", "hello\n"], ["stderr", "warn\n"]],
+  );
 });
 
 test("streamEvents(): validates threadRef shape", async () => {

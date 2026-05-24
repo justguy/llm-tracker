@@ -136,6 +136,10 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     const providersBody = await providersRes.json();
     assert.deepEqual(providersBody.providers, [
       { id: "manual", label: "Manual (advisory)" },
+      { id: "codex_cli", label: "Codex CLI" },
+      { id: "claude_code", label: "Claude Code" },
+      { id: "kimi", label: "Kimi" },
+      { id: "gemini", label: "Gemini" },
     ]);
 
     const manualCapabilitiesRes = await fetch(`${base}/api/providers/manual/capabilities`);

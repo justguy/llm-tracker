@@ -5,7 +5,9 @@
 // What this module is responsible for:
 //   - Holding the current "active" attention items keyed by their `dedupeKey`
 //     (§8A.4). The engine in `./engine.js` drives the set by handing the
-//     projection a freshly-computed array of items each tick.
+//     projection a freshly-computed array of items each tick. Existing items
+//     keep their stable `id` and first-raised `createdAt` when the same
+//     dedupeKey appears again.
 //   - Indexed lookup by `id`, by `sessionId`, and a bulk `getAll()` ordered
 //     by the engine's emitted §8A.3 priority order (caller's sort wins).
 //
@@ -48,6 +50,7 @@ export class AttentionProjection {
     if (!Array.isArray(items)) {
       throw new TypeError("AttentionProjection.apply: items must be an array");
     }
+    const previousByDedupe = this._byDedupeKey;
     const nextByDedupe = new Map();
     const nextById = new Map();
     const nextOrder = [];
@@ -56,8 +59,25 @@ export class AttentionProjection {
       if (typeof item.dedupeKey !== "string" || item.dedupeKey.length === 0) continue;
       if (typeof item.id !== "string" || item.id.length === 0) continue;
       if (nextByDedupe.has(item.dedupeKey)) continue; // dedupe within tick
-      nextByDedupe.set(item.dedupeKey, item);
-      nextById.set(item.id, item);
+      const previous = previousByDedupe.get(item.dedupeKey);
+      const stableItem = previous
+        ? {
+            ...item,
+            id: previous.id,
+            createdAt: previous.createdAt,
+            ...(previous.acknowledgedAt !== undefined && item.acknowledgedAt === undefined
+              ? { acknowledgedAt: previous.acknowledgedAt }
+              : {}),
+            ...(previous.snoozedUntil !== undefined && item.snoozedUntil === undefined
+              ? { snoozedUntil: previous.snoozedUntil }
+              : {}),
+            ...(previous.clearedAt !== undefined && item.clearedAt === undefined
+              ? { clearedAt: previous.clearedAt }
+              : {}),
+          }
+        : item;
+      nextByDedupe.set(stableItem.dedupeKey, stableItem);
+      nextById.set(stableItem.id, stableItem);
       nextOrder.push(item.dedupeKey);
     }
     this._byDedupeKey = nextByDedupe;

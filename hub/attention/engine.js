@@ -103,8 +103,8 @@ export const PRIORITY_RANK = Object.freeze({
 const RESERVED_RULE_KINDS = Object.freeze([...ATTENTION_KINDS]);
 
 /**
- * Stable §8A.3 comparator. Ties break by `createdAt` ASC (string compare on
- * ISO-8601 is chronological), then by `dedupeKey` ASC.
+ * Stable §8A.3 comparator. Ties break by `createdAt` ASC chronologically
+ * (numeric offsets are accepted by the validator), then by `dedupeKey` ASC.
  *
  * @param {AttentionItem} a
  * @param {AttentionItem} b
@@ -114,8 +114,19 @@ export function compareByPriority(a, b) {
   const ra = PRIORITY_RANK[/** @type {AttentionKind} */ (a.kind)] ?? Number.MAX_SAFE_INTEGER;
   const rb = PRIORITY_RANK[/** @type {AttentionKind} */ (b.kind)] ?? Number.MAX_SAFE_INTEGER;
   if (ra !== rb) return ra - rb;
-  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+  const tc = compareTimestamps(a.createdAt, b.createdAt);
+  if (tc !== 0) return tc;
   if (a.dedupeKey !== b.dedupeKey) return a.dedupeKey < b.dedupeKey ? -1 : 1;
+  return 0;
+}
+
+function compareTimestamps(a, b) {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) {
+    return ta - tb;
+  }
+  if (a !== b) return a < b ? -1 : 1;
   return 0;
 }
 
@@ -216,6 +227,7 @@ export function unboundSessionRule(session, now, config, makeId) {
     detail,
     source: "derived",
     sessionId: session.id,
+    clearCondition: "session.taskId is set or session reaches a terminal status",
     createdAt: nowIso,
     updatedAt: nowIso,
     dedupeKey: computeAttentionDedupeKey({
@@ -423,7 +435,7 @@ export class AttentionEngine {
 
     collected.sort(compareByPriority);
     this.projection.apply(collected);
-    return collected;
+    return this.projection.getAll();
   }
 
   /**

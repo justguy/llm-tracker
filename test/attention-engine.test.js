@@ -137,6 +137,22 @@ test("compareByPriority tie-breaks by createdAt ASC then dedupeKey ASC", () => {
   );
 });
 
+test("compareByPriority treats ISO numeric offsets chronologically", () => {
+  const earlier = stubItem("blocked", {
+    createdAt: "2026-05-24T10:00:00+02:00",
+    dedupeKey: "blocked|p|earlier|||",
+  });
+  const later = stubItem("blocked", {
+    createdAt: "2026-05-24T09:00:00Z",
+    dedupeKey: "blocked|p|later|||",
+  });
+  const sorted = [later, earlier].sort(compareByPriority);
+  assert.deepEqual(sorted.map((i) => i.dedupeKey), [
+    "blocked|p|earlier|||",
+    "blocked|p|later|||",
+  ]);
+});
+
 // ---------------------------------------------------------------------------
 // AttentionProjection
 // ---------------------------------------------------------------------------
@@ -310,6 +326,21 @@ test("AttentionEngine clears the unbound item on the next compute when the sessi
   assert.equal(proj.size(), 0);
 });
 
+test("AttentionEngine keeps item id and createdAt stable for the same dedupeKey", () => {
+  const engine = new AttentionEngine({
+    now: () => clockAfterMinutes(10),
+    makeId: testMakeId,
+  });
+  const first = engine.compute({ sessions: [makeSession()] })[0];
+  engine.now = () => clockAfterMinutes(11);
+  const second = engine.compute({ sessions: [makeSession()] })[0];
+
+  assert.equal(second.dedupeKey, first.dedupeKey);
+  assert.equal(second.id, first.id);
+  assert.equal(second.createdAt, first.createdAt);
+  assert.equal(second.updatedAt, clockAfterMinutes(11).toISOString());
+});
+
 test("AttentionEngine.compute sorts emitted items by §8A.3 priority", () => {
   // Use a stub rule for `blocked` to verify cross-kind ordering inside
   // compute() itself (not just via the comparator).
@@ -428,4 +459,11 @@ test("AttentionEngine swallows rule exceptions and continues with other rules", 
   assert.equal(items.length, 1);
   assert.equal(items[0].kind, "unbound_session");
   assert.ok(logs.some((m) => /blocked/.test(m)));
+});
+
+test("attention package root exports the concrete engine and projection", async () => {
+  const mod = await import("../hub/attention/index.js");
+  assert.equal(mod.AttentionEngine, AttentionEngine);
+  assert.equal(mod.AttentionProjection, AttentionProjection);
+  assert.equal(typeof mod.computeAttentionDedupeKey, "function");
 });
