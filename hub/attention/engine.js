@@ -282,12 +282,30 @@ function describeAge(mins) {
  */
 
 /**
+ * @typedef {object} AttentionChangePayload
+ * @property {AttentionItem[]} items   the freshly-computed, sorted active set
+ * @property {"global"|"project"} scope SH-4-09 default is "global"; per-project plumbing is a follow-up
+ * @property {{
+ *   added: AttentionItem[],
+ *   removed: AttentionItem[],
+ *   ackChanged: AttentionItem[],
+ *   snoozeChanged: AttentionItem[],
+ *   severityChanged: AttentionItem[],
+ * }} changes diff vs the previous compute()'s active set, keyed by dedupeKey
+ */
+
+/**
  * @typedef {object} AttentionEngineDeps
  * @property {AttentionProjection} [projection]    Drop-in projection; defaults to a fresh `new AttentionProjection()`.
  * @property {object}              [config]        Workspace config. Reads `config.untaskedSessions.{unboundAttentionAfterMinutes, unboundAutoArchiveAfterHours}`.
  * @property {() => Date}          [now]           Time source (injectable for tests). Defaults to `() => new Date()`.
  * @property {(prefix: string) => string} [makeId] ID factory used for new `AttentionItem.id`. Defaults to a per-engine counter — pass `hub/runtime/ids.js#makeRuntimeId` in production.
  * @property {{ warn?: Function, error?: Function }} [logger]
+ * @property {(payload: AttentionChangePayload) => void} [onChange]
+ *   SH-4-09: invoked at the end of `compute()` IFF the new set differs from
+ *   the previous set in a user-visible way (item created / cleared / ack-ed
+ *   / snoozed / severity-flipped). Defaults to a no-op. A future runtime
+ *   startup-glue task will wire this to `RuntimeBroadcaster.broadcastAttention`.
  */
 
 /**
@@ -309,6 +327,17 @@ export class AttentionEngine {
     this.now = typeof deps.now === "function" ? deps.now : () => new Date();
     this.makeId = typeof deps.makeId === "function" ? deps.makeId : defaultMakeId();
     this.logger = deps.logger || null;
+    this.onChange = typeof deps.onChange === "function" ? deps.onChange : null;
+
+    /**
+     * SH-4-09 prior-tick snapshot keyed by dedupeKey. Tracks just the fields
+     * the diff needs (`severity`, `acknowledgedAt`, `snoozedUntil`,
+     * `clearedAt`) plus a back-pointer to the prior item so we can include
+     * it in `changes.removed`.
+     *
+     * @type {Map<string, { severity: string, acknowledgedAt?: string, snoozedUntil?: string, clearedAt?: string, item: AttentionItem }>}
+     */
+    this._prior = new Map();
 
     /** @type {Map<AttentionKind, AttentionRuleFn | null>} */
     this._rules = new Map();
@@ -435,7 +464,103 @@ export class AttentionEngine {
 
     collected.sort(compareByPriority);
     this.projection.apply(collected);
-    return this.projection.getAll();
+    const finalItems = this.projection.getAll();
+    this.#emitChangesIfAny(finalItems);
+    return finalItems;
+  }
+
+  /**
+   * SH-4-09: diff `nextItems` against `this._prior`; if any of the DoD-listed
+   * user-visible changes is present (created / cleared / ack-ed / snoozed /
+   * severity flipped), invoke `this.onChange(payload)`. Always updates
+   * `_prior` so the next call diffs against the right baseline. Silent ticks
+   * (no qualifying change) MUST NOT fire `onChange` per the DoD.
+   *
+   * @param {AttentionItem[]} nextItems
+   */
+  #emitChangesIfAny(nextItems) {
+    /** @type {AttentionItem[]} */
+    const added = [];
+    /** @type {AttentionItem[]} */
+    const removed = [];
+    /** @type {AttentionItem[]} */
+    const ackChanged = [];
+    /** @type {AttentionItem[]} */
+    const snoozeChanged = [];
+    /** @type {AttentionItem[]} */
+    const severityChanged = [];
+
+    /** @type {Map<string, { severity: string, acknowledgedAt?: string, snoozedUntil?: string, clearedAt?: string, item: AttentionItem }>} */
+    const nextPrior = new Map();
+    /** @type {Set<string>} */
+    const seenInNext = new Set();
+
+    for (const item of nextItems) {
+      const key = item.dedupeKey;
+      seenInNext.add(key);
+      const snap = {
+        severity: item.severity,
+        acknowledgedAt: item.acknowledgedAt,
+        snoozedUntil: item.snoozedUntil,
+        clearedAt: item.clearedAt,
+        item,
+      };
+      nextPrior.set(key, snap);
+
+      const prev = this._prior.get(key);
+      if (!prev) {
+        added.push(item);
+        // A newly-arrived item that's already ack'd / snoozed / cleared still
+        // counts as a "created" event only (avoid double-firing).
+        continue;
+      }
+      if (prev.severity !== item.severity) {
+        severityChanged.push(item);
+      }
+      if (prev.acknowledgedAt === undefined && item.acknowledgedAt !== undefined) {
+        ackChanged.push(item);
+      }
+      if (prev.snoozedUntil !== item.snoozedUntil) {
+        snoozeChanged.push(item);
+      }
+      // `clearedAt` transition (undefined -> set) on a still-present item
+      // counts as "cleared" per the DoD ("explicit clearedAt set; either
+      // condition").
+      if (prev.clearedAt === undefined && item.clearedAt !== undefined) {
+        removed.push(item);
+      }
+    }
+
+    for (const [key, prev] of this._prior) {
+      if (!seenInNext.has(key)) {
+        removed.push(prev.item);
+      }
+    }
+
+    this._prior = nextPrior;
+
+    const fired =
+      added.length > 0 ||
+      removed.length > 0 ||
+      ackChanged.length > 0 ||
+      snoozeChanged.length > 0 ||
+      severityChanged.length > 0;
+    if (!fired) return;
+    if (typeof this.onChange !== "function") return;
+
+    try {
+      this.onChange({
+        items: nextItems,
+        scope: "global",
+        changes: { added, removed, ackChanged, snoozeChanged, severityChanged },
+      });
+    } catch (err) {
+      if (this.logger && typeof this.logger.error === "function") {
+        this.logger.error(
+          `AttentionEngine.onChange threw; suppressing: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
   }
 
   /**
