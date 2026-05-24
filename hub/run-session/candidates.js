@@ -48,15 +48,24 @@ export const NON_RUNNABLE_STATUSES = Object.freeze([
 ]);
 const ACTIVE_JOB_STATUSES = new Set([
   "queued",
+  "starting",
   "running",
   "waiting_for_approval",
   "blocked",
+  "verifying",
 ]);
 const ACTIVE_SESSION_STATUSES = new Set([
+  "starting",
+  "active",
   "running",
+  "idle",
   "waiting_for_human",
   "waiting_for_approval",
   "quiet",
+  "context_high",
+  "stopping",
+  "resuming",
+  "unknown",
   "not_responding",
   "blocked",
 ]);
@@ -112,7 +121,7 @@ export function scoreRunCandidates(input) {
   const highPriorityIds = new Set(options.highPriorityIds ?? DEFAULT_HIGH_PRIORITY_IDS);
 
   const tasksById = new Map(tasks.map((t) => [t.id, t]));
-  const activeJobByTaskId = buildActiveJobByTaskId(jobs);
+  const activeJobByTaskId = buildActiveJobByTaskId(jobs, projectSlug);
   const activeWorktrees = buildActiveSessionWorktrees(sessions);
 
   const candidates = [];
@@ -129,7 +138,7 @@ export function scoreRunCandidates(input) {
     candidates.push({
       projectSlug,
       taskId: task.id,
-      laneId: task.swimlaneId ?? task.laneId,
+      laneId: taskLaneId(task),
       score,
       reasons,
       penalties,
@@ -150,12 +159,14 @@ function isRunnable(task) {
   return !NON_RUNNABLE_STATUSES.includes(task.status);
 }
 
-function buildActiveJobByTaskId(jobs) {
+function buildActiveJobByTaskId(jobs, projectSlug) {
   const map = new Map();
   for (const job of jobs) {
     if (!job || typeof job !== "object") continue;
     if (typeof job.taskId !== "string") continue;
     if (!ACTIVE_JOB_STATUSES.has(job.status)) continue;
+    const jobProjectSlug = job.projectSlug ?? job.project?.slug;
+    if (typeof jobProjectSlug === "string" && jobProjectSlug !== projectSlug) continue;
     if (!map.has(job.taskId)) map.set(job.taskId, job);
   }
   return map;
@@ -181,14 +192,14 @@ function scoreTask(task, ctx) {
   const penalties = [];
   let score = 0;
 
-  const laneOfTask = task.swimlaneId ?? task.laneId;
+  const laneOfTask = taskLaneId(task);
   if (ctx.laneId && laneOfTask === ctx.laneId) {
     score += RUN_CANDIDATE_WEIGHTS.inSelectedLane;
     reasons.push(`+${RUN_CANDIDATE_WEIGHTS.inSelectedLane} in selected lane "${ctx.laneId}"`);
   }
 
-  const depsSatisfied = areDependenciesSatisfied(task, ctx.tasksById);
-  if (depsSatisfied) {
+  const blockingDeps = blockingDependencyIds(task, ctx.tasksById);
+  if (blockingDeps.length === 0) {
     score += RUN_CANDIDATE_WEIGHTS.dependenciesSatisfied;
     reasons.push(`+${RUN_CANDIDATE_WEIGHTS.dependenciesSatisfied} dependencies satisfied`);
   }
@@ -198,9 +209,10 @@ function scoreTask(task, ctx) {
     reasons.push(`+${RUN_CANDIDATE_WEIGHTS.nextOrRecommended} marked next/recommended`);
   }
 
-  if (typeof task.priorityId === "string" && ctx.highPriorityIds.has(task.priorityId)) {
+  const priorityId = taskPriorityId(task);
+  if (typeof priorityId === "string" && ctx.highPriorityIds.has(priorityId)) {
     score += RUN_CANDIDATE_WEIGHTS.highPriority;
-    reasons.push(`+${RUN_CANDIDATE_WEIGHTS.highPriority} priority ${task.priorityId}`);
+    reasons.push(`+${RUN_CANDIDATE_WEIGHTS.highPriority} priority ${priorityId}`);
   }
 
   if (hasRepoMetadata(task)) {
@@ -221,9 +233,11 @@ function scoreTask(task, ctx) {
     );
   }
 
-  if (isBlocked(task)) {
+  if (isBlocked(task) || blockingDeps.length > 0) {
     score += RUN_CANDIDATE_WEIGHTS.blocked;
-    penalties.push(`${RUN_CANDIDATE_WEIGHTS.blocked} task is blocked`);
+    const detail =
+      blockingDeps.length > 0 ? ` blocked by ${blockingDeps.join(", ")}` : "";
+    penalties.push(`${RUN_CANDIDATE_WEIGHTS.blocked} task is blocked${detail}`);
   }
 
   const sharedWorktreeMatch = findSharedWorktree(task, ctx.activeWorktrees);
@@ -245,14 +259,22 @@ function scoreTask(task, ctx) {
   return { score, reasons, penalties };
 }
 
-function areDependenciesSatisfied(task, tasksById) {
+function blockingDependencyIds(task, tasksById) {
   const deps = Array.isArray(task.dependencies) ? task.dependencies : [];
+  const blocking = [];
   for (const depId of deps) {
     const dep = tasksById.get(depId);
-    if (!dep) return false; // unresolved/unknown dependency -> treat as unsatisfied
-    if (dep.status !== "complete") return false;
+    if (!dep || dep.status !== "complete") blocking.push(depId);
   }
-  return true;
+  return blocking;
+}
+
+function taskLaneId(task) {
+  return task.placement?.swimlaneId ?? task.swimlaneId ?? task.laneId;
+}
+
+function taskPriorityId(task) {
+  return task.placement?.priorityId ?? task.priorityId;
 }
 
 function hasRepoMetadata(task) {

@@ -10,13 +10,17 @@ import {
 } from "../hub/run-session/candidates.js";
 
 function task(overrides = {}) {
+  const placement = overrides.placement ?? {
+    priorityId: overrides.priorityId ?? "p2",
+    swimlaneId: overrides.swimlaneId ?? overrides.laneId ?? "lane-default",
+  };
+  const { priorityId, swimlaneId, laneId, ...rest } = overrides;
   return {
     id: "t-1",
     status: "not_started",
-    priorityId: "p2",
-    swimlaneId: "lane-default",
+    placement,
     dependencies: [],
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -105,14 +109,15 @@ test("dependencies not satisfied if any dep is unresolved or unknown", () => {
     options: PROJECT,
   });
   const child = result.find((c) => c.taskId === "child");
-  assert.equal(child.score, 0); // no deps-satisfied bonus
+  assert.equal(child.score, -80); // no deps bonus, and dependency-derived blocked penalty
   assert.equal(child.reasons.find((r) => r.includes("dependencies satisfied")), undefined);
+  assert.ok(child.penalties.some((p) => p.includes("-80") && p.includes("pending")));
 
   const result2 = scoreRunCandidates({
     tasks: [task({ id: "orphan", dependencies: ["does-not-exist"] })],
     options: PROJECT,
   });
-  assert.equal(result2[0].score, 0);
+  assert.equal(result2[0].score, -80);
 });
 
 test("+60 for recommendedTaskIds", () => {
@@ -191,6 +196,24 @@ test("-100 when task has an active job (queued/running/etc.)", () => {
   assert.ok(c.penalties.some((p) => p.includes("-100") && p.includes("job_a")));
 });
 
+test("active job penalty covers canonical active states and ignores other projects", () => {
+  for (const status of ["queued", "starting", "running", "blocked", "verifying"]) {
+    const [c] = scoreRunCandidates({
+      tasks: [task({ id: "t-1" })],
+      jobs: [{ id: `job_${status}`, projectSlug: "proj", taskId: "t-1", status }],
+      options: PROJECT,
+    });
+    assert.equal(c.score, 80 - 100);
+  }
+
+  const [otherProject] = scoreRunCandidates({
+    tasks: [task({ id: "t-1" })],
+    jobs: [{ id: "job_other", projectSlug: "other", taskId: "t-1", status: "running" }],
+    options: PROJECT,
+  });
+  assert.equal(otherProject.score, 80);
+});
+
 test("completed jobs do not trigger active-job penalty", () => {
   const [c] = scoreRunCandidates({
     tasks: [task({ id: "t-1" })],
@@ -227,7 +250,7 @@ test("-50 when an active session shares the same worktree", () => {
         repos: { primary: { root: "/repo", worktree: "/wt/feat", allowed_paths: ["src/**"] } },
       }),
     ],
-    sessions: [{ id: "ses_x", worktreePath: "/wt/feat", status: "running" }],
+    sessions: [{ id: "ses_x", worktreePath: "/wt/feat", status: "active" }],
     options: PROJECT,
   });
   // +80 deps + +30 repo metadata - 50 shared worktree = 60 (no risky penalty: allowed_paths set)

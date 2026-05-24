@@ -146,6 +146,12 @@ test("update merges patch and re-validates the v0.7 invariants", () => {
   assert.equal(next.expiresAt, draft.expiresAt);
   assert.equal(next.profileId, "fast");
   assert.equal(next.warnings.length, 1);
+  assert.equal(Object.isFrozen(next.warnings), true);
+  assert.throws(
+    () => next.warnings.push({ kind: "missing_repo_metadata", severity: "medium" }),
+    /Cannot|read only|not extensible/,
+  );
+  assert.equal(store.get(draft.id).warnings.length, 1);
   assert.equal(Object.isFrozen(next), true);
 });
 
@@ -240,6 +246,20 @@ test("warnings array is always present and defensively copied", () => {
   const draft = store.create(input);
   input.warnings.push({ kind: "verify_pack_empty", severity: "medium" });
   assert.equal(draft.warnings.length, 1);
+  assert.equal(Object.isFrozen(draft.warnings), true);
+  assert.equal(Object.isFrozen(draft.warnings[0]), true);
+  assert.throws(
+    () => draft.warnings.push({ kind: "verify_pack_empty", severity: "medium" }),
+    /Cannot|read only|not extensible/,
+  );
+  assert.throws(
+    () => {
+      draft.warnings[0].severity = "high";
+    },
+    /Cannot|read only|not extensible/,
+  );
+  assert.equal(store.get(draft.id).warnings.length, 1);
+  assert.equal(store.get(draft.id).warnings[0].severity, "medium");
 
   const noWarnings = store.create({ source: "hub_run", mode: "untasked" });
   assert.deepEqual(noWarnings.warnings, []);

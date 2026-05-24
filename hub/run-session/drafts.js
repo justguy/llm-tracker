@@ -78,7 +78,7 @@ export function createDraftStore(options = {}) {
     const normalized = validateDraftInput(input);
     const id = makeDraftId();
     const createdMs = now();
-    const draft = Object.freeze({
+    const draft = freezeDraft({
       ...normalized,
       id,
       createdAt: new Date(createdMs).toISOString(),
@@ -116,7 +116,7 @@ export function createDraftStore(options = {}) {
       throw new TypeError("update: id/createdAt/expiresAt are immutable");
     }
     const merged = validateDraftInput({ ...existing, ...patch });
-    const next = Object.freeze({
+    const next = freezeDraft({
       ...merged,
       id: existing.id,
       createdAt: existing.createdAt,
@@ -198,7 +198,32 @@ function validateDraftInput(input) {
     mode,
     taskId: mode === "task_backed" ? rawTaskId : null,
     taskLocked,
-    warnings: Array.isArray(input.warnings) ? [...input.warnings] : [],
+    warnings: Array.isArray(input.warnings) ? cloneDraftValue(input.warnings) : [],
   };
   return normalized;
+}
+
+function isPlainObject(value) {
+  return Object.prototype.toString.call(value) === "[object Object]";
+}
+
+function cloneDraftValue(value) {
+  if (Array.isArray(value)) return value.map((item) => cloneDraftValue(item));
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, cloneDraftValue(child)]),
+    );
+  }
+  return value;
+}
+
+function freezeDraft(value) {
+  return deepFreeze(cloneDraftValue(value));
+}
+
+function deepFreeze(value) {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) return value;
+  if (Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
 }
