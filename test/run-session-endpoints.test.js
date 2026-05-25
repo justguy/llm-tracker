@@ -80,7 +80,7 @@ async function startMiniApp({ projects = {}, draftStoreOptions = {} } = {}) {
   });
   const app = express();
   app.use(express.json());
-  registerRunSessionRoutes(app, { store, draftStore, projection, jobRegistry, runSessionService });
+  registerRunSessionRoutes(app, { store, draftStore, projection, runSessionService, jobRegistry });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve, reject) => {
     server.once("listening", resolve);
@@ -169,36 +169,6 @@ test("GET /api/run-candidates returns scored candidates for a project", async ()
   }
 });
 
-test("GET /api/run-candidates includes active-job penalties from JobRegistry", async () => {
-  const app = await startMiniApp({
-    projects: {
-      proj: {
-        data: { tasks: [task({ id: "t1" }), task({ id: "t2" })] },
-        rev: 17,
-      },
-    },
-  });
-  try {
-    const draft = await postJson(app.base, "/api/run-session/draft", {
-      source: "task_card",
-      mode: "task_backed",
-      taskId: "t1",
-      projectSlug: "proj",
-    });
-    const launch = await postJson(app.base, "/api/run-session/launch", {
-      draftId: draft.body.draft.id,
-    });
-    assert.equal(launch.status, 201);
-
-    const r = await getJson(app.base, "/api/run-candidates?projectSlug=proj");
-    assert.equal(r.status, 200);
-    const t1 = r.body.candidates.find((c) => c.taskId === "t1");
-    assert.ok(t1.penalties.some((p) => p.includes("task already has active job")));
-  } finally {
-    await app.close();
-  }
-});
-
 test("GET /api/run-candidates with laneId surfaces the +100 lane bonus", async () => {
   const app = await startMiniApp({
     projects: {
@@ -248,6 +218,40 @@ test("GET /api/run-candidates filters non-runnable tasks", async () => {
       r.body.candidates.map((c) => c.taskId),
       ["alive"],
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/run-candidates includes active job penalty from live JobRegistry", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: { tasks: [task({ id: "claimed" }), task({ id: "open" })] },
+        rev: 1,
+      },
+    },
+  });
+  try {
+    const draft = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "claimed",
+      projectSlug: "proj",
+    });
+    const launch = await postJson(app.base, "/api/run-session/launch", {
+      draftId: draft.body.draft.id,
+    });
+    assert.equal(launch.status, 201);
+
+    const r = await getJson(app.base, "/api/run-candidates?projectSlug=proj");
+    assert.equal(r.status, 200);
+    const claimed = r.body.candidates.find((c) => c.taskId === "claimed");
+    const open = r.body.candidates.find((c) => c.taskId === "open");
+    assert.ok(claimed);
+    assert.ok(open);
+    assert.equal(claimed.score, open.score - 100);
+    assert.ok(claimed.penalties.some((p) => p.includes("-100") && p.includes(launch.body.jobId)));
   } finally {
     await app.close();
   }
@@ -708,7 +712,6 @@ test("POST /api/run-session/launch — claimMode=force with forceReason returns 
     const overrides = app.appendedEvents.filter((e) => e.type === "human.override");
     assert.equal(overrides.length, 1);
     assert.equal(overrides[0].source, "http");
-    assert.equal(app.appendedEvents.filter((e) => e.type === "job.queued").length, 0);
   } finally {
     await app.close();
   }

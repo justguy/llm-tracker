@@ -93,6 +93,19 @@ test("GET /api/attention: filters project scope when projectSlug is supplied", {
   }
 });
 
+test("GET /api/attention: project scope requires projectSlug", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp();
+  try {
+    const res = await fetch(`${env.base}/api/attention?scope=project`);
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.error.code, "INVALID_QUERY");
+    assert.match(body.error.message, /projectSlug/);
+  } finally {
+    await env.close();
+  }
+});
+
 test("GET /api/attention/:id: returns one item or 404", { timeout: TEST_TIMEOUT }, async () => {
   const item = { id: makeRuntimeId("att"), kind: "blocked" };
   const missing = makeRuntimeId("att");

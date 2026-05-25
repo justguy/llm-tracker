@@ -94,6 +94,25 @@ test("SessionTokenStore.revoke: invalidates every outstanding token for the sess
   assert.equal(store.validate(b1.token).ok, true);
 });
 
+test("SessionTokenStore.revoke: can preserve one token hash during rotation commit", () => {
+  const store = new SessionTokenStore();
+  const old = store.issue({ sessionId: "ses_a" });
+  const fresh = store.issue({ sessionId: "ses_a" });
+  assert.equal(store.revoke("ses_a", { exceptTokenHash: fresh.tokenHash }), 1);
+  assert.equal(store.validate(old.token).reason, TOKEN_REJECT_REASONS.UNKNOWN);
+  assert.equal(store.validate(fresh.token).ok, true);
+});
+
+test("SessionTokenStore.revokeTokenHash: invalidates only the named token", () => {
+  const store = new SessionTokenStore();
+  const old = store.issue({ sessionId: "ses_a" });
+  const fresh = store.issue({ sessionId: "ses_a" });
+  assert.equal(store.revokeTokenHash(fresh.tokenHash), true);
+  assert.equal(store.validate(fresh.token).reason, TOKEN_REJECT_REASONS.UNKNOWN);
+  assert.equal(store.validate(old.token).ok, true);
+  assert.equal(store.revokeTokenHash(fresh.tokenHash), false);
+});
+
 test("SessionTokenStore.purgeExpired: bulk cleanup", () => {
   let nowDate = new Date("2026-05-24T12:00:00Z");
   const store = new SessionTokenStore({ now: () => nowDate });

@@ -288,6 +288,52 @@ test(
 );
 
 test(
+  "attention.cleared suppresses re-raise while the source condition remains active",
+  () => {
+    const calls = [];
+    const engine = new AttentionEngine({
+      now: () => clockAfterMinutes(5),
+      makeId: testMakeId,
+      onChange: (p) => calls.push(p),
+    });
+    engine.registerRule("blocked", makeProgrammableBlockedRule([
+      { severity: "medium" },
+      { severity: "medium" },
+      null,
+      { severity: "medium" },
+    ]));
+
+    const [initial] = engine.compute({ sessions: [] });
+    assert.equal(
+      initial.dedupeKey,
+      computeAttentionDedupeKey({ kind: "blocked", sessionId: "ses_blocked" }),
+    );
+    assert.equal(
+      engine.applyRuntimeEvent({
+        type: "attention.cleared",
+        attentionItemId: initial.id,
+        dedupeKey: initial.dedupeKey,
+        clearedAt: "2026-05-24T12:06:00.000Z",
+        ts: "2026-05-24T12:06:00.000Z",
+      }),
+      true,
+    );
+    assert.equal(engine.getAll()[0].clearedAt, "2026-05-24T12:06:00.000Z");
+    assert.equal(calls.at(-1).changes.removed.length, 1);
+
+    const stillActive = engine.compute({ sessions: [] });
+    assert.deepEqual(stillActive, [], "human-cleared item remains hidden while source still emits it");
+
+    const sourceResolved = engine.compute({ sessions: [] });
+    assert.deepEqual(sourceResolved, [], "overlay is dropped once the source condition clears");
+
+    const reraised = engine.compute({ sessions: [] });
+    assert.equal(reraised.length, 1, "new source occurrence can surface after real clear");
+    assert.equal(reraised[0].clearedAt, undefined);
+  },
+);
+
+test(
   "default onChange is a no-op (engine without callback works as before)",
   () => {
     const engine = new AttentionEngine({

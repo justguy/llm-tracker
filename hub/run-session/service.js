@@ -57,8 +57,10 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }
 
-function packWithItemsOrNull(pack) {
-  return pack && Array.isArray(pack.items) && pack.items.length > 0 ? pack : null;
+function usableVerifyPack(pack) {
+  return pack && typeof pack === "object" && Array.isArray(pack.items) && pack.items.length > 0
+    ? pack
+    : null;
 }
 
 /**
@@ -109,7 +111,7 @@ function jobKindForProfile(profileId) {
  * @property {{ get(slug: string): { data?: object; rev?: number } | null }} store
  * @property {{ get(id: string): object | null }} draftStore
  * @property {{ sessions: Map<string, object>; toSnapshots(): object }} projection
- * @property {{ list(): object[]; create(input: object): Promise<{ jobId: string; rev: number; eventId: string; job: object | null }>; cancel(jobId: string, opts?: object): Promise<object> }} jobRegistry
+ * @property {{ list(): object[]; create(input: object): Promise<{ jobId: string; rev: number; eventId: string; job: object | null }> }} jobRegistry
  * @property {{ append(event: object): Promise<{ rev: number; eventId: string }> }} runtimeStore
  * @property {(prefix: string) => string} makeRuntimeId
  * @property {(event: object) => true} validateRuntimeEvent
@@ -170,13 +172,8 @@ export class RunSessionService {
     if (!projection || !(projection.sessions instanceof Map)) {
       throw new Error("RunSessionService: projection (with sessions Map) required");
     }
-    if (
-      !jobRegistry ||
-      typeof jobRegistry.list !== "function" ||
-      typeof jobRegistry.create !== "function" ||
-      typeof jobRegistry.cancel !== "function"
-    ) {
-      throw new Error("RunSessionService: jobRegistry (with list + create + cancel) required");
+    if (!jobRegistry || typeof jobRegistry.list !== "function" || typeof jobRegistry.create !== "function") {
+      throw new Error("RunSessionService: jobRegistry (with list + create) required");
     }
     if (!runtimeStore || typeof runtimeStore.append !== "function") {
       throw new Error("RunSessionService: runtimeStore (with append) required");
@@ -337,8 +334,8 @@ export class RunSessionService {
       });
     }
 
-    // Forced claim: append the override event before cancelling the active job
-    // and creating the replacement so the audit record precedes mutations.
+    // Forced claim: append the override event before creating session/job so
+    // the audit record precedes the new records in the log.
     if (claim.mode === "forced" && claim.overrideEvent) {
       const { source: _claimSource, ...overrideRest } = claim.overrideEvent;
       // task-claim emits source="system" because it lacks transport context;
@@ -354,30 +351,36 @@ export class RunSessionService {
       this.validateRuntimeEvent(overrideForValidation);
       const { id: _overrideId, ...overrideForAppend } = overrideForValidation;
       await this.runtimeStore.append(overrideForAppend);
-      if (isNonEmptyString(claim.activeJobId)) {
-        await this.jobRegistry.cancel(claim.activeJobId, {
-          source: "http",
-          summary: `pre-empted by forced launch for ${draft.projectSlug}/${draft.taskId}`,
-        });
-      }
     }
 
-    // Compose verify pack now that we have project + task. Empty packs are
-    // legal because task.verify is optional; JobRegistry persists only
-    // non-empty packs.
-    const verifyPack = packWithItemsOrNull(stampVerifyPack({
+    // Compose verify pack now that we have project + task. The helper
+    // tolerates a tracker shape with only meta.rev; SH-5-04 will widen this
+    // to include workspace/profile sources.
+    const verifyPack = stampVerifyPack({
       task,
       tracker: { meta: { rev: currentTrackerRev } },
       stampedAt: this.now(),
-    }));
+    });
+    const jobVerifyPack = usableVerifyPack(verifyPack);
 
     // Create session.
     const { sessionId, eventForAppend } = this.#buildSessionStartedEvent(draft, { withTaskId: true });
     await this.runtimeStore.append(eventForAppend);
 
-    // Create job. Joined launches attach as successor and queue behind the
-    // active job. Forced launches cancel the predecessor above, then start a
-    // fresh running job.
+    // Force is a pre-emption: the old active job is terminated first, then the
+    // new job starts without a predecessor. Join is the only mode that queues
+    // behind an active predecessor.
+    if (claim.mode === "forced" && isNonEmptyString(claim.activeJobId)) {
+      await this.jobRegistry.cancel(claim.activeJobId, {
+        source: "http",
+        summary: "preempted by forced Run Session launch",
+      });
+    }
+
+    // Create job. Joined launches attach as predecessor so the registry emits
+    // job.queued instead of job.started. Non-empty VerifyPacks ride through to
+    // the projection (SH-5-04 DoD line 3); tasks with no verify plan launch
+    // without a pack because task.verify is optional.
     const predecessor =
       claim.mode === "joined" && isNonEmptyString(claim.activeJobId)
         ? claim.activeJobId
@@ -390,7 +393,7 @@ export class RunSessionService {
       kind: jobKindForProfile(draft.profileId),
       source: "http",
       ...(predecessor ? { predecessorJobId: predecessor } : {}),
-      ...(verifyPack ? { verifyPack } : {}),
+      ...(jobVerifyPack ? { verifyPack: jobVerifyPack } : {}),
     });
 
     const contextPackRef = await this.#buildContextPackSafely({
@@ -536,19 +539,21 @@ export class RunSessionService {
       this.validateRuntimeEvent(overrideForValidation);
       const { id: _overrideId, ...overrideForAppend } = overrideForValidation;
       await this.runtimeStore.append(overrideForAppend);
-      if (isNonEmptyString(claim.activeJobId)) {
-        await this.jobRegistry.cancel(claim.activeJobId, {
-          source: "http",
-          summary: `pre-empted by forced attach for ${draft.projectSlug}/${attachTaskId}`,
-        });
-      }
     }
 
-    const verifyPack = packWithItemsOrNull(stampVerifyPack({
+    const verifyPack = stampVerifyPack({
       task,
       tracker: { meta: { rev: currentTrackerRev } },
       stampedAt: this.now(),
-    }));
+    });
+    const jobVerifyPack = usableVerifyPack(verifyPack);
+
+    if (claim.mode === "forced" && isNonEmptyString(claim.activeJobId)) {
+      await this.jobRegistry.cancel(claim.activeJobId, {
+        source: "http",
+        summary: "preempted by forced Run Session launch",
+      });
+    }
 
     const predecessor =
       claim.mode === "joined" && isNonEmptyString(claim.activeJobId)
@@ -562,7 +567,7 @@ export class RunSessionService {
       kind: jobKindForProfile(draft.profileId),
       source: "http",
       ...(predecessor ? { predecessorJobId: predecessor } : {}),
-      ...(verifyPack ? { verifyPack } : {}),
+      ...(jobVerifyPack ? { verifyPack: jobVerifyPack } : {}),
     });
 
     const contextPackRef = await this.#buildContextPackSafely({

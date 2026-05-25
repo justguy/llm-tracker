@@ -341,9 +341,6 @@ test("task_backed + force with reason returns mode=created and appends human.ove
     assert.equal(r.ok, true);
     assert.equal(r.mode, "created");
     assert.equal(r.taskClaimed, true);
-    assert.equal(h.jobRegistry.get(seed.jobId).status, "cancelled");
-    assert.equal(h.jobRegistry.get(r.jobId).status, "running");
-    assert.equal(h.jobRegistry.get(r.jobId).predecessorJobId, undefined);
 
     const overrides = h.appendedEvents.filter((e) => e.type === "human.override");
     assert.equal(overrides.length, 1);
@@ -352,11 +349,16 @@ test("task_backed + force with reason returns mode=created and appends human.ove
     assert.equal(overrides[0].context.preemptedJobId, seed.jobId);
     assert.equal(overrides[0].reason, "operator needs lane");
     assert.equal(overrides[0].user, "u_alice");
-    assert.equal(h.appendedEvents.filter((e) => e.type === "job.queued").length, 0);
-    assert.equal(
-      h.appendedEvents.some((e) => e.type === "job.completed" && e.jobId === seed.jobId && e.status === "cancelled"),
-      true,
-    );
+
+    const cancelled = h.appendedEvents.filter((e) => e.type === "job.completed" && e.jobId === seed.jobId);
+    assert.equal(cancelled.length, 1);
+    assert.equal(cancelled[0].status, "cancelled");
+    assert.equal(h.projection.jobs.get(seed.jobId).status, "cancelled");
+
+    const started = h.appendedEvents.filter((e) => e.type === "job.started" && e.jobId === r.jobId);
+    assert.equal(started.length, 1, "forced replacement job starts immediately");
+    assert.equal(h.projection.jobs.get(r.jobId).status, "running");
+    assert.equal(h.projection.jobs.get(r.jobId).predecessorJobId, undefined);
   } finally {
     h.close();
   }
@@ -398,11 +400,11 @@ test("task_backed: verifyPack.items mirrors task.verify.items and is frozen", as
   }
 });
 
-test("task_backed: task.verify omitted still launches and does not persist an empty verifyPack", async () => {
-  const noVerifyTask = task({ id: "t-no-verify", verify: undefined });
+test("task_backed: task without verify launches and omits verifyPack", async () => {
+  const noVerifyTask = task({ id: "t-no-verify" });
   delete noVerifyTask.verify;
   const h = await makeHarness({
-    projects: { proj: { data: { tasks: [noVerifyTask] }, rev: 3 } },
+    projects: { proj: { data: { tasks: [noVerifyTask] }, rev: 4 } },
   });
   try {
     const draft = makeDraft(h, {
@@ -415,7 +417,7 @@ test("task_backed: task.verify omitted still launches and does not persist an em
     assert.equal(r.ok, true);
     assert.equal(r.mode, "created");
     assert.equal(r.verifyPack, null);
-    assert.equal(h.jobRegistry.get(r.jobId).verifyPack, undefined);
+    assert.equal(h.projection.jobs.get(r.jobId).verifyPack, undefined);
   } finally {
     h.close();
   }
@@ -600,6 +602,86 @@ test("attach_existing: task collision (active job on same task) returns task_cla
     const r = await h.service.launch({ draftId: attachDraft.id, claimMode: "fail_if_active" });
     assert.equal(r.ok, false);
     assert.equal(r.error, "task_claim_conflict");
+  } finally {
+    h.close();
+  }
+});
+
+test("attach_existing: force with reason preempts active task job and starts replacement immediately", async () => {
+  const h = await makeHarness({
+    projects: { proj: { data: { tasks: [task({ id: "t-force" })] }, rev: 0 } },
+  });
+  try {
+    const ownerDraft = makeDraft(h, {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t-force",
+      projectSlug: "proj",
+    });
+    const owner = await h.service.launch({ draftId: ownerDraft.id });
+    assert.equal(owner.ok, true);
+
+    const stranger = await seedSession(h, {
+      source: "global_new_session",
+      mode: "untasked",
+    });
+    const attachDraft = makeDraft(h, {
+      source: "attach",
+      mode: "attach_existing",
+      attachExistingSessionId: stranger,
+      projectSlug: "proj",
+      attachTaskId: "t-force",
+    });
+
+    const r = await h.service.launch({
+      draftId: attachDraft.id,
+      claimMode: "force",
+      forceReason: "operator needs attach",
+      forceUser: "u_alice",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.mode, "attached");
+    assert.equal(r.sessionId, stranger);
+    assert.equal(r.taskClaimed, true);
+
+    const overrides = h.appendedEvents.filter((e) => e.type === "human.override");
+    assert.equal(overrides.length, 1);
+    assert.equal(overrides[0].context.kind, "task_claim_force");
+    assert.equal(overrides[0].context.preemptedJobId, owner.jobId);
+    assert.equal(overrides[0].reason, "operator needs attach");
+
+    const cancelled = h.appendedEvents.filter((e) => e.type === "job.completed" && e.jobId === owner.jobId);
+    assert.equal(cancelled.length, 1);
+    assert.equal(cancelled[0].status, "cancelled");
+    assert.equal(h.projection.jobs.get(owner.jobId).status, "cancelled");
+
+    const started = h.appendedEvents.filter((e) => e.type === "job.started" && e.jobId === r.jobId);
+    assert.equal(started.length, 1, "forced attach replacement job starts immediately");
+    assert.equal(h.projection.jobs.get(r.jobId).status, "running");
+    assert.equal(h.projection.jobs.get(r.jobId).predecessorJobId, undefined);
+  } finally {
+    h.close();
+  }
+});
+
+test("attach_existing: task without verify launches and omits verifyPack", async () => {
+  const h = await makeHarness({
+    projects: { proj: { data: { tasks: [task({ id: "t-no-verify", verify: undefined })] }, rev: 0 } },
+  });
+  try {
+    const seedSes = await seedSession(h, { source: "global_new_session", mode: "untasked" });
+    const attachDraft = makeDraft(h, {
+      source: "attach",
+      mode: "attach_existing",
+      attachExistingSessionId: seedSes,
+      projectSlug: "proj",
+      attachTaskId: "t-no-verify",
+    });
+    const r = await h.service.launch({ draftId: attachDraft.id });
+    assert.equal(r.ok, true);
+    assert.equal(r.mode, "attached");
+    assert.equal(r.verifyPack, null);
+    assert.equal(h.projection.jobs.get(r.jobId).verifyPack, undefined);
   } finally {
     h.close();
   }

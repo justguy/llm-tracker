@@ -562,8 +562,8 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     store,
     draftStore: runSessionDraftStore,
     projection: runtimeProjection,
-    jobRegistry,
-    runSessionService
+    runSessionService,
+    jobRegistry
   });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {

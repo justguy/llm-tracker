@@ -96,10 +96,10 @@ async function postJson(base, path, body) {
   });
 }
 
-async function patchJson(base, path, body) {
+async function patchJson(base, path, body, headers = {}) {
   return fetch(`${base}${path}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -264,6 +264,7 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     const createBody = await createRes.json();
     assert.ok(SESSION_ID_RE.test(createBody.session.id));
     assert.equal(createBody.session.name, "prod-smoke");
+    assert.equal(createBody.token.sessionId, createBody.session.id);
 
     const eventMsg = await eventPromise;
     assert.equal(eventMsg.type, "runtime.event");
@@ -288,7 +289,7 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
 
     const patchRes = await patchJson(base, `/api/sessions/${createBody.session.id}`, {
       status: "quiet",
-    });
+    }, { "X-LT-Session-Token": createBody.token.token });
     assert.equal(patchRes.status, 200);
     const patchBody = await patchRes.json();
     assert.equal(patchBody.session.status, "quiet");

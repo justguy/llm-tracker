@@ -227,18 +227,40 @@ export class SessionTokenStore {
    * a fresh one in one transaction.
    *
    * @param {string} sessionId
+   * @param {{ exceptTokenHash?: string }} [opts]
    * @returns {number}  count of tokens revoked
    */
-  revoke(sessionId) {
+  revoke(sessionId, opts = {}) {
     if (typeof sessionId !== "string" || sessionId.length === 0) return 0;
     const set = this.bySession.get(sessionId);
     if (!set) return 0;
+    const exceptTokenHash =
+      opts && typeof opts.exceptTokenHash === "string" && opts.exceptTokenHash.length > 0
+        ? opts.exceptTokenHash
+        : null;
     let n = 0;
-    for (const h of set) {
+    for (const h of [...set]) {
+      if (exceptTokenHash && h === exceptTokenHash) continue;
       if (this.byHash.delete(h)) n += 1;
+      set.delete(h);
     }
-    this.bySession.delete(sessionId);
+    if (set.size === 0) this.bySession.delete(sessionId);
     return n;
+  }
+
+  /**
+   * Revoke one token by hash. Used as rollback when a caller issued a fresh
+   * cleartext token but failed to durably append the matching runtime event.
+   *
+   * @param {string} tokenHash
+   * @returns {boolean}
+   */
+  revokeTokenHash(tokenHash) {
+    if (typeof tokenHash !== "string" || tokenHash.length === 0) return false;
+    const record = this.byHash.get(tokenHash);
+    if (!record) return false;
+    this._delete(tokenHash, record.sessionId);
+    return true;
   }
 
   /**

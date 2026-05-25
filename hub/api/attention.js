@@ -66,6 +66,9 @@ export function registerAttentionRoutes(app, deps) {
       return sendError(res, 400, "INVALID_QUERY", "`limit` must be an integer between 1 and 100");
     }
     const projectSlug = firstQueryValue(req.query.projectSlug);
+    if (scope === "project" && (typeof projectSlug !== "string" || projectSlug.length === 0)) {
+      return sendError(res, 400, "INVALID_QUERY", "`projectSlug` is required when scope='project'");
+    }
     let items = attentionEngine.getAll();
     if (scope === "project" && typeof projectSlug === "string" && projectSlug.length > 0) {
       items = items.filter((item) => item && item.projectSlug === projectSlug);

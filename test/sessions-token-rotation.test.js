@@ -78,6 +78,16 @@ async function createSession(env, body = { name: "rotate-test", tier: "manual" }
   return session;
 }
 
+async function createSessionResponse(env, body = { name: "rotate-test", tier: "manual" }) {
+  const res = await fetch(`${env.base}/api/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal(res.status, 201, "session creation should succeed");
+  return res.json();
+}
+
 function postRotate(base, sessionId, body, headers = {}) {
   const init = {
     method: "POST",
@@ -86,6 +96,49 @@ function postRotate(base, sessionId, body, headers = {}) {
   if (body !== undefined) init.body = JSON.stringify(body);
   return fetch(`${base}/api/sessions/${sessionId}/token/rotate`, init);
 }
+
+function patchSession(base, sessionId, body, headers = {}) {
+  return fetch(`${base}/api/sessions/${sessionId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+test("create returns initial token that can authenticate session mutation", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startApp();
+  try {
+    const body = await createSessionResponse(env);
+    assert.equal(body.token.sessionId, body.session.id);
+    assert.equal(body.token.tokenHash, hashToken(body.token.token));
+    assert.equal(env.tokenStore.validate(body.token.token, { expectedSessionId: body.session.id }).ok, true);
+
+    const patch = await patchSession(
+      env.base,
+      body.session.id,
+      { status: "quiet" },
+      { "X-LT-Session-Token": body.token.token },
+    );
+    assert.equal(patch.status, 200);
+    assert.equal((await patch.json()).session.status, "quiet");
+  } finally {
+    await env.close();
+  }
+});
+
+test("PATCH /api/sessions/:id requires token when tokenStore is wired", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startApp();
+  try {
+    const session = await createSession(env);
+    const res = await patchSession(env.base, session.id, { status: "quiet" });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(body.error.details.reason, "missing");
+  } finally {
+    await env.close();
+  }
+});
 
 test("rotate 401 when no X-LT-Session-Token header is supplied", { timeout: TEST_TIMEOUT }, async () => {
   const env = await startApp();
@@ -143,6 +196,30 @@ test("rotate 200 happy path: returns fresh token; old token now fails validation
     const newCheck = env.tokenStore.validate(body.token);
     assert.equal(newCheck.ok, true);
     assert.equal(newCheck.record.sessionId, session.id);
+  } finally {
+    await env.close();
+  }
+});
+
+test("rotate append failure rolls back the fresh token and leaves old token valid", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startApp();
+  try {
+    const session = await createSession(env);
+    const old = env.tokenStore.issue({ sessionId: session.id, capabilities: ["status"] });
+    const beforeCount = env.tokenStore.list().length;
+    const originalAppend = env.runtimeStore.append.bind(env.runtimeStore);
+    env.runtimeStore.append = async (event) => {
+      if (event?.type === "session.token_rotated") {
+        throw new Error("simulated append failure");
+      }
+      return originalAppend(event);
+    };
+
+    const res = await postRotate(env.base, session.id, {}, { "X-LT-Session-Token": old.token });
+    assert.equal(res.status, 500);
+    assert.equal((await res.json()).error.code, "APPEND_FAILED");
+    assert.equal(env.tokenStore.validate(old.token, { expectedSessionId: session.id }).ok, true);
+    assert.equal(env.tokenStore.list().length, beforeCount, "fresh token was rolled back");
   } finally {
     await env.close();
   }

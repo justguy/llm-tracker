@@ -14,9 +14,6 @@
 // validation; the service owns task-claim, session/job creation, and
 // VerifyPack stamping.
 //
-// Active jobs in candidate scoring use the live JobRegistry when supplied so
-// picker ranking stays aligned with the launch conflict policy.
-//
 // Error envelope mirrors hub/api/sessions.js: `{ error: { code, message, details? } }`.
 
 import { scoreRunCandidates } from "../run-session/candidates.js";
@@ -44,10 +41,11 @@ const LAUNCH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
  * @property {{ toSnapshots(): { sessions: object[] } }} projection
  *   RuntimeProjection — supplies the active sessions list for worktree
  *   conflict scoring.
- * @property {{ list(): object[] }} [jobRegistry]
- *   JobRegistry — supplies active jobs for candidate scoring.
  * @property {{ launch(input: object): Promise<object> }} runSessionService
  *   sh-3-05 RunSessionService — orchestrates POST /api/run-session/launch.
+ * @property {{ list(): object[] }} [jobRegistry]
+ *   Optional live JobRegistry. When supplied, candidate scoring includes active
+ *   job penalties instead of deferring conflict detection to launch time.
  */
 
 /**
@@ -103,11 +101,12 @@ export function registerRunSessionRoutes(app, deps) {
     }
 
     const tasks = Array.isArray(entry.data?.tasks) ? entry.data.tasks : [];
-    const sessions = projection.toSnapshots().sessions || [];
+    const snapshots = projection.toSnapshots();
+    const sessions = snapshots.sessions || [];
     const jobs =
       jobRegistry && typeof jobRegistry.list === "function"
         ? jobRegistry.list()
-        : [];
+        : snapshots.jobs || [];
 
     let candidates;
     try {

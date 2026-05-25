@@ -346,6 +346,15 @@ export class AttentionEngine {
      */
     this._prior = new Map();
 
+    /**
+     * Explicit human clears persist while the source condition remains true.
+     * Auto-clear markers emitted by rules are not stored here; this map only
+     * records durable attention.cleared runtime events.
+     *
+     * @type {Map<string, { clearedAt: string, attentionItemId?: string }>}
+     */
+    this._humanClearsByDedupeKey = new Map();
+
     /** @type {Map<AttentionKind, AttentionRuleFn | null>} */
     this._rules = new Map();
     // Reserve a slot for every canonical kind so sh-4-03 can plug rules
@@ -470,7 +479,12 @@ export class AttentionEngine {
     }
 
     collected.sort(compareByPriority);
-    this.projection.apply(collected);
+    const emittedDedupeKeys = new Set(collected.map((item) => item.dedupeKey));
+    for (const key of this._humanClearsByDedupeKey.keys()) {
+      if (!emittedDedupeKeys.has(key)) this._humanClearsByDedupeKey.delete(key);
+    }
+    const visibleItems = collected.filter((item) => !this._humanClearsByDedupeKey.has(item.dedupeKey));
+    this.projection.apply(visibleItems);
     const finalItems = this.projection.getAll();
     this.#emitChangesIfAny(finalItems);
     return finalItems;
@@ -490,6 +504,20 @@ export class AttentionEngine {
   applyRuntimeEvent(event) {
     if (!event || typeof event !== "object") return false;
     if (!ATTENTION_OVERLAY_EVENT_TYPES.has(event.type)) return false;
+    if (
+      event.type === "attention.cleared" &&
+      typeof event.dedupeKey === "string" &&
+      event.dedupeKey.length > 0 &&
+      typeof event.clearedAt === "string" &&
+      event.clearedAt.length > 0
+    ) {
+      this._humanClearsByDedupeKey.set(event.dedupeKey, {
+        clearedAt: event.clearedAt,
+        ...(typeof event.attentionItemId === "string" && event.attentionItemId.length > 0
+          ? { attentionItemId: event.attentionItemId }
+          : {}),
+      });
+    }
 
     const current = this.projection.getAll();
     let changed = false;

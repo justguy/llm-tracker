@@ -19,7 +19,6 @@
 
 import { log } from "../logging/index.js";
 import { requireSessionToken } from "./middleware/session-token.js";
-import { hashToken } from "../sessions/auth/tokens.js";
 import { createSessionStdioCaptureChangedEvent } from "../runtime/events.js";
 
 // Allowed body fields on POST. Anything else triggers UNKNOWN_FIELDS (400).
@@ -135,6 +134,16 @@ export function registerSessionsRoutes(app, deps) {
   if (typeof workspace !== "string" || workspace.length === 0) {
     throw new Error("registerSessionsRoutes: workspace string required");
   }
+  const tokenMiddleware =
+    tokenStore && typeof tokenStore.issue === "function" && typeof tokenStore.revoke === "function"
+      ? requireSessionToken({
+          tokenStore,
+          runtimeStore,
+          makeRuntimeId,
+          validateRuntimeEvent,
+          workspace,
+        })
+      : null;
 
   // --- GET /api/sessions --------------------------------------------------
   app.get("/api/sessions", (_req, res) => {
@@ -240,10 +249,22 @@ export function registerSessionsRoutes(app, deps) {
 
     const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
 
+    let issuedToken = null;
+    if (tokenStore && typeof tokenStore.issue === "function") {
+      try {
+        issuedToken = tokenStore.issue({ sessionId });
+      } catch (err) {
+        return sendError(res, 500, "TOKEN_ISSUE_FAILED", err.message || "failed to issue session token");
+      }
+    }
+
     let appendResult;
     try {
       appendResult = await runtimeStore.append(eventForAppend);
     } catch (err) {
+      if (issuedToken && typeof tokenStore.revokeTokenHash === "function") {
+        tokenStore.revokeTokenHash(issuedToken.tokenHash);
+      }
       return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
     }
 
@@ -254,14 +275,26 @@ export function registerSessionsRoutes(app, deps) {
 
     res.status(201).json({
       session,
+      ...(issuedToken
+        ? {
+            token: {
+              token: issuedToken.token,
+              tokenHash: issuedToken.tokenHash,
+              sessionId: issuedToken.sessionId,
+              capabilities: [...issuedToken.capabilities],
+              issuedAt: issuedToken.issuedAt,
+              expiresAt: issuedToken.expiresAt,
+            },
+          }
+        : {}),
       rev: appendResult.rev,
       eventId: appendResult.eventId,
     });
   });
 
   // --- PATCH /api/sessions/:id --------------------------------------------
-  app.patch("/api/sessions/:id", async (req, res) => {
-    const { id: sessionId } = req.params;
+  const patchSessionStatus = async (req, res) => {
+    const sessionId = req.params.id || req.params.sessionId;
     if (!isSessionIdShape(sessionId)) {
       return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
     }
@@ -340,7 +373,12 @@ export function registerSessionsRoutes(app, deps) {
       rev: appendResult.rev,
       eventId: appendResult.eventId,
     });
-  });
+  };
+  if (tokenMiddleware) {
+    app.patch("/api/sessions/:sessionId", tokenMiddleware, patchSessionStatus);
+  } else {
+    app.patch("/api/sessions/:id", patchSessionStatus);
+  }
 
   // --- POST /api/sessions/:sessionId/token/rotate -------------------------
   // SH-2-07 (TDD v0.5 §19.2): caller presents current session token via the
@@ -351,14 +389,7 @@ export function registerSessionsRoutes(app, deps) {
   //
   // Mounted only when `tokenStore` is wired so the older four routes keep
   // working in test fixtures that don't carry token plumbing.
-  if (tokenStore && typeof tokenStore.issue === "function" && typeof tokenStore.revoke === "function") {
-    const tokenMiddleware = requireSessionToken({
-      tokenStore,
-      runtimeStore,
-      makeRuntimeId,
-      validateRuntimeEvent,
-      workspace,
-    });
+  if (tokenMiddleware) {
     const captureToggleChains = new Map();
     const runSerializedCaptureToggle = (sessionId, fn) => {
       const previous = captureToggleChains.get(sessionId) || Promise.resolve();
@@ -430,13 +461,6 @@ export function registerSessionsRoutes(app, deps) {
         return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
       }
 
-      // Revoke FIRST so the just-used (old) token dies immediately, then
-      // issue the new one in the same handler call. Order matters: if issue
-      // ran first and revoke threw, the caller would briefly hold two valid
-      // tokens; this way a failure in issue() just means rotation didn't
-      // happen (callers still have to re-authenticate next request).
-      tokenStore.revoke(sessionId);
-
       let issued;
       try {
         issued = tokenStore.issue({
@@ -465,6 +489,9 @@ export function registerSessionsRoutes(app, deps) {
       try {
         validateRuntimeEvent(eventForValidation);
       } catch (err) {
+        if (typeof tokenStore.revokeTokenHash === "function") {
+          tokenStore.revokeTokenHash(issued.tokenHash);
+        }
         return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
           errors: err.errors,
         });
@@ -476,8 +503,13 @@ export function registerSessionsRoutes(app, deps) {
       try {
         appendResult = await runtimeStore.append(eventForAppend);
       } catch (err) {
+        if (typeof tokenStore.revokeTokenHash === "function") {
+          tokenStore.revokeTokenHash(issued.tokenHash);
+        }
         return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
       }
+
+      tokenStore.revoke(sessionId, { exceptTokenHash: issued.tokenHash });
 
       res.status(200).json({
         token: issued.token,
