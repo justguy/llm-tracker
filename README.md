@@ -182,6 +182,7 @@ Running hubs expose `GET /help` as the current agent contract for that workspace
 - For standard workspaces, that file comes from [`workspace-template/README.md`](./workspace-template/README.md)
 - Agents should read `/help` before using write paths or task-intelligence endpoints
 - Agents should prefer `next` to choose work, `brief` to load task context, `why` to explain task intent, `decisions` to recall prior decisions, and `execute` / `verify` to close the work loop before broad file reads
+- The `/help` task contract includes optional `task.repos` and `task.verify` fields for Session Hub repo scope and verify-pack inputs
 - If you change agent-facing behavior, update the workspace template so `/help` stays accurate
 
 ---

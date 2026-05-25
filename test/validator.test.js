@@ -212,3 +212,90 @@ test("requires at least one swimlane and priority", () => {
   const { ok } = validateProject(p);
   assert.equal(ok, false);
 });
+
+test("validateProject rejects legacy allowed_paths outside repo-relative POSIX scope", () => {
+  const p = validProject();
+  p.tasks[0].allowed_paths = ["/etc/passwd", "src\\**", "C:Users/me/secrets", "https://example.com/src/**"];
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/0") && e.includes("repo-relative")),
+    `expected absolute path error, got: ${errors.join("; ")}`
+  );
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/1") && e.includes("POSIX-style")),
+    `expected POSIX path error, got: ${errors.join("; ")}`
+  );
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/2") && e.includes("Windows-drive")),
+    `expected Windows-drive path error, got: ${errors.join("; ")}`
+  );
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/allowed_paths/3") && e.includes("URI schemes")),
+    `expected URI scheme path error, got: ${errors.join("; ")}`
+  );
+});
+
+test("accepts task.repos and task.verify additions (sh-5-07 wiring)", () => {
+  const p = validProject();
+  p.tasks[0].repos = {
+    primary: { root: "/abs/repo", allowed_paths: ["src/**"] },
+    secondary: [{ root: "../sibling" }]
+  };
+  p.tasks[0].verify = {
+    items: [
+      { kind: "command", id: "lt.test", required: true, cmd: "npm test" },
+      { kind: "skill_run", id: "lt.closeout", required: false, skillId: "tracker-closeout-sweep" }
+    ]
+  };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("accepts null task.repos and task.verify to clear optional additions", () => {
+  const p = validProject();
+  p.tasks[0].repos = null;
+  p.tasks[0].verify = null;
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("validateProject rejects absolute allowed_paths via task-extensions wiring", () => {
+  const p = validProject();
+  p.tasks[0].repos = { primary: { root: "r", allowed_paths: ["/etc/passwd"] } };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/repos/primary/allowed_paths/0") && e.includes("repo-relative")),
+    `expected a repo-relative error on tasks[0], got: ${errors.join("; ")}`
+  );
+});
+
+test("validateProject rejects duplicate verify-item ids via task-extensions wiring", () => {
+  const p = validProject();
+  p.tasks[0].verify = {
+    items: [
+      { kind: "command", id: "dup", required: true, cmd: "a" },
+      { kind: "lint", id: "dup", required: false, tool: "eslint" }
+    ]
+  };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0/verify/items/1/id") && e.includes('duplicate verify-item id "dup"')),
+    `expected a duplicate-id error on tasks[0], got: ${errors.join("; ")}`
+  );
+});
+
+test("validateProject rejects bad verify-item id pattern via task-extensions wiring", () => {
+  const p = validProject();
+  p.tasks[0].verify = {
+    items: [{ kind: "command", id: "BadID", required: true, cmd: "true" }]
+  };
+  const { ok, errors } = validateProject(p);
+  assert.equal(ok, false);
+  assert.ok(
+    errors.some((e) => e.includes("/tasks/0") && e.includes("pattern")),
+    `expected a pattern error on tasks[0], got: ${errors.join("; ")}`
+  );
+});

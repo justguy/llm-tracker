@@ -17,6 +17,11 @@ import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
 import { buildTrackerErrorBody } from "./error-payload.js";
 import { registerSessionsRoutes } from "./api/sessions.js";
+import { registerJobsRoutes } from "./api/jobs.js";
+import { registerRunSessionRoutes } from "./api/run-session.js";
+import { JobRegistry } from "./jobs/registry.js";
+import { createDraftStore } from "./run-session/drafts.js";
+import { RunSessionService } from "./run-session/service.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
 import { loadWorkspaceConfig } from "./config/loader.js";
@@ -45,6 +50,7 @@ const UI_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_SCRATCHPAD_LEN = 5000;
 const MAX_COMMENT_LEN = 500;
 const MAX_BLOCKER_REASON_LEN = 2000;
+const RUN_SESSION_DRAFT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 function isLocalOrigin(origin) {
   if (!origin) return false;
@@ -447,6 +453,37 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     makeRuntimeId,
     validateRuntimeEvent,
     workspace
+  });
+  const jobRegistry = new JobRegistry({
+    runtimeStore,
+    projection: runtimeProjection,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace
+  });
+  registerJobsRoutes(app, { jobRegistry });
+  const runSessionDraftStore = createDraftStore();
+  const runSessionDraftSweepTimer = setInterval(() => {
+    try {
+      runSessionDraftStore.sweep();
+    } catch {}
+  }, RUN_SESSION_DRAFT_SWEEP_INTERVAL_MS);
+  runSessionDraftSweepTimer.unref?.();
+  const runSessionService = new RunSessionService({
+    store,
+    draftStore: runSessionDraftStore,
+    projection: runtimeProjection,
+    jobRegistry,
+    runtimeStore,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace
+  });
+  registerRunSessionRoutes(app, {
+    store,
+    draftStore: runSessionDraftStore,
+    projection: runtimeProjection,
+    runSessionService
   });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {
@@ -1132,6 +1169,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
 
     clearInterval(uiSessionSweepTimer);
     clearInterval(linkedTargetsPollTimer);
+    clearInterval(runSessionDraftSweepTimer);
 
     try {
       await watcher.close();
@@ -1185,6 +1223,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       httpServer.off("listening", onListening);
       clearInterval(uiSessionSweepTimer);
       clearInterval(linkedTargetsPollTimer);
+      clearInterval(runSessionDraftSweepTimer);
       try {
         await watcher.close();
       } catch {}

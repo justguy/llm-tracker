@@ -301,6 +301,32 @@
       "additionalProperties": true
     },
 
+    "VerifyPack": {
+      "description": "SH-5-04: immutable VerifyPack stamped on a JobRecord at create time. Shape mirrors stampVerifyPack() output; the inner item shape is intentionally permissive here because sh-5-07's task-extensions validator already gates the items before stamping.",
+      "type": "object",
+      "required": ["items"],
+      "properties": {
+        "jobId":          { "type": ["string", "null"] },
+        "stampedAt":      { "type": "string", "format": "date-time" },
+        "stampedFromRev": { "type": ["integer", "null"] },
+        "items": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "required": ["id", "kind"],
+            "properties": {
+              "id":       { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
+              "kind":     { "type": "string", "enum": ["command", "lint", "skill_run", "human_approval", "dod_check"] },
+              "required": { "type": "boolean" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+
     "JobStartedEvent": {
       "type": "object",
       "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId", "sessionId"],
@@ -320,7 +346,34 @@
         "kind": {
           "type": "string",
           "enum": ["code", "prd", "review", "planning", "closeout", "custom"]
-        }
+        },
+        "verifyPack":  { "$ref": "#/definitions/VerifyPack" }
+      },
+      "additionalProperties": true
+    },
+
+    "JobQueuedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId", "sessionId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "job.queued" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "jobId":             { "$ref": "#/definitions/jobId" },
+        "sessionId":         { "$ref": "#/definitions/sessionId" },
+        "projectSlug":       { "type": "string", "minLength": 1 },
+        "taskId":            { "type": "string", "minLength": 1 },
+        "profileId":         { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["code", "prd", "review", "planning", "closeout", "custom"]
+        },
+        "predecessorJobId":  { "$ref": "#/definitions/jobId" },
+        "verifyPack":        { "$ref": "#/definitions/VerifyPack" }
       },
       "additionalProperties": true
     },
@@ -383,6 +436,26 @@
         "jobId":     { "$ref": "#/definitions/jobId" },
         "sessionId": { "$ref": "#/definitions/sessionId" },
         "reason":    { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "JobUnblockedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId", "sessionId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "job.unblocked" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "jobId":     { "$ref": "#/definitions/jobId" },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "previousReason": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "user": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": true
     },
@@ -499,8 +572,6 @@
             "session.model_changed",
             "session.task_attached",
             "session.task_unbound",
-            "job.queued",
-            "job.unblocked",
             "sandbox.escape_requested",
             "sandbox.escape_resolved",
             "session.ask",
@@ -525,9 +596,11 @@
     { "$ref": "#/definitions/SessionStoppedEvent" },
     { "$ref": "#/definitions/SessionStdioCaptureChangedEvent" },
     { "$ref": "#/definitions/JobStartedEvent" },
+    { "$ref": "#/definitions/JobQueuedEvent" },
     { "$ref": "#/definitions/JobCheckpointEvent" },
     { "$ref": "#/definitions/JobCompletedEvent" },
     { "$ref": "#/definitions/JobRolloverRequestedEvent" },
+    { "$ref": "#/definitions/JobUnblockedEvent" },
     { "$ref": "#/definitions/SkillRunStartedEvent" },
     { "$ref": "#/definitions/SkillRunFinishedEvent" },
     { "$ref": "#/definitions/RepoChangeEvent" },

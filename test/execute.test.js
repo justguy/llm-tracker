@@ -12,7 +12,11 @@ test("buildExecutePayload augments brief context with execution contract and pla
   project.tasks[0].definition_of_done = ["CLI and HTTP output match"];
   project.tasks[0].constraints = ["Do not break legacy trackers"];
   project.tasks[0].expected_changes = ["hub/execute.js", "bin/commands/execute.js"];
-  project.tasks[0].allowed_paths = ["hub/execute.js", "bin/commands/execute.js"];
+  project.tasks[0].allowed_paths = ["legacy-only.js"];
+  project.tasks[0].repos = {
+    primary: { root: "/repo", allowed_paths: ["hub/execute.js"] },
+    secondary: [{ root: "/repo-docs", allowed_paths: ["docs/**"] }]
+  };
   project.tasks[0].approval_required_for = ["new dependencies"];
 
   const payload = buildExecutePayload({
@@ -38,7 +42,13 @@ test("buildExecutePayload augments brief context with execution contract and pla
 
   assert.equal(payload.packType, "execute");
   assert.equal(payload.executionContract.definition_of_done[0], "CLI and HTTP output match");
+  assert.deepEqual(payload.executionContract.allowed_paths, ["hub/execute.js", "docs/**"]);
   assert.ok(payload.executionPlan.some((item) => item.kind === "expected_change"));
+  assert.ok(
+    payload.executionPlan.some(
+      (item) => item.kind === "allowed_paths" && item.text.includes("hub/execute.js, docs/**")
+    )
+  );
   assert.ok(payload.executionPlan.some((item) => item.kind === "approval"));
   assert.equal(payload.references[0].selectedBecause, "explicit task reference");
 });

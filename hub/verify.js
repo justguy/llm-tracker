@@ -5,7 +5,8 @@ function verificationContract(task) {
     definition_of_done: task.definition_of_done || [],
     constraints: task.constraints || [],
     expected_changes: task.expected_changes || [],
-    allowed_paths: task.allowed_paths || []
+    allowed_paths: task.allowed_paths || [],
+    verify: task.verify || null
   };
 }
 
@@ -49,6 +50,18 @@ function buildChecks(task, dependencies = []) {
     });
   }
 
+  for (const item of task.verify?.items || []) {
+    checks.push({
+      kind: "verify_pack_item",
+      itemKind: item.kind,
+      id: item.id,
+      required: item.required,
+      text: describeVerifyItem(item),
+      status: item.required ? "required" : "optional",
+      evidenceFrom: ["taskVerify"]
+    });
+  }
+
   for (const dependency of dependencies) {
     checks.push({
       kind: "dependency_state",
@@ -68,6 +81,23 @@ function buildChecks(task, dependencies = []) {
   }
 
   return checks;
+}
+
+function describeVerifyItem(item) {
+  switch (item.kind) {
+    case "command":
+      return item.cmd;
+    case "lint":
+      return [item.tool, ...(item.args || [])].join(" ");
+    case "skill_run":
+      return item.skillId;
+    case "human_approval":
+      return item.prompt;
+    case "dod_check":
+      return item.ref;
+    default:
+      return item.id;
+  }
 }
 
 export function buildVerifyPayload({
@@ -104,10 +134,11 @@ export function buildVerifyPayload({
         lastTouchedRev: brief.task.lastTouchedRev,
         selectedBecause: "current task state"
       },
-      dependencyState,
-      references: brief.references,
-      snippets: brief.snippets,
-      recentHistory: brief.recentHistory
+        dependencyState,
+        taskVerify: brief.task.verify?.items || [],
+        references: brief.references,
+        snippets: brief.snippets,
+        recentHistory: brief.recentHistory
     },
     checks: buildChecks(brief.task, dependencyState)
   };
@@ -134,6 +165,7 @@ export function getVerifyPayload({ workspace, slug, entry, taskId, now }) {
           selectedBecause: "current task state"
         },
         dependencyState,
+        taskVerify: result.payload.task.verify?.items || [],
         references: result.payload.references,
         snippets: result.payload.snippets,
         recentHistory: result.payload.recentHistory

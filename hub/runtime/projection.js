@@ -210,6 +210,10 @@ function handleJobStarted(p, e) {
   if (!isJobId(id)) return;
   const existing = p.jobs.get(id);
   if (!existing) p.jobOrder.push(id);
+  // SH-5-04: verifyPack is deeply frozen by stampVerifyPack() before append,
+  // so passing the reference through subsequent spread-based handlers cannot
+  // mutate the stamp. DoD §11.6.1 line 4: later patches to task.verify must
+  // not widen or alter the in-flight pack.
   p.jobs.set(id, {
     ...(existing || {}),
     id,
@@ -218,6 +222,7 @@ function handleJobStarted(p, e) {
     ...(e.taskId !== undefined ? { taskId: e.taskId } : {}),
     ...(e.profileId !== undefined ? { profileId: e.profileId } : {}),
     ...(e.kind !== undefined ? { kind: e.kind } : {}),
+    ...(e.verifyPack && typeof e.verifyPack === "object" ? { verifyPack: e.verifyPack } : {}),
     status: "running",
     startedAt: e.ts,
   });
@@ -250,9 +255,11 @@ function handleJobCompleted(p, e) {
 }
 
 function handleJobQueued(p, e) {
-  // job.queued is a generic event today (sh-1-02 schema): payload shape is
-  // loose, but it conventionally carries `jobId` (and optionally `sessionId`,
-  // `projectSlug`, `taskId`, `predecessorJobId`). Upsert what we can.
+  // job.queued upserts what the SH-5-01 + SH-5-04 strict variant carries:
+  // jobId (required), sessionId, projectSlug, taskId, profileId, kind,
+  // predecessorJobId, and the immutable SH-5-04 verifyPack stamp. The pack
+  // is deeply frozen by stampVerifyPack(), so passing the reference through
+  // is safe for subsequent ...existing spreads in handleJobCheckpoint et al.
   const id = e.jobId;
   if (!isJobId(id)) return;
   const existing = p.jobs.get(id);
@@ -263,7 +270,10 @@ function handleJobQueued(p, e) {
     ...(isSessionId(e.sessionId) ? { sessionId: e.sessionId } : {}),
     ...(e.projectSlug !== undefined ? { projectSlug: e.projectSlug } : {}),
     ...(e.taskId !== undefined ? { taskId: e.taskId } : {}),
+    ...(e.profileId !== undefined ? { profileId: e.profileId } : {}),
+    ...(e.kind !== undefined ? { kind: e.kind } : {}),
     ...(isJobId(e.predecessorJobId) ? { predecessorJobId: e.predecessorJobId } : {}),
+    ...(e.verifyPack && typeof e.verifyPack === "object" ? { verifyPack: e.verifyPack } : {}),
     status: "queued",
     queuedAt: e.ts,
   });

@@ -10,7 +10,13 @@ test("buildVerifyPayload derives evidence sources and deterministic checks", () 
   project.tasks[0].references = ["hub/verify.js:1-40"];
   project.tasks[0].definition_of_done = ["Payload includes real evidence sources"];
   project.tasks[0].expected_changes = ["hub/verify.js"];
-  project.tasks[0].allowed_paths = ["hub/verify.js"];
+  project.tasks[0].allowed_paths = ["legacy-only.js"];
+  project.tasks[0].repos = {
+    primary: { root: "/repo", allowed_paths: ["hub/verify.js"] }
+  };
+  project.tasks[0].verify = {
+    items: [{ kind: "command", id: "lt.test", required: true, cmd: "node --test test/verify.test.js" }]
+  };
 
   const payload = buildVerifyPayload({
     slug: "test-project",
@@ -35,7 +41,16 @@ test("buildVerifyPayload derives evidence sources and deterministic checks", () 
 
   assert.equal(payload.packType, "verify");
   assert.equal(payload.evidenceSources.taskState.selectedBecause, "current task state");
+  assert.deepEqual(payload.verificationContract.verify, project.tasks[0].verify);
+  assert.deepEqual(payload.verificationContract.allowed_paths, ["hub/verify.js"]);
+  assert.equal(payload.evidenceSources.taskVerify[0].id, "lt.test");
   assert.equal(payload.evidenceSources.references[0].selectedBecause, "explicit task reference");
   assert.ok(payload.checks.some((check) => check.kind === "definition_of_done"));
   assert.ok(payload.checks.some((check) => check.kind === "expected_change"));
+  assert.ok(
+    payload.checks.some(
+      (check) => check.kind === "verify_pack_item" && check.id === "lt.test" && check.required === true
+    )
+  );
+  assert.ok(payload.checks.some((check) => check.kind === "allowed_path" && check.text === "hub/verify.js"));
 });
