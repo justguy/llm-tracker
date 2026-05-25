@@ -21,6 +21,7 @@ import {
   deriveActivityWithSeverity,
   expectsHeartbeat,
   hasExplicitStructuredState,
+  isInitialStartedState,
   processExited,
   minutesSince,
 } from "../hub/sessions/activity.js";
@@ -106,6 +107,19 @@ test("hasExplicitStructuredState: true for mcp/adapter/ui/cli/http statusSource.
   // Bare-string statusSource (legacy callers) also accepted.
   assert.equal(hasExplicitStructuredState({ statusSource: "mcp" }), true);
   assert.equal(hasExplicitStructuredState({ statusSource: "system" }), false);
+});
+
+test("isInitialStartedState: only true for session.started provenance", () => {
+  assert.equal(
+    isInitialStartedState({ status: "starting", statusSource: { kind: "http", eventType: "session.started" } }),
+    true,
+  );
+  assert.equal(
+    isInitialStartedState({ status: "starting", statusSource: { kind: "http", eventType: "session.status" } }),
+    false,
+  );
+  assert.equal(isInitialStartedState({ status: "active", statusSource: { eventType: "session.started" } }), false);
+  assert.equal(isInitialStartedState({ status: "starting", statusSource: "http" }), false);
 });
 
 test("minutesSince: Infinity for null/undefined; correct minutes for known ts", () => {
@@ -203,6 +217,43 @@ test("deriveActivity: dumb_terminal with no lastOutputAt → quiet (Infinity > 1
   // Infinity gets clamped to MAX_SAFE_INTEGER so the §8.3 finite-number
   // invariant on `minutes` holds.
   assert.equal(r.warnings[0].minutes, Number.MAX_SAFE_INTEGER);
+});
+
+test("deriveActivity: startedAt fallback prevents immediate dumb_terminal quiet", () => {
+  const session = makeSession({
+    tier: "dumb_terminal",
+    status: "starting",
+    statusSource: { kind: "http", eventType: "session.started" },
+    startedAt: isoMinutesAgo(2),
+  });
+  const r = deriveActivity(session, NOW);
+  assert.equal(r.state, "active");
+  assert.deepEqual(r.warnings, []);
+});
+
+test("deriveActivity: startedAt fallback prevents immediate heartbeat quiet", () => {
+  const session = makeSession({
+    tier: "mcp_tracked",
+    status: "starting",
+    statusSource: { kind: "http", eventType: "session.started" },
+    startedAt: isoMinutesAgo(2),
+  });
+  const r = deriveActivity(session, NOW);
+  assert.equal(r.state, "active");
+  assert.deepEqual(r.warnings, []);
+});
+
+test("deriveActivity: explicit later status='starting' is preserved", () => {
+  const session = makeSession({
+    tier: "mcp_tracked",
+    status: "starting",
+    statusSource: { kind: "mcp", eventType: "session.status" },
+    startedAt: isoMinutesAgo(30),
+    lastActivityAt: isoMinutesAgo(15),
+  });
+  const r = deriveActivity(session, NOW);
+  assert.equal(r.state, "starting");
+  assert.deepEqual(r.warnings, []);
 });
 
 // --- deriveActivityWithSeverity --------------------------------------------

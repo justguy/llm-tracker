@@ -105,6 +105,7 @@ const HANDLERS = Object.freeze({
   "session.status": handleSessionStatus,
   "session.warning": handleSessionWarning,
   "session.warning_cleared": handleSessionWarningCleared,
+  "session.output": handleSessionOutput,
   "session.stopped": handleSessionStopped,
   "session.stdio_capture_changed": handleSessionStdioCaptureChanged,
   "job.started": handleJobStarted,
@@ -133,8 +134,10 @@ function handleSessionStarted(p, e) {
     ...(session.projectSlug !== undefined ? { projectSlug: session.projectSlug } : {}),
     ...(session.taskId !== undefined ? { taskId: session.taskId } : {}),
     status: "starting",
-    statusSource: { kind: e.source, eventId: e.id },
+    statusSource: { kind: e.source, eventId: e.id, eventType: e.type },
     startedAt: e.ts,
+    ...(session.lastOutputAt !== undefined ? { lastOutputAt: session.lastOutputAt } : {}),
+    ...(session.lastStructuredEventAt !== undefined ? { lastStructuredEventAt: session.lastStructuredEventAt } : {}),
     warnings: existing?.warnings || [],
   });
 }
@@ -147,7 +150,7 @@ function handleSessionStatus(p, e) {
   p.sessions.set(id, {
     ...existing,
     status: e.status,
-    statusSource: { kind: e.source, eventId: e.id },
+    statusSource: { kind: e.source, eventId: e.id, eventType: e.type },
     lastActivityAt: e.ts,
   });
 }
@@ -176,6 +179,24 @@ function handleSessionWarningCleared(p, e) {
   p.sessions.set(id, { ...existing, warnings });
 }
 
+function handleSessionOutput(p, e) {
+  const id = e.sessionId;
+  if (!isSessionId(id)) return;
+  const existing = p.sessions.get(id);
+  if (!existing) return;
+  const next = {
+    ...existing,
+    lastActivityAt: e.ts,
+  };
+  if (e.stream === "stdout" || e.stream === "stderr") {
+    next.lastOutputAt = e.ts;
+  }
+  if (e.stream === "structured") {
+    next.lastStructuredEventAt = e.ts;
+  }
+  p.sessions.set(id, next);
+}
+
 function handleSessionStopped(p, e) {
   const id = e.sessionId;
   if (!isSessionId(id)) return;
@@ -184,7 +205,7 @@ function handleSessionStopped(p, e) {
   p.sessions.set(id, {
     ...existing,
     status: "stopped",
-    statusSource: { kind: e.source, eventId: e.id },
+    statusSource: { kind: e.source, eventId: e.id, eventType: e.type },
     stoppedAt: e.ts,
     ...(typeof e.reason === "string" ? { stopReason: e.reason } : {}),
     ...(Number.isInteger(e.exitCode) ? { exitCode: e.exitCode } : {}),

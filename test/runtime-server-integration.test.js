@@ -128,6 +128,10 @@ function waitForEventOfType(ws, eventType) {
   });
 }
 
+function isoMinutesAgo(minutes) {
+  return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
 test("startHub mounts /api/jobs routes live — create + PATCH drive runtime events", { timeout: TEST_TIMEOUT }, async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();
@@ -296,6 +300,202 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
   } finally {
     if (runtimeWs) runtimeWs.close();
     if (legacyWs) legacyWs.close();
+    await hub.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("startHub activity monitor marks stale dumb_terminal output quiet", { timeout: TEST_TIMEOUT }, async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const hub = await startHub({ workspace, port, uiDir: join(process.cwd(), "ui") });
+  let runtimeWs;
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const runtimeConn = await openWsWithFirstMessage(`ws://127.0.0.1:${port}/runtime/ws`, {
+      headers: { Origin: base },
+    });
+    runtimeWs = runtimeConn.ws;
+    assert.equal(runtimeConn.firstMessage.type, "runtime.snapshot");
+
+    const startedPromise = waitForEventOfType(runtimeWs, "session.started");
+    const createRes = await postJson(base, "/api/sessions", {
+      name: "quiet-terminal",
+      tier: "dumb_terminal",
+    });
+    assert.equal(createRes.status, 201);
+    const createBody = await createRes.json();
+    await startedPromise;
+
+    const staleOutputAt = isoMinutesAgo(15);
+    const statusPromise = waitForEventOfType(runtimeWs, "session.status");
+    await hub.runtimeStore.append({
+      schemaVersion: 1,
+      ts: staleOutputAt,
+      type: "session.output",
+      source: "system",
+      workspace,
+      sessionId: createBody.session.id,
+      stream: "stdout",
+      bytes: 8,
+      preview: "stale",
+    });
+
+    const statusMsg = await statusPromise;
+    assert.equal(statusMsg.event.source, "system");
+    assert.equal(statusMsg.event.status, "quiet");
+    assert.equal(statusMsg.event.sessionId, createBody.session.id);
+
+    const getRes = await fetch(`${base}/api/sessions/${createBody.session.id}`);
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json();
+    assert.equal(getBody.session.status, "quiet");
+    assert.equal(getBody.session.lastOutputAt, staleOutputAt);
+  } finally {
+    if (runtimeWs) runtimeWs.close();
+    await hub.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("startHub activity monitor marks stale structured heartbeat quiet", { timeout: TEST_TIMEOUT }, async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const hub = await startHub({ workspace, port, uiDir: join(process.cwd(), "ui") });
+  let runtimeWs;
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const runtimeConn = await openWsWithFirstMessage(`ws://127.0.0.1:${port}/runtime/ws`, {
+      headers: { Origin: base },
+    });
+    runtimeWs = runtimeConn.ws;
+    assert.equal(runtimeConn.firstMessage.type, "runtime.snapshot");
+
+    const startedPromise = waitForEventOfType(runtimeWs, "session.started");
+    const createRes = await postJson(base, "/api/sessions", {
+      name: "quiet-heartbeat",
+      tier: "mcp_tracked",
+    });
+    assert.equal(createRes.status, 201);
+    const createBody = await createRes.json();
+    await startedPromise;
+
+    const staleHeartbeatAt = isoMinutesAgo(15);
+    const statusPromise = waitForEventOfType(runtimeWs, "session.status");
+    await hub.runtimeStore.append({
+      schemaVersion: 1,
+      ts: staleHeartbeatAt,
+      type: "session.output",
+      source: "mcp",
+      workspace,
+      sessionId: createBody.session.id,
+      stream: "structured",
+      bytes: 0,
+      preview: "heartbeat",
+    });
+
+    const statusMsg = await statusPromise;
+    assert.equal(statusMsg.event.source, "system");
+    assert.equal(statusMsg.event.status, "quiet");
+    assert.equal(statusMsg.event.sessionId, createBody.session.id);
+
+    const getRes = await fetch(`${base}/api/sessions/${createBody.session.id}`);
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json();
+    assert.equal(getBody.session.status, "quiet");
+    assert.equal(getBody.session.lastStructuredEventAt, staleHeartbeatAt);
+  } finally {
+    if (runtimeWs) runtimeWs.close();
+    await hub.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("startHub activity monitor preserves explicit human status", { timeout: TEST_TIMEOUT }, async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const hub = await startHub({ workspace, port, uiDir: join(process.cwd(), "ui") });
+  let runtimeWs;
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const runtimeConn = await openWsWithFirstMessage(`ws://127.0.0.1:${port}/runtime/ws`, {
+      headers: { Origin: base },
+    });
+    runtimeWs = runtimeConn.ws;
+    assert.equal(runtimeConn.firstMessage.type, "runtime.snapshot");
+
+    const startedPromise = waitForEventOfType(runtimeWs, "session.started");
+    const createRes = await postJson(base, "/api/sessions", {
+      name: "explicit-human",
+      tier: "mcp_tracked",
+    });
+    assert.equal(createRes.status, 201);
+    const createBody = await createRes.json();
+    await startedPromise;
+
+    const patchRes = await patchJson(
+      base,
+      `/api/sessions/${createBody.session.id}`,
+      { status: "waiting_for_human" },
+      { "X-LT-Session-Token": createBody.token.token },
+    );
+    assert.equal(patchRes.status, 200);
+
+    const staleHeartbeatAt = isoMinutesAgo(15);
+    await hub.runtimeStore.append({
+      schemaVersion: 1,
+      ts: staleHeartbeatAt,
+      type: "session.output",
+      source: "mcp",
+      workspace,
+      sessionId: createBody.session.id,
+      stream: "structured",
+      bytes: 0,
+      preview: "heartbeat",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const getRes = await fetch(`${base}/api/sessions/${createBody.session.id}`);
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json();
+    assert.equal(getBody.session.status, "waiting_for_human");
+    assert.equal(getBody.session.statusSource.kind, "http");
+    assert.equal(getBody.session.lastStructuredEventAt, staleHeartbeatAt);
+
+    const startingPatchRes = await patchJson(
+      base,
+      `/api/sessions/${createBody.session.id}`,
+      { status: "starting" },
+      { "X-LT-Session-Token": createBody.token.token },
+    );
+    assert.equal(startingPatchRes.status, 200);
+
+    const secondStaleHeartbeatAt = isoMinutesAgo(16);
+    await hub.runtimeStore.append({
+      schemaVersion: 1,
+      ts: secondStaleHeartbeatAt,
+      type: "session.output",
+      source: "mcp",
+      workspace,
+      sessionId: createBody.session.id,
+      stream: "structured",
+      bytes: 0,
+      preview: "heartbeat",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const startingGetRes = await fetch(`${base}/api/sessions/${createBody.session.id}`);
+    assert.equal(startingGetRes.status, 200);
+    const startingGetBody = await startingGetRes.json();
+    assert.equal(startingGetBody.session.status, "starting");
+    assert.equal(startingGetBody.session.statusSource.kind, "http");
+    assert.equal(startingGetBody.session.statusSource.eventType, "session.status");
+    assert.equal(startingGetBody.session.lastStructuredEventAt, secondStaleHeartbeatAt);
+  } finally {
+    if (runtimeWs) runtimeWs.close();
     await hub.close();
     rmSync(workspace, { recursive: true, force: true });
   }

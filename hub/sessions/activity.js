@@ -38,10 +38,11 @@
 //      warnings, no event.
 //   2. If the underlying process exited (or status is already `stopped`),
 //      derive `stopped` — no warnings.
-//   3. If an explicit structured source set the current status
-//      (`mcp | adapter | ui | cli | http`), trust it — passthrough the
-//      existing `warnings`. Auto-derivation never overrides a human / MCP
-//      / app-server-set state.
+//   3. If an explicit structured source set the current status after
+//      creation (`mcp | adapter | ui | cli | http`), trust it — passthrough
+//      the existing `warnings`. Auto-derivation never overrides a human /
+//      MCP / app-server-set state. The initial `starting` status seeded by
+//      `session.started` is not treated as a durable override.
 //   4. dumb_terminal silence past the quiet threshold → `quiet` +
 //      `quiet_terminal` warning.
 //   5. mcp_tracked / codex_app_server / hybrid missing the heartbeat past
@@ -155,6 +156,22 @@ export function hasExplicitStructuredState(session) {
 }
 
 /**
+ * True only for the initial status seeded by `session.started`. A later
+ * explicit `session.status` event is authoritative even when it sets the
+ * state back to "starting".
+ *
+ * @param {{ status?: string, statusSource?: { eventType?: string } | string }} session
+ * @returns {boolean}
+ */
+export function isInitialStartedState(session) {
+  if (!session || typeof session !== "object") return false;
+  if (session.status !== "starting") return false;
+  const src = session.statusSource;
+  if (!src || typeof src === "string") return false;
+  return src.eventType === "session.started";
+}
+
+/**
  * True when the underlying OS process exited (or the session is already in
  * the `stopped` state). The hub doesn't yet have a dedicated `processExited`
  * field on SessionRecord — when adapters land (SH-2-17/18) the field is
@@ -209,7 +226,9 @@ export function deriveActivity(session, now, thresholds = DEFAULT_THRESHOLDS) {
     return { state: "stopped", warnings: [] };
   }
   // 3. Explicit structured state (app-server/MCP/human override) wins.
-  if (hasExplicitStructuredState(session)) {
+  // `session.started` seeds status="starting" from HTTP/UI creation; that
+  // initial state should still be eligible for activity derivation.
+  if (!isInitialStartedState(session) && hasExplicitStructuredState(session)) {
     return {
       state: session.status,
       warnings: Array.isArray(session.warnings) ? session.warnings : [],
@@ -217,7 +236,7 @@ export function deriveActivity(session, now, thresholds = DEFAULT_THRESHOLDS) {
   }
   // 4. dumb_terminal: no recent raw output → quiet + quiet_terminal.
   if (session.tier === "dumb_terminal") {
-    const mins = minutesSince(session.lastOutputAt, now);
+    const mins = minutesSince(session.lastOutputAt ?? session.startedAt, now);
     if (mins > thresholds.dumbTerminalQuietAfterMinutes) {
       return {
         state: "quiet",
@@ -227,7 +246,7 @@ export function deriveActivity(session, now, thresholds = DEFAULT_THRESHOLDS) {
   }
   // 5. mcp/app-server/hybrid: missing heartbeat → quiet + missing_heartbeat.
   if (expectsHeartbeat(session)) {
-    const mins = minutesSince(session.lastStructuredEventAt, now);
+    const mins = minutesSince(session.lastStructuredEventAt ?? session.startedAt, now);
     if (mins > thresholds.missingHeartbeatAfterMinutes) {
       return {
         state: "quiet",

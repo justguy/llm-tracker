@@ -44,6 +44,7 @@ import { RuntimeStore } from "./runtime/store.js";
 import { rebuildRuntimeFromDisk, wrapSnapshot } from "./runtime/startup.js";
 import { RuntimeBroadcaster } from "./runtime/ws.js";
 import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
+import { ActivityMonitor } from "./sessions/activity.js";
 import { SessionTokenStore } from "./sessions/auth/tokens.js";
 import { Store, slugFromFile } from "./store.js";
 
@@ -61,6 +62,7 @@ const MAX_SCRATCHPAD_LEN = 5000;
 const MAX_COMMENT_LEN = 500;
 const MAX_BLOCKER_REASON_LEN = 2000;
 const RUN_SESSION_DRAFT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const ACTIVITY_MONITOR_TICK_INTERVAL_MS = 60 * 1000;
 
 function isLocalOrigin(origin) {
   if (!origin) return false;
@@ -77,6 +79,16 @@ function isAllowedMutatingOrigin(req, origin) {
   if (!origin) return false;
   if (isLocalOrigin(origin)) return true;
   return origin === requestOrigin(req);
+}
+
+function shouldScheduleActivityTick(event) {
+  if (!event || typeof event !== "object") return false;
+  if (event.type === "session.status" && event.source === "system") return false;
+  return (
+    event.type === "session.output" ||
+    event.type === "session.status" ||
+    event.type === "session.stopped"
+  );
 }
 
 function parseCookies(header) {
@@ -295,6 +307,8 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     ]);
   };
 
+  let scheduleActivityTick = () => {};
+
   const runtimeStore = new RuntimeStore({
     workspaceRoot: workspace,
     snapshotDebounceMs: runtimeConfig.snapshotDebounceMs,
@@ -311,8 +325,54 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       if (!attentionEngine.applyRuntimeEvent(event)) {
         recomputeAttention();
       }
+      if (shouldScheduleActivityTick(event)) {
+        scheduleActivityTick();
+      }
     }
   });
+  const activityMonitor = new ActivityMonitor({
+    runtimeStore,
+    projection: runtimeProjection,
+    workspace,
+    makeRuntimeId,
+    thresholds: workspaceConfig.resolved.sessionHub.activity,
+  });
+  let activityTickTimer = null;
+  let activityTickRunning = false;
+  let activityTickQueued = false;
+  let activityMonitorClosed = false;
+  const runActivityTick = async () => {
+    if (activityMonitorClosed) return;
+    if (activityTickRunning) {
+      activityTickQueued = true;
+      return;
+    }
+    activityTickRunning = true;
+    try {
+      do {
+        activityTickQueued = false;
+        await activityMonitor.tickAll();
+      } while (activityTickQueued && !activityMonitorClosed);
+    } catch (err) {
+      console.warn("ActivityMonitor tick failed:", err?.message || err);
+    } finally {
+      activityTickRunning = false;
+    }
+  };
+  scheduleActivityTick = () => {
+    if (activityMonitorClosed || activityTickTimer) return;
+    activityTickTimer = setTimeout(() => {
+      activityTickTimer = null;
+      void runActivityTick();
+    }, 0);
+    activityTickTimer.unref?.();
+  };
+  const activityMonitorIntervalTimer = setInterval(
+    () => scheduleActivityTick(),
+    ACTIVITY_MONITOR_TICK_INTERVAL_MS,
+  );
+  activityMonitorIntervalTimer.unref?.();
+
   runtimeStore.rev = runtimeProjection.rev;
   await replayAttentionOverlays();
 
@@ -1250,6 +1310,12 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     clearInterval(uiSessionSweepTimer);
     clearInterval(linkedTargetsPollTimer);
     clearInterval(runSessionDraftSweepTimer);
+    activityMonitorClosed = true;
+    clearInterval(activityMonitorIntervalTimer);
+    if (activityTickTimer) {
+      clearTimeout(activityTickTimer);
+      activityTickTimer = null;
+    }
 
     try {
       await watcher.close();
@@ -1304,6 +1370,12 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       clearInterval(uiSessionSweepTimer);
       clearInterval(linkedTargetsPollTimer);
       clearInterval(runSessionDraftSweepTimer);
+      activityMonitorClosed = true;
+      clearInterval(activityMonitorIntervalTimer);
+      if (activityTickTimer) {
+        clearTimeout(activityTickTimer);
+        activityTickTimer = null;
+      }
       try {
         await watcher.close();
       } catch {}
