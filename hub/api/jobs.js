@@ -11,6 +11,7 @@
 //   PATCH  /api/jobs/:jobId                     — checkpoint delegate (SH-5-18)
 //   POST   /api/jobs/:jobId/checkpoint          — emit job.checkpoint
 //   POST   /api/jobs/:jobId/complete            — JobCompleteResult union
+//   POST   /api/jobs/:jobId/complete-override   — emit human.override + job.completed
 //   POST   /api/jobs/:jobId/cancel              — emit job.completed (cancelled)
 //   POST   /api/jobs/:jobId/rollover            — emit job.rollover_requested
 //   POST   /api/jobs/:jobId/unblock             — emit job.unblocked (SH-5-16)
@@ -19,12 +20,17 @@
 // The `/complete` route implements the JobCompleteResult union (§11.5.1):
 //   { ok: true,  mode: "completed", jobId }
 //   { ok: false, mode: "gates_pending", missing[], requiresOverride, overridePromptUrl }
-// The third union variant (`completed_via_override`) is the response shape of
-// SH-5-15's `/complete-override` endpoint and is out of scope here.
+//   { ok: true,  mode: "completed_via_override", jobId, overrideEventId }
 //
 // Error envelope mirrors hub/api/sessions.js: `{ error: { code, message, details? } }`.
 
 import { isJobId } from "../runtime/ids.js";
+import { TERMINAL_JOB_STATUS } from "../jobs/registry.js";
+import {
+  buildGatesPendingResult,
+  findMissingRequiredGates,
+  resolveUiCompleteMode,
+} from "../jobs/gates.js";
 
 const CHECKPOINT_ALLOWED_FIELDS = new Set(["status", "summary", "idempotencyKey"]);
 // SH-5-18: PATCH /api/jobs/:jobId reconciles with checkpoint semantics, so it
@@ -40,7 +46,8 @@ const CREATE_ALLOWED_FIELDS = new Set([
   "predecessorJobId",
   "idempotencyKey",
 ]);
-const COMPLETE_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
+const COMPLETE_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey", "uiCompleteMode"]);
+const COMPLETE_OVERRIDE_ALLOWED_FIELDS = new Set(["reason", "summary", "user", "idempotencyKey"]);
 const CANCEL_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
 const ROLLOVER_ALLOWED_FIELDS = new Set(["reason", "idempotencyKey"]);
 // SH-5-16: /unblock accepts reason + previousReason. `user` is intentionally
@@ -73,11 +80,12 @@ export function registerJobsRoutes(app, deps) {
     typeof jobRegistry.get !== "function" ||
     typeof jobRegistry.checkpoint !== "function" ||
     typeof jobRegistry.complete !== "function" ||
+    typeof jobRegistry.completeWithOverride !== "function" ||
     typeof jobRegistry.cancel !== "function" ||
     typeof jobRegistry.requestRollover !== "function" ||
     typeof jobRegistry.unblock !== "function"
   ) {
-    throw new Error("registerJobsRoutes: jobRegistry (with list/get/checkpoint/complete/cancel/requestRollover/unblock) required");
+    throw new Error("registerJobsRoutes: jobRegistry (with list/get/checkpoint/complete/completeWithOverride/cancel/requestRollover/unblock) required");
   }
 
   // --- GET /api/jobs ------------------------------------------------------
@@ -198,6 +206,7 @@ export function registerJobsRoutes(app, deps) {
     const body = req.body;
     let summary;
     let idempotencyKey;
+    let uiCompleteMode;
     if (body !== undefined && body !== null) {
       if (typeof body !== "object" || Array.isArray(body)) {
         return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
@@ -207,27 +216,31 @@ export function registerJobsRoutes(app, deps) {
         if (unknown) return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
         summary = body.summary;
         idempotencyKey = body.idempotencyKey;
+        try {
+          uiCompleteMode = resolveUiCompleteMode(body.uiCompleteMode);
+        } catch (err) {
+          return mapGateError(res, err);
+        }
       }
     }
+    if (uiCompleteMode === undefined) uiCompleteMode = resolveUiCompleteMode(undefined);
 
-    // Inspect the projection record's completionGates. Until SH-5-04 lands,
-    // this field is generally absent — in which case the common path runs.
+    // Inspect the projection record's completionGates. A gate with status
+    // `satisfied` or `overridden` still blocks completion unless it carries a
+    // runtime-event evidenceRef. This prevents UI-only flips from completing.
     const existing = jobRegistry.get(jobId);
     if (!existing) {
       return sendError(res, 404, "JOB_NOT_FOUND", `job not found: ${jobId}`);
     }
-    const gates = Array.isArray(existing.completionGates) ? existing.completionGates : [];
-    const missing = gates.filter(
-      (g) => g && g.required === true && g.status !== "satisfied" && g.status !== "overridden",
-    );
-    if (missing.length > 0) {
-      return res.status(200).json({
-        ok: false,
-        mode: "gates_pending",
-        missing,
-        requiresOverride: true,
-        overridePromptUrl: `/api/jobs/${jobId}/complete-override`,
+    if (TERMINAL_JOB_STATUS.includes(existing.status)) {
+      return sendError(res, 409, "JOB_TERMINAL", `job '${jobId}' is terminal (${existing.status})`, {
+        jobId,
+        status: existing.status,
       });
+    }
+    const missing = findMissingRequiredGates(existing);
+    if (missing.length > 0) {
+      return res.status(200).json(buildGatesPendingResult(jobId, missing));
     }
 
     try {
@@ -238,6 +251,54 @@ export function registerJobsRoutes(app, deps) {
         source: "http",
       });
       return res.status(200).json({ ok: true, mode: "completed", jobId });
+    } catch (err) {
+      return mapRegistryError(res, err);
+    }
+  });
+
+  // --- POST /api/jobs/:jobId/complete-override ----------------------------
+  // Human override of missing completion gates. The human.override event is
+  // recorded first; its canonical event id becomes each overridden gate's
+  // evidenceRef before the job.completed terminal transition is emitted.
+  app.post("/api/jobs/:jobId/complete-override", async (req, res) => {
+    const { jobId } = req.params;
+    if (!isJobId(jobId)) {
+      return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
+    }
+    const bodyOrErr = requireObjectBody(req, res);
+    if (bodyOrErr === undefined) return;
+    const unknown = rejectUnknownFields(bodyOrErr, COMPLETE_OVERRIDE_ALLOWED_FIELDS);
+    if (unknown) return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+    if (typeof bodyOrErr.reason !== "string" || bodyOrErr.reason.length === 0) {
+      return sendError(res, 400, "INVALID_BODY", "`reason` is required for completion override");
+    }
+    if (bodyOrErr.user !== undefined && (typeof bodyOrErr.user !== "string" || bodyOrErr.user.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`user` must be a non-empty string when present");
+    }
+
+    const existing = jobRegistry.get(jobId);
+    if (!existing) {
+      return sendError(res, 404, "JOB_NOT_FOUND", `job not found: ${jobId}`);
+    }
+    const missing = findMissingRequiredGates(existing);
+    if (missing.length === 0) {
+      return sendError(res, 409, "NO_MISSING_GATES", "completion override requires at least one missing required gate");
+    }
+
+    try {
+      const result = await jobRegistry.completeWithOverride(jobId, {
+        reason: bodyOrErr.reason,
+        ...(bodyOrErr.summary !== undefined ? { summary: bodyOrErr.summary } : {}),
+        ...(bodyOrErr.user !== undefined ? { user: bodyOrErr.user } : {}),
+        ...(bodyOrErr.idempotencyKey !== undefined ? { idempotencyKey: bodyOrErr.idempotencyKey } : {}),
+        source: "http",
+      });
+      return res.status(200).json({
+        ok: true,
+        mode: "completed_via_override",
+        jobId,
+        overrideEventId: result.overrideEventId,
+      });
     } catch (err) {
       return mapRegistryError(res, err);
     }
@@ -377,7 +438,9 @@ function rejectUnknownFields(body, allowed) {
  *   INVALID_SESSION_ID        -> 400 (SH-5-18, create-time)
  *   INVALID_PREDECESSOR_ID    -> 400 (SH-5-18, create-time)
  *   INVALID_JOB_KIND          -> 400 (SH-5-18, create-time)
+ *   INVALID_GATE_IDS          -> 400
  *   INVALID_JOB_STATE         -> 409
+ *   NO_MISSING_GATES          -> 409
  *   UNKNOWN_JOB               -> 404 (JOB_NOT_FOUND in the HTTP envelope)
  *   UNKNOWN_PREDECESSOR       -> 404 (SH-5-18, create-time)
  *   JOB_TERMINAL              -> 409
@@ -391,11 +454,13 @@ function mapRegistryError(res, err) {
     case "INVALID_JOB_STATUS":
     case "TERMINAL_STATUS_FORBIDDEN":
     case "INVALID_INPUT":
+    case "INVALID_GATE_IDS":
     case "INVALID_SESSION_ID":
     case "INVALID_PREDECESSOR_ID":
     case "INVALID_JOB_KIND":
       return sendError(res, 400, code, err.message, details);
     case "INVALID_JOB_STATE":
+    case "NO_MISSING_GATES":
       return sendError(res, 409, code, err.message, details);
     case "UNKNOWN_JOB":
       return sendError(res, 404, "JOB_NOT_FOUND", err.message, details);
@@ -405,6 +470,29 @@ function mapRegistryError(res, err) {
       return sendError(res, 409, "JOB_TERMINAL", err.message, details);
     default:
       return sendError(res, 500, "REGISTRY_FAILED", (err && err.message) || "job registry call failed");
+  }
+}
+
+function mapGateError(res, err) {
+  const code = err && err.code;
+  const details = err && err.details;
+  switch (code) {
+    case "INVALID_UI_COMPLETE_MODE":
+    case "INVALID_GATE_STATUS":
+    case "EVIDENCE_REF_REQUIRED":
+    case "OVERRIDE_REASON_REQUIRED":
+    case "INVALID_GATE_IDS":
+    case "INVALID_USER":
+      return sendError(res, 400, "INVALID_BODY", err.message, details);
+    case "INVALID_JOB_ID":
+      return sendError(res, 400, "INVALID_JOB_ID", err.message, details);
+    case "INVALID_JOB":
+    case "INVALID_GATE":
+    case "INVALID_WORKSPACE":
+    case "INVALID_SOURCE":
+      return sendError(res, 500, "GATE_STATE_FAILED", err.message, details);
+    default:
+      return sendError(res, 500, "GATE_STATE_FAILED", (err && err.message) || "completion gate state failed");
   }
 }
 

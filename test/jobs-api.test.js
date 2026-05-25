@@ -270,6 +270,7 @@ test("POST /api/jobs/:id/complete — missing required gates: HTTP 200 with gate
   const app = await startApp();
   try {
     const created = await app.jobRegistry.create(validJobInput());
+    const evidenceRef = makeRuntimeId("evt");
 
     // Inject completionGates directly onto the projection record. SH-5-04 will
     // populate this slot via the verify pack; until then the route inspects
@@ -277,9 +278,16 @@ test("POST /api/jobs/:id/complete — missing required gates: HTTP 200 with gate
     const record = app.projection.jobs.get(created.jobId);
     record.completionGates = [
       { id: "g-required-pending", kind: "verify_pack", required: true, status: "pending" },
-      { id: "g-required-satisfied", kind: "dod_checked", required: true, status: "satisfied" },
+      { id: "g-required-satisfied", kind: "dod_checked", required: true, status: "satisfied", evidenceRef },
       { id: "g-optional-pending", kind: "verify_pack", required: false, status: "pending" },
-      { id: "g-overridden", kind: "verify_pack", required: true, status: "overridden" },
+      {
+        id: "g-overridden",
+        kind: "verify_pack",
+        required: true,
+        status: "overridden",
+        evidenceRef,
+        overrideReason: "operator accepted",
+      },
     ];
 
     const r = await postJson(app.base, `/api/jobs/${created.jobId}/complete`, {});
@@ -287,14 +295,178 @@ test("POST /api/jobs/:id/complete — missing required gates: HTTP 200 with gate
     assert.equal(r.body.ok, false);
     assert.equal(r.body.mode, "gates_pending");
     assert.equal(r.body.requiresOverride, true);
+    assert.equal(r.body.uiCompleteMode, "block_required_missing");
     assert.equal(r.body.overridePromptUrl, `/api/jobs/${created.jobId}/complete-override`);
     assert.equal(r.body.missing.length, 1);
+    assert.deepEqual(r.body.missing_gates, r.body.missing);
     assert.equal(r.body.missing[0].id, "g-required-pending");
     assert.equal(r.body.missing[0].required, true);
 
     // No job.completed event was emitted (the route short-circuits).
     assert.equal(app.appendedEvents.filter((e) => e.type === "job.completed").length, 0);
     assert.equal(app.jobRegistry.get(created.jobId).status, "running");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/complete — satisfied gate without evidenceRef is still blocked", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "g-ui-flipped", kind: "verify_pack", required: true, status: "satisfied" },
+    ];
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/complete`, {});
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, false);
+    assert.equal(r.body.mode, "gates_pending");
+    assert.equal(r.body.missing[0].id, "g-ui-flipped");
+    assert.equal(app.appendedEvents.filter((e) => e.type === "job.completed").length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/complete — rejects unknown uiCompleteMode", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/complete`, {
+      uiCompleteMode: "silent_complete",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_BODY");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/complete-override — reason required", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "g-required", kind: "verify_pack", required: true, status: "pending" },
+    ];
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/complete-override`, {});
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_BODY");
+    assert.equal(app.appendedEvents.filter((e) => e.type === "human.override").length, 0);
+    assert.equal(app.jobRegistry.get(created.jobId).status, "running");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/complete-override — records HumanOverrideEvent, binds gates, completes", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "g-required", kind: "verify_pack", required: true, status: "pending" },
+      { id: "g-optional", kind: "verify_pack", required: false, status: "pending" },
+    ];
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/complete-override`, {
+      reason: "operator accepted missing verify evidence",
+      user: "user:adi",
+      summary: "completed by human override",
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, true);
+    assert.equal(r.body.mode, "completed_via_override");
+    assert.equal(r.body.jobId, created.jobId);
+    assert.match(r.body.overrideEventId, /^evt_/);
+
+    const overrideEvent = app.appendedEvents.find((e) => e.type === "human.override");
+    assert.ok(overrideEvent);
+    assert.equal(overrideEvent.id, r.body.overrideEventId);
+    assert.equal(overrideEvent.jobId, created.jobId);
+    assert.deepEqual(overrideEvent.gateIds, ["g-required"]);
+    assert.equal(overrideEvent.reason, "operator accepted missing verify evidence");
+    assert.equal(overrideEvent.user, "user:adi");
+    assert.equal(overrideEvent.context.kind, "complete_override");
+    assert.equal(overrideEvent.context.sessionId, SES);
+    assert.equal(overrideEvent.context.projectSlug, "demo");
+    assert.equal(overrideEvent.context.taskId, "t-1");
+    assert.deepEqual(overrideEvent.overriddenGates, [
+      {
+        id: "g-required",
+        kind: "verify_pack",
+        required: true,
+        status: "overridden",
+        overrideReason: "operator accepted missing verify evidence",
+      },
+    ]);
+
+    const completedEvents = app.appendedEvents.filter((e) => e.type === "job.completed");
+    assert.equal(completedEvents.length, 1);
+    assert.equal(completedEvents[0].status, "completed");
+
+    const job = app.jobRegistry.get(created.jobId);
+    assert.equal(job.status, "completed");
+    assert.equal(job.summary, "completed by human override");
+    assert.deepEqual(job.completionGates[0], {
+      id: "g-required",
+      kind: "verify_pack",
+      required: true,
+      status: "overridden",
+      evidenceRef: r.body.overrideEventId,
+      overrideReason: "operator accepted missing verify evidence",
+    });
+    assert.deepEqual(job.completionGates[1], {
+      id: "g-optional",
+      kind: "verify_pack",
+      required: false,
+      status: "pending",
+    });
+
+    const replay = new RuntimeProjection();
+    for (const event of app.appendedEvents) replay.apply(event);
+    const replayedJob = replay.jobs.get(created.jobId);
+    assert.equal(replayedJob.status, "completed");
+    assert.deepEqual(replayedJob.completionGates, [
+      {
+        id: "g-required",
+        kind: "verify_pack",
+        required: true,
+        status: "overridden",
+        evidenceRef: r.body.overrideEventId,
+        overrideReason: "operator accepted missing verify evidence",
+      },
+    ]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/complete-override — terminal job rejects before recording override", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "g-required", kind: "verify_pack", required: true, status: "pending" },
+    ];
+    await app.jobRegistry.cancel(created.jobId, { summary: "cancelled first" });
+    const eventCountBefore = app.appendedEvents.length;
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/complete-override`, {
+      reason: "late operator override",
+    });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.error.code, "JOB_TERMINAL");
+    assert.equal(app.appendedEvents.length, eventCountBefore);
+    assert.equal(app.appendedEvents.filter((e) => e.type === "human.override").length, 0);
+    assert.deepEqual(app.jobRegistry.get(created.jobId).completionGates, [
+      { id: "g-required", kind: "verify_pack", required: true, status: "pending" },
+    ]);
   } finally {
     await app.close();
   }

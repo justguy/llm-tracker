@@ -42,6 +42,7 @@
 //     SH-5-04 (verify pack) and SH-5-03 (skill plan).
 
 import { isJobId, isSessionId } from "../runtime/ids.js";
+import { findMissingRequiredGates } from "./gates.js";
 
 /**
  * @typedef {"queued" | "starting" | "running" | "blocked" | "verifying" | "completed" | "cancelled" | "rolled_over"} JobStatus
@@ -410,6 +411,90 @@ export class JobRegistry {
       ...(summary ? { summary } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
+  }
+
+  /**
+   * Complete a job by recording an explicit HumanOverrideEvent for the
+   * currently missing required completion gates, then emitting job.completed.
+   * The runtime projection consumes human.override to bind each overridden
+   * gate's evidenceRef to the canonical override event id, so replay rebuilds
+   * the same JobRecord state without route-owned projection mutation.
+   *
+   * @param {string} jobId
+   * @param {object} input
+   * @param {string} input.reason
+   * @param {string} [input.summary]
+   * @param {string} [input.user]
+   * @param {string} [input.source="system"]
+   * @param {string} [input.idempotencyKey]
+   * @returns {Promise<{ rev: number; eventId: string; overrideEventId: string; overrideRev: number; job: object | null }>}
+   */
+  async completeWithOverride(jobId, input) {
+    const existing = this.#assertActive(jobId, "completeWithOverride");
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw makeError("completeWithOverride: input must be an object", "INVALID_INPUT");
+    }
+    const { reason, summary, user, source = "system", idempotencyKey } = input;
+    assertNonEmptyString(reason, "reason", "completeWithOverride");
+    if (summary !== undefined && (typeof summary !== "string" || summary.length === 0)) {
+      throw makeError("completeWithOverride: summary must be a non-empty string when present", "INVALID_INPUT", { field: "summary" });
+    }
+    if (user !== undefined && (typeof user !== "string" || user.length === 0)) {
+      throw makeError("completeWithOverride: user must be a non-empty string when present", "INVALID_INPUT", { field: "user" });
+    }
+
+    const missing = findMissingRequiredGates(existing);
+    if (missing.length === 0) {
+      throw makeError(
+        `completeWithOverride: job '${jobId}' has no missing required completion gates`,
+        "NO_MISSING_GATES",
+        { jobId },
+      );
+    }
+    const gateIds = missing.map((gate) => gate.id);
+    if (gateIds.some((gateId) => typeof gateId !== "string" || gateId.length === 0)) {
+      throw makeError(
+        "completeWithOverride: every missing gate must have a non-empty id",
+        "INVALID_GATE_IDS",
+        { jobId },
+      );
+    }
+
+    const overrideResult = await this.#appendEvent({
+      type: "human.override",
+      source,
+      jobId,
+      sessionId: existing.sessionId,
+      gateIds,
+      reason,
+      context: {
+        kind: "complete_override",
+        jobId,
+        ...(isSessionId(existing.sessionId) ? { sessionId: existing.sessionId } : {}),
+        ...(typeof existing.projectSlug === "string" && existing.projectSlug.length > 0 ? { projectSlug: existing.projectSlug } : {}),
+        ...(typeof existing.taskId === "string" && existing.taskId.length > 0 ? { taskId: existing.taskId } : {}),
+      },
+      overriddenGates: missing.map((gate) => ({
+        ...gate,
+        status: "overridden",
+        overrideReason: reason,
+      })),
+      ...(user ? { user } : {}),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+
+    const completeResult = await this.complete(jobId, {
+      status: "completed",
+      ...(summary ? { summary } : {}),
+      source,
+    });
+    return {
+      rev: completeResult.rev,
+      eventId: completeResult.eventId,
+      overrideEventId: overrideResult.eventId,
+      overrideRev: overrideResult.rev,
+      job: completeResult.job,
+    };
   }
 
   /**

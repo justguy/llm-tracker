@@ -114,6 +114,7 @@ const HANDLERS = Object.freeze({
   "job.queued": handleJobQueued,
   "job.unblocked": handleJobUnblocked,
   "job.rollover_requested": handleJobRolloverRequested,
+  "human.override": handleHumanOverride,
   "skill.run.started": handleSkillRunStarted,
   "skill.run.finished": handleSkillRunFinished,
 });
@@ -328,6 +329,40 @@ function handleJobRolloverRequested(p, e) {
     ...existing,
     rolloverRequestedAt: e.ts,
     ...(typeof e.reason === "string" ? { rolloverReason: e.reason } : {}),
+  });
+}
+
+function handleHumanOverride(p, e) {
+  const id = e.jobId;
+  if (!isJobId(id)) return;
+  const existing = p.jobs.get(id);
+  if (!existing) return;
+  if (typeof e.id !== "string" || e.id.length === 0) return;
+  if (typeof e.reason !== "string" || e.reason.length === 0) return;
+
+  const gateIds = new Set(Array.isArray(e.gateIds) ? e.gateIds.filter((gateId) => typeof gateId === "string" && gateId.length > 0) : []);
+  if (gateIds.size === 0) return;
+
+  const currentGates = Array.isArray(existing.completionGates) ? existing.completionGates : [];
+  const eventGates = Array.isArray(e.overriddenGates) ? e.overriddenGates : [];
+  const sourceGates = currentGates.length > 0 ? currentGates : eventGates;
+  if (sourceGates.length === 0) return;
+
+  const nextGates = sourceGates
+    .filter((gate) => gate && typeof gate === "object")
+    .map((gate) => {
+      if (!gateIds.has(gate.id)) return { ...gate };
+      return {
+        ...gate,
+        status: "overridden",
+        evidenceRef: e.id,
+        overrideReason: e.reason,
+      };
+    });
+  p.jobs.set(id, {
+    ...existing,
+    completionGates: nextGates,
+    lastActivityAt: e.ts,
   });
 }
 
