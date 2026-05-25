@@ -318,7 +318,7 @@ test(
       }),
       true,
     );
-    assert.equal(engine.getAll()[0].clearedAt, "2026-05-24T12:06:00.000Z");
+    assert.deepEqual(engine.getAll(), [], "human clear removes the item from the visible projection immediately");
     assert.equal(calls.at(-1).changes.removed.length, 1);
 
     const stillActive = engine.compute({ sessions: [] });

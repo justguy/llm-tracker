@@ -520,6 +520,15 @@ export class AttentionEngine {
     }
 
     const current = this.projection.getAll();
+    if (event.type === "attention.cleared") {
+      const next = current.filter((item) => !attentionEventMatchesItem(event, item));
+      if (next.length !== current.length) {
+        this.projection.apply(next);
+        this.#emitChangesIfAny(this.projection.getAll());
+      }
+      return true;
+    }
+
     let changed = false;
     const next = current.map((item) => {
       if (!attentionEventMatchesItem(event, item)) return item;

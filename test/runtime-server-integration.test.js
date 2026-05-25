@@ -357,6 +357,22 @@ test("startHub wires attention routes to runtime attention broadcasts", { timeou
     const ackedItem = ackUpdate.items.find((i) => i.id === item.id);
     assert.ok(ackedItem, "acknowledged attention item should remain in the active set");
     assert.equal(typeof ackedItem.acknowledgedAt, "string");
+
+    const clearRuntimeEvent = waitForMessageType(runtimeWs, "runtime.event");
+    const clearAttentionUpdate = waitForMessageType(runtimeWs, "attention.updated");
+    const clearRes = await postJson(base, `/api/attention/${item.id}/clear`, {
+      dedupeKey: item.dedupeKey,
+      reason: "operator resolved the approval",
+    });
+    assert.equal(clearRes.status, 201);
+    assert.equal((await clearRuntimeEvent).event.type, "attention.cleared");
+    const clearUpdate = await clearAttentionUpdate;
+    assert.equal(clearUpdate.items.find((i) => i.id === item.id), undefined);
+
+    const afterClearRes = await fetch(`${base}/api/attention?scope=global`);
+    assert.equal(afterClearRes.status, 200);
+    const afterClearBody = await afterClearRes.json();
+    assert.equal(afterClearBody.items.find((i) => i.id === item.id), undefined);
   } finally {
     if (runtimeWs) runtimeWs.close();
     await hub.close();
