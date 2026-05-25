@@ -21,6 +21,8 @@ export function Cell({
   setDragState,
   activeTask,
   activeTaskMode,
+  runtimeSessions,
+  runtimeJobs,
   onDrop,
   onDeleteTask,
   onSaveComment,
@@ -100,6 +102,9 @@ export function Cell({
               activeMode=${activeTask?.id === task.id ? activeTaskMode : "brief"}
               expanded=${activeTask?.id === task.id}
               dragging=${dragState.taskId === task.id}
+              projectSlug=${slug}
+              runtimeSessions=${runtimeSessions}
+              runtimeJobs=${runtimeJobs}
               onDragStart=${(e, selectedTask) => {
                 e.dataTransfer.effectAllowed = "move";
                 e.dataTransfer.setData("text/plain", selectedTask.id);
@@ -137,6 +142,8 @@ export function Matrix({
   fuzzyMatchMap,
   activeTask,
   activeTaskMode,
+  runtimeSessions,
+  runtimeJobs,
   onMove,
   onToggleCollapse,
   onMoveLane,
@@ -311,6 +318,8 @@ export function Matrix({
             setDragState=${setDragState}
             activeTask=${activeTask?.placement?.swimlaneId === lane.id && activeTask?.placement?.priorityId === priority.id ? activeTask : null}
             activeTaskMode=${activeTaskMode}
+            runtimeSessions=${runtimeSessions}
+            runtimeJobs=${runtimeJobs}
             onDrop=${onMove}
             onDeleteTask=${onDeleteTask}
             onSaveComment=${onSaveComment}

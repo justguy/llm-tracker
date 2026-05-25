@@ -22,6 +22,8 @@ export function TreeTaskCard({
   fuzzyMatchMap,
   activeTask,
   activeTaskMode,
+  runtimeSessions,
+  runtimeJobs,
   onDeleteTask,
   onSaveComment,
   onOpenTask,
@@ -37,6 +39,9 @@ export function TreeTaskCard({
         fuzzyActive=${!!(fuzzyQuery && fuzzyQuery.trim())}
         activeMode=${activeTask?.id === task.id ? activeTaskMode : "brief"}
         expanded=${activeTask?.id === task.id}
+        projectSlug=${slug}
+        runtimeSessions=${runtimeSessions}
+        runtimeJobs=${runtimeJobs}
         onDelete=${onDeleteTask}
         onSaveComment=${onSaveComment}
         onToggleExpand=${(selected) => onOpenTask && onOpenTask(selected, "brief")}
@@ -133,6 +138,8 @@ export function TreeView({
   fuzzyMatchMap,
   activeTask,
   activeTaskMode,
+  runtimeSessions,
+  runtimeJobs,
   onDeleteTask,
   onSaveComment,
   onOpenTask,
@@ -166,6 +173,8 @@ export function TreeView({
       fuzzyMatchMap=${fuzzyMatchMap}
       activeTask=${activeTask?.id === task.id ? activeTask : null}
       activeTaskMode=${activeTaskMode}
+      runtimeSessions=${runtimeSessions}
+      runtimeJobs=${runtimeJobs}
       onDeleteTask=${onDeleteTask}
       onSaveComment=${onSaveComment}
       onOpenTask=${onOpenTask}

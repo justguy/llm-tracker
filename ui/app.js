@@ -62,6 +62,86 @@ export {
   loadNextRecommendation
 };
 
+const TERMINAL_RUNTIME_JOB_STATUSES = new Set(["completed", "cancelled", "rolled_over"]);
+
+function isRuntimeRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeRuntimeJobList(jobs) {
+  if (!Array.isArray(jobs)) return [];
+  return jobs.filter((job) => isRuntimeRecord(job) && typeof job.id === "string" && job.id.length > 0);
+}
+
+function upsertRuntimeJob(jobs, id, updater) {
+  if (typeof id !== "string" || id.length === 0) return normalizeRuntimeJobList(jobs);
+  const list = normalizeRuntimeJobList(jobs);
+  const index = list.findIndex((job) => job.id === id);
+  const base = index >= 0 ? list[index] : { id };
+  const nextJob = updater(base);
+  if (!isRuntimeRecord(nextJob)) return list;
+  if (index === -1) return list.concat(nextJob);
+  const next = list.slice();
+  next[index] = nextJob;
+  return next;
+}
+
+export function applyRuntimeJobEvent(jobs, event) {
+  if (!isRuntimeRecord(event)) return normalizeRuntimeJobList(jobs);
+  const jobId = event.jobId;
+  if (typeof jobId !== "string" || jobId.length === 0) return normalizeRuntimeJobList(jobs);
+
+  switch (event.type) {
+    case "job.started":
+      return upsertRuntimeJob(jobs, jobId, (job) => ({
+        ...job,
+        id: jobId,
+        ...(typeof event.sessionId === "string" ? { sessionId: event.sessionId } : {}),
+        ...(event.projectSlug !== undefined ? { projectSlug: event.projectSlug } : {}),
+        ...(event.taskId !== undefined ? { taskId: event.taskId } : {}),
+        ...(event.profileId !== undefined ? { profileId: event.profileId } : {}),
+        ...(event.kind !== undefined ? { kind: event.kind } : {}),
+        status: "running",
+        startedAt: event.ts,
+      }));
+    case "job.queued":
+      return upsertRuntimeJob(jobs, jobId, (job) => ({
+        ...job,
+        id: jobId,
+        ...(typeof event.sessionId === "string" ? { sessionId: event.sessionId } : {}),
+        ...(event.projectSlug !== undefined ? { projectSlug: event.projectSlug } : {}),
+        ...(event.taskId !== undefined ? { taskId: event.taskId } : {}),
+        ...(event.profileId !== undefined ? { profileId: event.profileId } : {}),
+        ...(event.kind !== undefined ? { kind: event.kind } : {}),
+        ...(event.predecessorJobId !== undefined ? { predecessorJobId: event.predecessorJobId } : {}),
+        status: "queued",
+        queuedAt: event.ts,
+      }));
+    case "job.checkpoint":
+      return upsertRuntimeJob(jobs, jobId, (job) => ({
+        ...job,
+        lastActivityAt: event.ts,
+        ...(typeof event.status === "string" ? { status: event.status } : {}),
+        ...(typeof event.summary === "string" ? { lastCheckpointSummary: event.summary } : {}),
+      }));
+    case "job.unblocked":
+      return upsertRuntimeJob(jobs, jobId, (job) => ({
+        ...job,
+        status: "running",
+        lastActivityAt: event.ts,
+      }));
+    case "job.completed":
+      return upsertRuntimeJob(jobs, jobId, (job) => ({
+        ...job,
+        status: TERMINAL_RUNTIME_JOB_STATUSES.has(event.status) ? event.status : "completed",
+        completedAt: event.ts,
+        ...(typeof event.summary === "string" ? { summary: event.summary } : {}),
+      }));
+    default:
+      return normalizeRuntimeJobList(jobs);
+  }
+}
+
 // ─────── App ───────
 function App() {
   const initialSettings = useMemo(() => loadSettings(), []);
@@ -101,6 +181,7 @@ function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [attentionItems, setAttentionItems] = useState([]);
   const [runtimeSessions, setRuntimeSessions] = useState([]);
+  const [runtimeJobs, setRuntimeJobs] = useState([]);
   const [runtimeWsUp, setRuntimeWsUp] = useState(false);
   const [sessionCardSize, setSessionCardSize] = useState(
     ["compact", "normal", "large"].includes(initialSettings.sessionCardSize)
@@ -316,8 +397,10 @@ function App() {
         if (msg.type === "runtime.snapshot") {
           setAttentionItems(Array.isArray(msg.snapshot?.attention) ? msg.snapshot.attention : []);
           setRuntimeSessions(Array.isArray(msg.snapshot?.sessions) ? msg.snapshot.sessions : []);
+          setRuntimeJobs(normalizeRuntimeJobList(msg.snapshot?.jobs));
         } else if (msg.type === "runtime.event") {
           setRuntimeSessions((prev) => applyRuntimeSessionsMessage(prev, msg));
+          setRuntimeJobs((prev) => applyRuntimeJobEvent(prev, msg.event));
         } else if (msg.type === "attention.updated") {
           setAttentionItems(Array.isArray(msg.items) ? msg.items : []);
         }
@@ -955,6 +1038,8 @@ function App() {
                 setTaskDrawer((current) => (current?.slug === s ? null : current))
               }
               onOpenTaskModal=${(task, mode) => onOpenTaskModalHandler(s, task, mode)}
+              runtimeSessions=${runtimeSessions}
+              runtimeJobs=${runtimeJobs}
               scratchpadExpanded=${!!scratchpadExpanded[s]}
               onToggleScratchpad=${onToggleScratchpad}
               onSaveScratchpad=${onSaveScratchpad}

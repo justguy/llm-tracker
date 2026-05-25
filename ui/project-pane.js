@@ -27,6 +27,8 @@ export function ProjectPane({
   openTaskMode,
   onCloseTask,
   onOpenTaskModal,
+  runtimeSessions,
+  runtimeJobs,
   scratchpadExpanded,
   onToggleScratchpad,
   onSaveScratchpad
@@ -58,6 +60,8 @@ export function ProjectPane({
               fuzzyMatchMap=${fuzzyMatchMap}
               activeTask=${activeTask}
               activeTaskMode=${openTaskMode}
+              runtimeSessions=${runtimeSessions}
+              runtimeJobs=${runtimeJobs}
               onDeleteTask=${(task) => onDeleteTask(slug, task)}
               onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
               onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
@@ -75,6 +79,8 @@ export function ProjectPane({
               fuzzyMatchMap=${fuzzyMatchMap}
               activeTask=${activeTask}
               activeTaskMode=${openTaskMode}
+              runtimeSessions=${runtimeSessions}
+              runtimeJobs=${runtimeJobs}
               onDeleteTask=${(task) => onDeleteTask(slug, task)}
               onSaveComment=${(taskId, value) => onSaveComment(slug, taskId, value)}
               onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
@@ -91,6 +97,8 @@ export function ProjectPane({
               fuzzyMatchMap=${fuzzyMatchMap}
               activeTask=${activeTask}
               activeTaskMode=${openTaskMode}
+              runtimeSessions=${runtimeSessions}
+              runtimeJobs=${runtimeJobs}
               onMove=${(args) => onMove(slug, args)}
               onToggleCollapse=${(laneId, collapsed) => onToggleCollapse(slug, laneId, collapsed)}
               onMoveLane=${(laneId, direction) => onMoveLane(slug, laneId, direction)}
