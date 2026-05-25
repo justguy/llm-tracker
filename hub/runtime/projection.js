@@ -160,6 +160,7 @@ function handleSessionStatus(p, e) {
     status: e.status,
     statusSource: { kind: e.source, eventId: e.id, eventType: e.type },
     lastActivityAt: e.ts,
+    ...(e.contextUsage && typeof e.contextUsage === "object" ? { contextUsage: { ...e.contextUsage } } : {}),
   });
 }
 

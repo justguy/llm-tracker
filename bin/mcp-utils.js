@@ -1,5 +1,6 @@
 import { httpRequest } from "./workspace-client.js";
 import { loadProjectEntry } from "../hub/project-loader.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
 export function clampInt(value, { fallback, min, max }) {
   const parsed = parseInt(value, 10);
@@ -62,19 +63,57 @@ export async function readToolPayload(getter, workspace, slug, extra = {}) {
   return makeJsonResult(payload.payload || payload);
 }
 
-export async function runHubMutation({ workspace, portFlag, method, path, label, body }) {
-  const response = await httpRequest(workspace, portFlag, method, path, body);
+export async function runHubMutation({
+  workspace,
+  portFlag,
+  method,
+  path,
+  label,
+  body,
+  headers,
+  jsonRpcErrorOnFailure = false
+}) {
+  const response = await httpRequest(workspace, portFlag, method, path, body, { headers });
   if (response.status === 0) {
+    if (jsonRpcErrorOnFailure) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Hub not reachable at ${response.url}. Start the hub or daemon before calling ${label}.`,
+        { status: response.status, url: response.url, body: response.body }
+      );
+    }
     return makeTextResult(
       `Hub not reachable at ${response.url}. Start the hub or daemon before calling ${label}.`,
       { isError: true }
     );
   }
   if (response.status >= 400) {
+    if (jsonRpcErrorOnFailure) {
+      throw new McpError(
+        response.status === 401 ? ErrorCode.InvalidParams : ErrorCode.InternalError,
+        `${label} failed (${response.status}): ${formatHubError(response.body)}`,
+        { status: response.status, body: response.body }
+      );
+    }
     return makeTextResult(
-      `${label} failed (${response.status}): ${response.body.error || response.body.raw}`,
+      `${label} failed (${response.status}): ${formatHubError(response.body)}`,
       { isError: true }
     );
   }
   return makeJsonResult(response.body);
+}
+
+function formatHubError(body) {
+  if (!body || typeof body !== "object") return String(body);
+  if (typeof body.error === "string") return body.error;
+  if (body.error && typeof body.error === "object") {
+    const code = typeof body.error.code === "string" ? `${body.error.code}: ` : "";
+    const message =
+      typeof body.error.message === "string"
+        ? body.error.message
+        : JSON.stringify(body.error);
+    return `${code}${message}`;
+  }
+  if (typeof body.raw === "string") return body.raw;
+  return JSON.stringify(body);
 }

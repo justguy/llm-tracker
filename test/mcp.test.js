@@ -188,6 +188,17 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_redo",
       "tracker_reload",
       "tracker_search",
+      "tracker_session_blocked",
+      "tracker_session_broadcast",
+      "tracker_session_complete",
+      "tracker_session_context",
+      "tracker_session_context_usage",
+      "tracker_session_handoff",
+      "tracker_session_heartbeat",
+      "tracker_session_list",
+      "tracker_session_note",
+      "tracker_session_start",
+      "tracker_session_status",
       "tracker_undo",
       "tracker_verify",
       "tracker_why"
@@ -479,6 +490,94 @@ test("tracker_patch goes through the running hub from MCP", async () => {
       });
       const projectPayload = JSON.parse(project.result.content[0].text);
       assert.equal(projectPayload.project.scratchpad, "patched via mcp");
+    } finally {
+      await client.close();
+    }
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_session_status forwards sessionToken to the running hub", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-session-token-");
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
+  const port = await findFreePort();
+
+  try {
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
+
+    const client = startMcp(workspace);
+    try {
+      await client.initialize();
+
+      const started = await client.request("tools/call", {
+        name: "tracker_session_start",
+        arguments: {
+          name: "mcp token test",
+          tier: "mcp_tracked",
+          projectSlug: "test-project"
+        }
+      });
+      assert.notEqual(started.result.isError, true);
+      const startedPayload = JSON.parse(started.result.content[0].text);
+      const sessionId = startedPayload.session.id;
+      const sessionToken = startedPayload.token.token;
+      assert.match(sessionId, /^ses_/);
+      assert.equal(typeof sessionToken, "string");
+
+      const rejected = await client.request("tools/call", {
+        name: "tracker_session_status",
+        arguments: {
+          sessionId,
+          sessionToken: "not-a-real-session-token",
+          status: "quiet",
+          note: "should be rejected"
+        }
+      });
+      assert.ok(rejected.error);
+      assert.match(rejected.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
+
+      const afterReject = await client.request("tools/call", {
+        name: "tracker_session_context",
+        arguments: { sessionId, sessionToken }
+      });
+      const afterRejectPayload = JSON.parse(afterReject.result.content[0].text);
+      assert.equal(afterRejectPayload.session.status, "starting");
+
+      const accepted = await client.request("tools/call", {
+        name: "tracker_session_status",
+        arguments: {
+          sessionId,
+          sessionToken,
+          status: "quiet",
+          note: "valid token"
+        }
+      });
+      assert.notEqual(accepted.result.isError, true);
+      const acceptedPayload = JSON.parse(accepted.result.content[0].text);
+      assert.equal(acceptedPayload.session.status, "quiet");
+
+      const usage = await client.request("tools/call", {
+        name: "tracker_session_context_usage",
+        arguments: {
+          sessionId,
+          sessionToken,
+          percent: 85,
+          used: 85000,
+          limit: 100000,
+          source: "mcp"
+        }
+      });
+      assert.notEqual(usage.result.isError, true);
+      const usagePayload = JSON.parse(usage.result.content[0].text);
+      assert.equal(usagePayload.session.status, "context_high");
+      assert.deepEqual(usagePayload.session.contextUsage, {
+        percent: 85,
+        used: 85000,
+        limit: 100000,
+        source: "mcp"
+      });
     } finally {
       await client.close();
     }

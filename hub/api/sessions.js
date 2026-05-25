@@ -39,7 +39,7 @@ const POST_ALLOWED_FIELDS = new Set([
 ]);
 
 // Allowed body fields on PATCH. Anything else triggers UNKNOWN_FIELDS (400).
-const PATCH_ALLOWED_FIELDS = new Set(["status", "comment"]);
+const PATCH_ALLOWED_FIELDS = new Set(["status", "comment", "contextUsage"]);
 
 // Allowed body fields on POST /:sessionId/token/rotate. Both are optional —
 // an empty body `{}` means "use the caller's current capabilities and the
@@ -349,7 +349,7 @@ export function registerSessionsRoutes(app, deps) {
       return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
     }
 
-    const { status, comment } = body;
+    const { status, comment, contextUsage } = body;
     if (status === undefined) {
       return sendError(res, 400, "INVALID_BODY", "`status` is required (PATCH currently only supports status updates)");
     }
@@ -364,6 +364,10 @@ export function registerSessionsRoutes(app, deps) {
     }
     if (comment !== undefined && (typeof comment !== "string" || comment.length === 0)) {
       return sendError(res, 400, "INVALID_BODY", "`comment` must be a non-empty string when present");
+    }
+    const contextUsageShape = validateContextUsage(contextUsage);
+    if (contextUsageShape.error) {
+      return sendError(res, 400, "INVALID_BODY", contextUsageShape.error);
     }
 
     // 404 if the session doesn't exist in the projection. We check this
@@ -385,6 +389,7 @@ export function registerSessionsRoutes(app, deps) {
       sessionId,
       status,
       ...(comment ? { comment } : {}),
+      ...(contextUsageShape.value ? { contextUsage: contextUsageShape.value } : {}),
     };
 
     try {
@@ -697,6 +702,38 @@ function sessionTokenRejectMessage(reason) {
     case "revoked": return "session token has been revoked";
     default: return "session token rejected";
   }
+}
+
+function validateContextUsage(value) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "`contextUsage` must be a JSON object when present" };
+  }
+  const output = {};
+  if ("percent" in value) {
+    if (!Number.isFinite(value.percent) || value.percent < 0 || value.percent > 100) {
+      return { error: "`contextUsage.percent` must be a number between 0 and 100" };
+    }
+    output.percent = value.percent;
+  }
+  if ("source" in value) {
+    if (typeof value.source !== "string" || value.source.length === 0) {
+      return { error: "`contextUsage.source` must be a non-empty string when present" };
+    }
+    output.source = value.source;
+  }
+  for (const key of ["used", "limit"]) {
+    if (key in value) {
+      if (!Number.isFinite(value[key]) || value[key] < 0) {
+        return { error: `\`contextUsage.${key}\` must be a non-negative number when present` };
+      }
+      output[key] = value[key];
+    }
+  }
+  if (!("percent" in output) && !("used" in output) && !("limit" in output)) {
+    return { error: "`contextUsage` requires at least one of percent, used, or limit" };
+  }
+  return { value: output };
 }
 
 function sendError(res, status, code, message, details) {

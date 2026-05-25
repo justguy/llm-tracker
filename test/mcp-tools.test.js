@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTools } from "../bin/mcp-tools.js";
-import { workspaceRuntimePayload } from "../bin/mcp-context-data.js";
+import { SESSION_TOOL_NAMES, workspaceRuntimePayload } from "../bin/mcp-context-data.js";
 import { getPrompt } from "../bin/mcp-prompts.js";
 import { validProject } from "./fixtures.js";
 
@@ -52,6 +52,24 @@ test("tracker_patch validates required MCP arguments before attempting hub I/O",
     const missingPatch = await tool.handler({ slug: "test-project" });
     assert.equal(missingPatch.isError, true);
     assert.match(missingPatch.content[0].text, /requires a JSON object patch/i);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_session_* tools are registered with sessionToken arguments", () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-session-");
+  try {
+    const tools = createTools(workspace);
+    for (const name of SESSION_TOOL_NAMES) {
+      const tool = tools.get(name);
+      assert.ok(tool, `${name} should be registered`);
+      assert.equal(tool.inputSchema.type, "object");
+      assert.ok(tool.inputSchema.properties.sessionToken, `${name} should carry sessionToken`);
+    }
+
+    const runtime = workspaceRuntimePayload(workspace);
+    assert.deepEqual(runtime.daemonRule.sessionTools, SESSION_TOOL_NAMES);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

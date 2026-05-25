@@ -30,7 +30,30 @@ export const WRITE_TOOL_NAMES = [
   "tracker_pick",
   "tracker_undo",
   "tracker_redo",
-  "tracker_reload"
+  "tracker_reload",
+  "tracker_session_start",
+  "tracker_session_heartbeat",
+  "tracker_session_status",
+  "tracker_session_note",
+  "tracker_session_blocked",
+  "tracker_session_handoff",
+  "tracker_session_context_usage",
+  "tracker_session_complete",
+  "tracker_session_broadcast"
+];
+
+export const SESSION_TOOL_NAMES = [
+  "tracker_session_start",
+  "tracker_session_heartbeat",
+  "tracker_session_status",
+  "tracker_session_note",
+  "tracker_session_blocked",
+  "tracker_session_handoff",
+  "tracker_session_context_usage",
+  "tracker_session_complete",
+  "tracker_session_list",
+  "tracker_session_context",
+  "tracker_session_broadcast"
 ];
 
 export function makeResourceContent(uri, mimeType, text) {
@@ -147,7 +170,8 @@ export function workspaceStatusPayload(workspace) {
       readToolsRequireDaemon: false,
       writeToolsRequireDaemon: true,
       readTools: READ_TOOL_NAMES,
-      writeTools: WRITE_TOOL_NAMES
+      writeTools: WRITE_TOOL_NAMES,
+      sessionTools: SESSION_TOOL_NAMES
     },
     projectCount: projects.length,
     projects
@@ -184,7 +208,8 @@ export function workspaceRuntimePayload(workspace) {
     daemonRule: {
       readToolsRequireDaemon: false,
       writeToolsRequireDaemon: true,
-      writeTools: WRITE_TOOL_NAMES
+      writeTools: WRITE_TOOL_NAMES,
+      sessionTools: SESSION_TOOL_NAMES
     }
   };
 }

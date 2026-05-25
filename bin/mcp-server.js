@@ -11,6 +11,7 @@ import {
   ListResourceTemplatesRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  McpError,
   ReadResourceRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { getPrompt, listPrompts, listResources, readResource } from "./mcp-context.js";
@@ -71,6 +72,7 @@ export async function startMcpServer({ workspace: workspaceFlag, portFlag } = {}
     try {
       return await tool.handler(request.params?.arguments || {});
     } catch (error) {
+      if (error instanceof McpError) throw error;
       debugLog(`tool error ${name}: ${error.message}`);
       return makeTextResult(`Tool ${name} failed: ${error.message}`, { isError: true });
     }

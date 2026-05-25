@@ -1,0 +1,354 @@
+import { runHubMutation, nonEmptyString, makeTextResult } from "./mcp-utils.js";
+
+const SESSION_ID_RE = /^ses_[0-9a-hjkmnp-tv-z]{26}$/;
+const SESSION_STATUSES = new Set([
+  "starting",
+  "active",
+  "quiet",
+  "idle",
+  "waiting_for_human",
+  "waiting_for_approval",
+  "blocked",
+  "context_high",
+  "done",
+  "stopping",
+  "stopped",
+  "resuming",
+  "rolled_over",
+  "archived",
+  "unknown"
+]);
+
+const sessionTokenProperty = {
+  type: "string",
+  description: "Session-scoped token. MCP clients pass this as `sessionToken`; the hub receives it as X-LT-Session-Token."
+};
+
+function sessionIdProperty(description = "Runtime session id") {
+  return { type: "string", description };
+}
+
+function optionalStringProperty(description) {
+  return { type: "string", description };
+}
+
+function sessionTokenHeaders(sessionToken) {
+  const token = nonEmptyString(sessionToken);
+  return token ? { "X-LT-Session-Token": token } : undefined;
+}
+
+function requireSessionId(args, toolName, key = "sessionId") {
+  const sessionId = nonEmptyString(args[key]);
+  if (!sessionId) return { error: `${toolName} requires ${key}.` };
+  if (!SESSION_ID_RE.test(sessionId)) {
+    return { error: `${toolName} requires a canonical ses_ session id.` };
+  }
+  return { sessionId };
+}
+
+function requireSessionToken(args, toolName) {
+  const sessionToken = nonEmptyString(args.sessionToken);
+  if (!sessionToken) return { error: `${toolName} requires sessionToken.` };
+  return { sessionToken };
+}
+
+function compactText(parts) {
+  return parts
+    .filter((part) => typeof part === "string" && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join(" | ");
+}
+
+function progressText(progress) {
+  if (!progress || typeof progress !== "object" || Array.isArray(progress)) return "";
+  const bits = [];
+  if (typeof progress.phase === "string" && progress.phase.length > 0) bits.push(`phase=${progress.phase}`);
+  if (Number.isFinite(progress.percent)) bits.push(`percent=${progress.percent}`);
+  if (typeof progress.source === "string" && progress.source.length > 0) bits.push(`source=${progress.source}`);
+  return bits.length ? `progress: ${bits.join(", ")}` : "";
+}
+
+function contextUsageText(args) {
+  const bits = [];
+  if (Number.isFinite(args.percent)) bits.push(`percent=${args.percent}`);
+  if (Number.isFinite(args.used)) bits.push(`used=${args.used}`);
+  if (Number.isFinite(args.limit)) bits.push(`limit=${args.limit}`);
+  const source = nonEmptyString(args.source);
+  if (source) bits.push(`source=${source}`);
+  return bits.length ? `context_usage: ${bits.join(", ")}` : "context_usage reported";
+}
+
+function createSessionTool(definition) {
+  return {
+    name: definition.name,
+    description: definition.description,
+    inputSchema: definition.inputSchema,
+    handler: async (args = {}) => {
+      const prepared = definition.prepareRequest(args);
+      if (prepared?.error) return makeTextResult(prepared.error, { isError: true });
+      return runHubMutation(prepared);
+    }
+  };
+}
+
+function createStatusMutation(
+  workspace,
+  portFlag,
+  name,
+  description,
+  statusFactory,
+  commentFactory,
+  extraProperties = {},
+  bodyFactory = null
+) {
+  return createSessionTool({
+    name,
+    description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: sessionIdProperty(),
+        sessionToken: sessionTokenProperty,
+        ...extraProperties
+      },
+      required: ["sessionId", "sessionToken"]
+    },
+    prepareRequest(args = {}) {
+      const id = requireSessionId(args, name);
+      if (id.error) return id;
+      const token = requireSessionToken(args, name);
+      if (token.error) return token;
+      const status = statusFactory(args);
+      if (!SESSION_STATUSES.has(status)) {
+        return { error: `${name} requires status to be one of: ${[...SESSION_STATUSES].join(", ")}.` };
+      }
+      const comment = commentFactory ? nonEmptyString(commentFactory(args)) : null;
+      return {
+        workspace,
+        portFlag,
+        method: "PATCH",
+        path: `/api/sessions/${id.sessionId}`,
+        label: name,
+        body: {
+          status,
+          ...(comment ? { comment } : {}),
+          ...(typeof bodyFactory === "function" ? bodyFactory(args) : {})
+        },
+        headers: sessionTokenHeaders(token.sessionToken),
+        jsonRpcErrorOnFailure: true
+      };
+    }
+  });
+}
+
+export function createSessionTools(workspace, portFlag) {
+  return [
+    createSessionTool({
+      name: "tracker_session_start",
+      description: "Create a runtime session through the running hub. The create response returns the cleartext session token once.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Session display name" },
+          tier: {
+            type: "string",
+            enum: ["dumb_terminal", "mcp_tracked", "codex_app_server", "hybrid", "manual"],
+            description: "Session capability tier"
+          },
+          projectSlug: optionalStringProperty("Optional project slug"),
+          taskId: optionalStringProperty("Optional tracker task id"),
+          agent: optionalStringProperty("Optional agent id"),
+          provider: optionalStringProperty("Optional provider id"),
+          model: optionalStringProperty("Optional model name"),
+          cwd: optionalStringProperty("Optional working directory"),
+          repoRoot: optionalStringProperty("Optional repository root"),
+          worktreePath: optionalStringProperty("Optional worktree path"),
+          branch: optionalStringProperty("Optional branch name"),
+          sessionToken: sessionTokenProperty
+        },
+        required: ["name", "tier"]
+      },
+      prepareRequest(args = {}) {
+        const name = nonEmptyString(args.name);
+        const tier = nonEmptyString(args.tier);
+        if (!name) return { error: "tracker_session_start requires name." };
+        if (!tier) return { error: "tracker_session_start requires tier." };
+        const body = { name, tier };
+        for (const field of ["projectSlug", "taskId", "agent", "provider", "model", "cwd", "repoRoot", "worktreePath", "branch"]) {
+          const value = nonEmptyString(args[field]);
+          if (value) body[field] = value;
+        }
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: "/api/sessions",
+          label: "tracker_session_start",
+          body,
+          headers: sessionTokenHeaders(args.sessionToken)
+        };
+      }
+    }),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_heartbeat",
+      "Report an MCP session heartbeat through the running hub.",
+      (args) => nonEmptyString(args.status) || "active",
+      (args) => compactText([nonEmptyString(args.note), progressText(args.progress)]),
+      {
+        status: { type: "string", enum: [...SESSION_STATUSES], description: "Optional activity state; defaults to active" },
+        note: optionalStringProperty("Optional heartbeat note"),
+        jobId: optionalStringProperty("Optional active job id"),
+        progress: { type: "object", description: "Optional progress summary", additionalProperties: true }
+      }
+    ),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_status",
+      "Set a runtime session ActivityState through the running hub.",
+      (args) => nonEmptyString(args.status),
+      (args) => nonEmptyString(args.note) || nonEmptyString(args.comment),
+      {
+        status: { type: "string", enum: [...SESSION_STATUSES], description: "ActivityState" },
+        note: optionalStringProperty("Optional status note"),
+        comment: optionalStringProperty("Optional status comment")
+      }
+    ),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_note",
+      "Attach a note to the session runtime log while keeping the session active.",
+      () => "active",
+      (args) => nonEmptyString(args.note),
+      {
+        note: optionalStringProperty("Session note")
+      }
+    ),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_blocked",
+      "Report a blocked session state.",
+      () => "blocked",
+      (args) => nonEmptyString(args.reason) || nonEmptyString(args.note),
+      {
+        reason: optionalStringProperty("Blocker reason"),
+        note: optionalStringProperty("Optional blocker note")
+      }
+    ),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_handoff",
+      "Record a final handoff note for a session before stopping or rollover.",
+      () => "stopping",
+      (args) => compactText([
+        nonEmptyString(args.summary),
+        nonEmptyString(args.facts),
+        nonEmptyString(args.evidence),
+        nonEmptyString(args.risks),
+        nonEmptyString(args.nextAsk)
+      ]),
+      {
+        summary: optionalStringProperty("Handoff summary"),
+        facts: optionalStringProperty("Facts to carry forward"),
+        evidence: optionalStringProperty("Verification or evidence summary"),
+        risks: optionalStringProperty("Known risks"),
+        nextAsk: optionalStringProperty("Recommended next action")
+      }
+    ),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_context_usage",
+      "Report structured context usage for a session.",
+      (args) => Number.isFinite(args.percent) && args.percent >= 80 ? "context_high" : "active",
+      contextUsageText,
+      {
+        percent: { type: "number", description: "Context usage percent" },
+        used: { type: "number", description: "Optional used context units" },
+        limit: { type: "number", description: "Optional maximum context units" },
+        source: optionalStringProperty("Optional usage source, such as mcp")
+      },
+      (args = {}) => {
+        const contextUsage = {};
+        if (Number.isFinite(args.percent)) contextUsage.percent = args.percent;
+        if (Number.isFinite(args.used)) contextUsage.used = args.used;
+        if (Number.isFinite(args.limit)) contextUsage.limit = args.limit;
+        const source = nonEmptyString(args.source);
+        if (source) contextUsage.source = source;
+        return { contextUsage };
+      }
+    ),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_complete",
+      "Mark a session done through the running hub.",
+      () => "done",
+      (args) => nonEmptyString(args.summary) || nonEmptyString(args.note),
+      {
+        summary: optionalStringProperty("Completion summary"),
+        note: optionalStringProperty("Optional completion note")
+      }
+    ),
+    createSessionTool({
+      name: "tracker_session_list",
+      description: "List runtime sessions from the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionToken: sessionTokenProperty
+        }
+      },
+      prepareRequest(args = {}) {
+        return {
+          workspace,
+          portFlag,
+          method: "GET",
+          path: "/api/sessions",
+          label: "tracker_session_list",
+          headers: sessionTokenHeaders(args.sessionToken)
+        };
+      }
+    }),
+    createSessionTool({
+      name: "tracker_session_context",
+      description: "Fetch one runtime session context record from the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: sessionIdProperty(),
+          sessionToken: sessionTokenProperty
+        },
+        required: ["sessionId"]
+      },
+      prepareRequest(args = {}) {
+        const id = requireSessionId(args, "tracker_session_context");
+        if (id.error) return id;
+        return {
+          workspace,
+          portFlag,
+          method: "GET",
+          path: `/api/sessions/${id.sessionId}`,
+          label: "tracker_session_context",
+          headers: sessionTokenHeaders(args.sessionToken)
+        };
+      }
+    }),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_broadcast",
+      "Record a broadcast-style session update through the running hub.",
+      () => "active",
+      (args) => nonEmptyString(args.message),
+      {
+        message: optionalStringProperty("Broadcast message")
+      }
+    )
+  ];
+}
