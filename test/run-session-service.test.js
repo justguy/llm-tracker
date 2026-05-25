@@ -341,6 +341,9 @@ test("task_backed + force with reason returns mode=created and appends human.ove
     assert.equal(r.ok, true);
     assert.equal(r.mode, "created");
     assert.equal(r.taskClaimed, true);
+    assert.equal(h.jobRegistry.get(seed.jobId).status, "cancelled");
+    assert.equal(h.jobRegistry.get(r.jobId).status, "running");
+    assert.equal(h.jobRegistry.get(r.jobId).predecessorJobId, undefined);
 
     const overrides = h.appendedEvents.filter((e) => e.type === "human.override");
     assert.equal(overrides.length, 1);
@@ -349,6 +352,11 @@ test("task_backed + force with reason returns mode=created and appends human.ove
     assert.equal(overrides[0].context.preemptedJobId, seed.jobId);
     assert.equal(overrides[0].reason, "operator needs lane");
     assert.equal(overrides[0].user, "u_alice");
+    assert.equal(h.appendedEvents.filter((e) => e.type === "job.queued").length, 0);
+    assert.equal(
+      h.appendedEvents.some((e) => e.type === "job.completed" && e.jobId === seed.jobId && e.status === "cancelled"),
+      true,
+    );
   } finally {
     h.close();
   }
@@ -385,6 +393,29 @@ test("task_backed: verifyPack.items mirrors task.verify.items and is frozen", as
     assert.equal(r.verifyPack.stampedFromRev, 3);
     assert.equal(Object.isFrozen(r.verifyPack), true);
     assert.equal(Object.isFrozen(r.verifyPack.items), true);
+  } finally {
+    h.close();
+  }
+});
+
+test("task_backed: task.verify omitted still launches and does not persist an empty verifyPack", async () => {
+  const noVerifyTask = task({ id: "t-no-verify", verify: undefined });
+  delete noVerifyTask.verify;
+  const h = await makeHarness({
+    projects: { proj: { data: { tasks: [noVerifyTask] }, rev: 3 } },
+  });
+  try {
+    const draft = makeDraft(h, {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t-no-verify",
+      projectSlug: "proj",
+    });
+    const r = await h.service.launch({ draftId: draft.id });
+    assert.equal(r.ok, true);
+    assert.equal(r.mode, "created");
+    assert.equal(r.verifyPack, null);
+    assert.equal(h.jobRegistry.get(r.jobId).verifyPack, undefined);
   } finally {
     h.close();
   }

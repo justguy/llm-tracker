@@ -483,6 +483,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     store,
     draftStore: runSessionDraftStore,
     projection: runtimeProjection,
+    jobRegistry,
     runSessionService
   });
 

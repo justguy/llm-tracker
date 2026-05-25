@@ -14,9 +14,8 @@
 // validation; the service owns task-claim, session/job creation, and
 // VerifyPack stamping.
 //
-// Active jobs in candidate scoring: still pass-through `jobs: []` for the
-// scorer because sh-3-08 owns the live wiring. The launch path consumes the
-// JobRegistry directly through the service.
+// Active jobs in candidate scoring use the live JobRegistry when supplied so
+// picker ranking stays aligned with the launch conflict policy.
 //
 // Error envelope mirrors hub/api/sessions.js: `{ error: { code, message, details? } }`.
 
@@ -45,6 +44,8 @@ const LAUNCH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
  * @property {{ toSnapshots(): { sessions: object[] } }} projection
  *   RuntimeProjection — supplies the active sessions list for worktree
  *   conflict scoring.
+ * @property {{ list(): object[] }} [jobRegistry]
+ *   JobRegistry — supplies active jobs for candidate scoring.
  * @property {{ launch(input: object): Promise<object> }} runSessionService
  *   sh-3-05 RunSessionService — orchestrates POST /api/run-session/launch.
  */
@@ -59,7 +60,7 @@ export function registerRunSessionRoutes(app, deps) {
   if (!app || typeof app.get !== "function" || typeof app.post !== "function") {
     throw new Error("registerRunSessionRoutes: express app required");
   }
-  const { store, draftStore, projection, runSessionService } = deps || {};
+  const { store, draftStore, projection, runSessionService, jobRegistry } = deps || {};
   if (!store || typeof store.get !== "function") {
     throw new Error("registerRunSessionRoutes: store (with get) required");
   }
@@ -103,14 +104,17 @@ export function registerRunSessionRoutes(app, deps) {
 
     const tasks = Array.isArray(entry.data?.tasks) ? entry.data.tasks : [];
     const sessions = projection.toSnapshots().sessions || [];
+    const jobs =
+      jobRegistry && typeof jobRegistry.list === "function"
+        ? jobRegistry.list()
+        : [];
 
     let candidates;
     try {
       candidates = scoreRunCandidates({
         tasks,
         sessions,
-        // JobRegistry (sh-5-01) is not yet implemented; pass [] until then.
-        jobs: [],
+        jobs,
         options: {
           projectSlug,
           ...(laneId ? { laneId } : {}),
