@@ -227,6 +227,30 @@ test("AttentionStripView action chips: disabled chips show disabledReason and do
   assert.equal(firedFor, "open");
 });
 
+test("AttentionStripView action chips: feature-gated actions render generated disabledReason", () => {
+  const items = [
+    makeItem({
+      kind: "context_high",
+      severity: "high",
+      dedupeKey: "gate1",
+      recommendedActions: [
+        { id: "rollover", label: "Roll over", kind: "rollover", enabled: true },
+      ],
+    }),
+  ];
+  const vnode = AttentionStripView({ items, now: NOW, collapsed: false });
+  const buttons = findNodes(
+    vnode,
+    (n) =>
+      n.type === "button" &&
+      typeof n.props?.class === "string" &&
+      n.props.class.split(/\s+/).includes("attention-strip__action"),
+  );
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].props.disabled, true);
+  assert.match(buttons[0].props.title, /Rollover action handlers are gated/);
+});
+
 test("AttentionStripView toggle button fires onToggleCollapsed", () => {
   let toggled = 0;
   const items = [makeItem({ kind: "blocked", severity: "high", dedupeKey: "tog1" })];

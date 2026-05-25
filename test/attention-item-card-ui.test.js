@@ -171,6 +171,26 @@ test("AttentionItemCard does NOT dispatch onAction for disabled actions", () => 
   assert.equal(captured, null);
 });
 
+test("AttentionItemCard renders generated disabledReason for feature-gated actions", () => {
+  const item = makeItem({
+    kind: "context_high",
+    recommendedActions: [
+      { id: "rollover", label: "Roll over", kind: "rollover", enabled: true },
+    ],
+  });
+  const vnode = AttentionItemCard({ item });
+  const buttons = findNodes(
+    vnode,
+    (n) =>
+      n.type === "button" &&
+      typeof n.props?.class === "string" &&
+      n.props.class.split(/\s+/).includes("attention-item-card__action"),
+  );
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].props.disabled, true);
+  assert.match(buttons[0].props.title, /Rollover action handlers are gated/);
+});
+
 test("AttentionItemCard fires onItemClick when card is clicked and sets role=button", () => {
   let received = null;
   const vnode = AttentionItemCard({ item: makeItem(), onItemClick: (it) => { received = it; } });

@@ -11,6 +11,7 @@
 // attention-strip-ui.test.js.
 
 import { html } from "htm/preact";
+import { decorateAttentionActions, dispatchAttentionAction } from "./actions.js";
 
 import {
   ATTENTION_KINDS,
@@ -63,11 +64,12 @@ export function resolveClearCondition(item) {
   return typeof fallback === "string" ? fallback : "";
 }
 
-function renderActions(actions, item, onAction) {
-  if (!Array.isArray(actions) || actions.length === 0) return null;
+function renderActions(actions, item, onAction, actionOptions) {
+  const decorated = decorateAttentionActions(actions, item, actionOptions);
+  if (decorated.length === 0) return null;
   return html`
     <div class="attention-item-card__actions">
-      ${actions.map(
+      ${decorated.map(
         (action) => html`
           <button
             key=${action.id}
@@ -78,7 +80,7 @@ function renderActions(actions, item, onAction) {
             onClick=${(e) => {
               e.stopPropagation();
               if (action.enabled === false) return;
-              if (typeof onAction === "function") onAction(item, action);
+              runAttentionAction(item, action, onAction, actionOptions);
             }}
           >
             ${action.label}
@@ -89,6 +91,16 @@ function renderActions(actions, item, onAction) {
   `;
 }
 
+function runAttentionAction(item, action, onAction, actionOptions) {
+  if (typeof onAction === "function") {
+    onAction(item, action);
+    return;
+  }
+  dispatchAttentionAction(item, action, actionOptions).catch((err) => {
+    console.error("Attention action dispatch failed:", err?.message || err);
+  });
+}
+
 /**
  * Render a single attention card. Pure view; no hooks.
  *
@@ -96,10 +108,11 @@ function renderActions(actions, item, onAction) {
  *   item: AttentionItem,
  *   onAction?: (item: AttentionItem, action: AttentionAction) => void,
  *   onItemClick?: (item: AttentionItem) => void,
+ *   actionOptions?: object,
  * }} props
  */
 export function AttentionItemCard(props = {}) {
-  const { item, onAction, onItemClick } = props;
+  const { item, onAction, onItemClick, actionOptions } = props;
   if (!item || typeof item !== "object") return null;
 
   const severity = ATTENTION_SEVERITIES.includes(item.severity)
@@ -136,7 +149,7 @@ export function AttentionItemCard(props = {}) {
             </div>
           `
         : null}
-      ${renderActions(item.recommendedActions, item, onAction)}
+      ${renderActions(item.recommendedActions, item, onAction, actionOptions)}
     </article>
   `;
 }

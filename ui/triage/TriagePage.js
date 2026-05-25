@@ -12,6 +12,7 @@
 
 import { html } from "htm/preact";
 import { useEffect, useState } from "preact/hooks";
+import { decorateAttentionActions, dispatchAttentionAction } from "../attention/actions.js";
 
 const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
 
@@ -126,7 +127,7 @@ export function groupBySeverityThenKind(items) {
  * onItemClick callback (avoids accidental drills when the operator clicks a
  * chip).
  */
-function TriageCard({ item, dimmed, onAction, onItemClick }) {
+function TriageCard({ item, dimmed, onAction, onItemClick, actionOptions }) {
   if (!item) return null;
   const sevLabel = SEVERITY_LABELS[item.severity] || item.severity;
   const sourceLabel = item.source || "unknown";
@@ -146,16 +147,17 @@ function TriageCard({ item, dimmed, onAction, onItemClick }) {
         ${dimmed ? html`<span class="triage__dim-label">muted</span>` : null}
       </div>
       ${item.detail ? html`<div class="triage__detail">${item.detail}</div>` : null}
-      ${renderActions(item.recommendedActions, item, onAction)}
+      ${renderActions(item.recommendedActions, item, onAction, actionOptions)}
     </div>
   `;
 }
 
-function renderActions(actions, item, onAction) {
-  if (!Array.isArray(actions) || actions.length === 0) return null;
+function renderActions(actions, item, onAction, actionOptions) {
+  const decorated = decorateAttentionActions(actions, item, actionOptions);
+  if (decorated.length === 0) return null;
   return html`
     <div class="triage__actions">
-      ${actions.map(
+      ${decorated.map(
         (action) => html`
           <button
             key=${action.id}
@@ -166,7 +168,7 @@ function renderActions(actions, item, onAction) {
             onClick=${(e) => {
               e.stopPropagation();
               if (action.enabled === false) return;
-              if (typeof onAction === "function") onAction(item, action);
+              runAttentionAction(item, action, onAction, actionOptions);
             }}
           >
             ${action.label}
@@ -175,6 +177,16 @@ function renderActions(actions, item, onAction) {
       )}
     </div>
   `;
+}
+
+function runAttentionAction(item, action, onAction, actionOptions) {
+  if (typeof onAction === "function") {
+    onAction(item, action);
+    return;
+  }
+  dispatchAttentionAction(item, action, actionOptions).catch((err) => {
+    console.error("Attention action dispatch failed:", err?.message || err);
+  });
 }
 
 /**
@@ -187,6 +199,7 @@ function renderActions(actions, item, onAction) {
  *   loadError?: string,
  *   onAction?: (item: AttentionItem, action: object) => void,
  *   onItemClick?: (item: AttentionItem) => void,
+ *   actionOptions?: object,
  * }} props
  */
 export function TriagePageView(props = {}) {
@@ -196,6 +209,7 @@ export function TriagePageView(props = {}) {
     loadError,
     onAction,
     onItemClick,
+    actionOptions,
   } = props;
   const items = Array.isArray(itemsProp) ? itemsProp : [];
   const now = nowProp instanceof Date ? nowProp : new Date();
@@ -236,6 +250,7 @@ export function TriagePageView(props = {}) {
                               dimmed=${isItemDimmed(item, now)}
                               onAction=${onAction}
                               onItemClick=${onItemClick}
+                              actionOptions=${actionOptions}
                             />
                           `
                         )}
@@ -260,6 +275,7 @@ export function TriagePageView(props = {}) {
  *   now?: Date,
  *   onAction?: (item: AttentionItem, action: object) => void,
  *   onItemClick?: (item: AttentionItem) => void,
+ *   actionOptions?: object,
  * }} props
  */
 export function TriagePage(props = {}) {
@@ -269,6 +285,7 @@ export function TriagePage(props = {}) {
     now,
     onAction,
     onItemClick,
+    actionOptions,
   } = props;
 
   const [fetched, setFetched] = useState(/** @type {AttentionItem[] | null} */ (null));
@@ -304,6 +321,7 @@ export function TriagePage(props = {}) {
       loadError=${loadError}
       onAction=${onAction}
       onItemClick=${onItemClick}
+      actionOptions=${actionOptions}
     />
   `;
 }

@@ -21,6 +21,7 @@
 
 import { html } from "htm/preact";
 import { useEffect, useState } from "preact/hooks";
+import { decorateAttentionActions, dispatchAttentionAction } from "./actions.js";
 
 const SEVERITY_LABELS = {
   critical: "Critical",
@@ -96,7 +97,7 @@ export function criticalItems(items, now) {
  * detail, and the recommendedActions as chips. Mirror with Triage cards by
  * design — both surfaces share the same primitive look-and-feel.
  */
-function StripCard({ item, onAction, onItemClick }) {
+function StripCard({ item, onAction, onItemClick, actionOptions }) {
   if (!item) return null;
   const sevLabel = SEVERITY_LABELS[item.severity] || item.severity;
   const sourceLabel = item.source || "unknown";
@@ -112,16 +113,17 @@ function StripCard({ item, onAction, onItemClick }) {
         <span class="attention-strip__source" title=${`source: ${sourceLabel}`}>${sourceLabel}</span>
       </div>
       <div class="attention-strip__title">${item.title}</div>
-      ${renderActions(item.recommendedActions, item, onAction)}
+      ${renderActions(item.recommendedActions, item, onAction, actionOptions)}
     </div>
   `;
 }
 
-function renderActions(actions, item, onAction) {
-  if (!Array.isArray(actions) || actions.length === 0) return null;
+function renderActions(actions, item, onAction, actionOptions) {
+  const decorated = decorateAttentionActions(actions, item, actionOptions);
+  if (decorated.length === 0) return null;
   return html`
     <div class="attention-strip__actions">
-      ${actions.map(
+      ${decorated.map(
         (action) => html`
           <button
             key=${action.id}
@@ -132,7 +134,7 @@ function renderActions(actions, item, onAction) {
             onClick=${(e) => {
               e.stopPropagation();
               if (action.enabled === false) return;
-              if (typeof onAction === "function") onAction(item, action);
+              runAttentionAction(item, action, onAction, actionOptions);
             }}
           >
             ${action.label}
@@ -141,6 +143,16 @@ function renderActions(actions, item, onAction) {
       )}
     </div>
   `;
+}
+
+function runAttentionAction(item, action, onAction, actionOptions) {
+  if (typeof onAction === "function") {
+    onAction(item, action);
+    return;
+  }
+  dispatchAttentionAction(item, action, actionOptions).catch((err) => {
+    console.error("Attention action dispatch failed:", err?.message || err);
+  });
 }
 
 /**
@@ -155,6 +167,7 @@ function renderActions(actions, item, onAction) {
  *   onToggleCollapsed?: () => void,
  *   onAction?: (item: AttentionItem, action: object) => void,
  *   onItemClick?: (item: AttentionItem) => void,
+ *   actionOptions?: object,
  *   loadError?: string,
  * }} props
  */
@@ -166,6 +179,7 @@ export function AttentionStripView(props = {}) {
     onToggleCollapsed,
     onAction,
     onItemClick,
+    actionOptions,
     loadError,
   } = props;
   const now = nowProp instanceof Date ? nowProp : new Date();
@@ -207,6 +221,7 @@ export function AttentionStripView(props = {}) {
                       item=${item}
                       onAction=${onAction}
                       onItemClick=${onItemClick}
+                      actionOptions=${actionOptions}
                     />
                   `
                 )}
@@ -222,6 +237,7 @@ export function AttentionStripView(props = {}) {
                     item=${item}
                     onAction=${onAction}
                     onItemClick=${onItemClick}
+                    actionOptions=${actionOptions}
                   />
                 `
               )}
@@ -243,6 +259,7 @@ export function AttentionStripView(props = {}) {
  *   now?: Date,
  *   onAction?: (item: AttentionItem, action: object) => void,
  *   onItemClick?: (item: AttentionItem) => void,
+ *   actionOptions?: object,
  * }} props
  */
 export function AttentionStrip(props = {}) {
@@ -253,6 +270,7 @@ export function AttentionStrip(props = {}) {
     now,
     onAction,
     onItemClick,
+    actionOptions,
   } = props;
 
   const [fetched, setFetched] = useState(/** @type {AttentionItem[] | null} */ (null));
@@ -291,6 +309,7 @@ export function AttentionStrip(props = {}) {
       loadError=${loadError}
       onAction=${onAction}
       onItemClick=${onItemClick}
+      actionOptions=${actionOptions}
     />
   `;
 }

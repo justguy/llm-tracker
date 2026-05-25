@@ -267,6 +267,30 @@ test("TriagePage action chips: disabled actions render disabledReason and do not
   assert.equal(firedFor, "open");
 });
 
+test("TriagePage action chips: feature-gated actions render generated disabledReason", () => {
+  const items = [
+    makeItem({
+      kind: "context_high",
+      severity: "high",
+      dedupeKey: "gate1",
+      recommendedActions: [
+        { id: "rollover", label: "Roll over", kind: "rollover", enabled: true },
+      ],
+    }),
+  ];
+  const vnode = TriagePageView({ items, now: NOW });
+  const buttons = findNodes(
+    vnode,
+    (n) =>
+      n.type === "button" &&
+      typeof n.props?.class === "string" &&
+      n.props.class.includes("triage__action"),
+  );
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].props.disabled, true);
+  assert.match(buttons[0].props.title, /Rollover action handlers are gated/);
+});
+
 test("TriagePage onItemClick fires when the card is clicked (and not when a chip is clicked)", () => {
   const calls = [];
   const items = [
