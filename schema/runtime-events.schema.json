@@ -387,6 +387,26 @@
       "additionalProperties": true
     },
 
+    "JobUnblockedEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "jobId", "sessionId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "job.unblocked" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "jobId":     { "$ref": "#/definitions/jobId" },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "previousReason": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "user": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+
     "SkillRunStartedEvent": {
       "type": "object",
       "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "skillId"],
@@ -500,7 +520,6 @@
             "session.task_attached",
             "session.task_unbound",
             "job.queued",
-            "job.unblocked",
             "sandbox.escape_requested",
             "sandbox.escape_resolved",
             "session.ask",
@@ -528,6 +547,7 @@
     { "$ref": "#/definitions/JobCheckpointEvent" },
     { "$ref": "#/definitions/JobCompletedEvent" },
     { "$ref": "#/definitions/JobRolloverRequestedEvent" },
+    { "$ref": "#/definitions/JobUnblockedEvent" },
     { "$ref": "#/definitions/SkillRunStartedEvent" },
     { "$ref": "#/definitions/SkillRunFinishedEvent" },
     { "$ref": "#/definitions/RepoChangeEvent" },

@@ -26,6 +26,31 @@ test("normalizeReposInput(null) and {} return null", () => {
   assert.equal(normalizeReposInput(undefined), null);
   assert.equal(normalizeReposInput({}), null);
   assert.equal(normalizeReposInput({ primary: null, secondary: [] }), null);
+  assert.equal(
+    normalizeReposInput({
+      primary: { root: " ", worktree: "", branch: "", allowed_paths: "" },
+      secondary: [],
+    }),
+    null
+  );
+});
+
+test("serializeTaskExtensions allows verify-only save with untouched blank repos row", () => {
+  const payload = serializeTaskExtensions({
+    repos: {
+      primary: { root: "", worktree: "", branch: "", allowed_paths: "" },
+      secondary: [],
+    },
+    verify: [{ kind: "command", id: "build", cmd: "npm test" }],
+  });
+  assert.deepEqual(payload, {
+    repos: null,
+    verify: {
+      items: [
+        { kind: "command", id: "build", required: false, cmd: "npm test", expectExit: 0 },
+      ],
+    },
+  });
 });
 
 test("normalizeReposInput primary happy path with newline-separated allowed_paths (trim/split/dedupe)", () => {
@@ -91,13 +116,14 @@ test("normalizeReposInput rejects '..', absolute, and NUL allowed_paths entries"
     () => normalizeReposInput({ primary: { root: "src", allowed_paths: `bad${NUL}path` } }),
     "INVALID_REPOS"
   );
-});
-
-test("normalizeReposInput rejects empty primary.root", () => {
   assertThrowsCode(
-    () => normalizeReposInput({ primary: { root: "   " } }),
+    () => normalizeReposInput({ primary: { root: "src", allowed_paths: "file:///tmp/secret" } }),
     "INVALID_REPOS"
   );
+});
+
+test("normalizeReposInput ignores fully empty repo row but rejects partial row without root", () => {
+  assert.equal(normalizeReposInput({ primary: { root: "   " } }), null);
   assertThrowsCode(
     () => normalizeReposInput({ primary: { root: "", allowed_paths: "a.js" } }),
     "INVALID_REPOS"
@@ -187,6 +213,30 @@ test("normalizeVerifyItems enforces per-kind constraints", () => {
     () =>
       normalizeVerifyItems([
         { kind: "command", id: "ok", cmd: "x", timeoutSec: 0 },
+      ]),
+    "INVALID_VERIFY"
+  );
+  // command.cwd URI scheme
+  assertThrowsCode(
+    () =>
+      normalizeVerifyItems([
+        { kind: "command", id: "cwd", cmd: "x", cwd: "file:///tmp" },
+      ]),
+    "INVALID_VERIFY"
+  );
+  // command.cwd Windows drive
+  assertThrowsCode(
+    () =>
+      normalizeVerifyItems([
+        { kind: "command", id: "win", cmd: "x", cwd: "C:/repo" },
+      ]),
+    "INVALID_VERIFY"
+  );
+  // command.cwd backslash
+  assertThrowsCode(
+    () =>
+      normalizeVerifyItems([
+        { kind: "command", id: "slash", cmd: "x", cwd: "src\\tests" },
       ]),
     "INVALID_VERIFY"
   );

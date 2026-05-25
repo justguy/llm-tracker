@@ -260,6 +260,42 @@ test("skill.run.finished §24 example passes (with canonical IDs)", () => {
   assert.equal(validateRuntimeEvent(evt), true);
 });
 
+test("job.unblocked validates as a strict JobUnblockedEvent", () => {
+  const evt = {
+    schemaVersion: 1,
+    id: makeRuntimeId("evt"),
+    ts: "2026-05-23T16:43:00Z",
+    type: "job.unblocked",
+    source: "http",
+    workspace: "/Users/adil/.llm-tracker",
+    jobId: makeRuntimeId("job"),
+    sessionId: makeRuntimeId("ses"),
+    previousReason: "blocked_on_dep",
+    reason: "manual override",
+    user: "u_alice",
+  };
+  assert.equal(validateRuntimeEvent(evt), true);
+});
+
+test("job.unblocked rejects missing sessionId", () => {
+  const evt = {
+    schemaVersion: 1,
+    id: makeRuntimeId("evt"),
+    ts: "2026-05-23T16:43:00Z",
+    type: "job.unblocked",
+    source: "http",
+    workspace: "/Users/adil/.llm-tracker",
+    jobId: makeRuntimeId("job"),
+  };
+  assert.throws(
+    () => validateRuntimeEvent(evt),
+    (err) => {
+      assert.match(err.message, /sessionId|required/i);
+      return true;
+    },
+  );
+});
+
 test("generic event with known type but unspecified payload still validates against base", () => {
   const evt = {
     schemaVersion: 1,

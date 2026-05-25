@@ -69,6 +69,7 @@ const MAX_DOD_REF_LEN = 256;
 const ITEM_ID_RE = /^[a-z0-9][a-z0-9_.:-]{0,63}$/;
 const SKILL_ID_RE = /^[a-z0-9][a-z0-9_.:-]{0,127}$/;
 const LINT_TOOL_RE = /^[a-zA-Z0-9_.:-]+$/;
+const URI_SCHEME_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|(?:mailto|file|data|ssh|git):)/i;
 
 const VERIFY_KINDS = Object.freeze([
   "command",
@@ -121,6 +122,19 @@ function dedupe(arr) {
   return out;
 }
 
+function isEmptyRepoRef(raw) {
+  if (!isPlainObject(raw)) return true;
+  const root = trimOrEmpty(raw.root);
+  const worktree = trimOrEmpty(raw.worktree);
+  const branch = trimOrEmpty(raw.branch);
+  return (
+    root.length === 0 &&
+    worktree.length === 0 &&
+    branch.length === 0 &&
+    splitAllowedPaths(raw.allowed_paths).length === 0
+  );
+}
+
 function checkAllowedPath(value, index) {
   if (typeof value !== "string" || value.length === 0) {
     throw fail("INVALID_REPOS", `allowed_paths[${index}]: must be a non-empty string`);
@@ -144,6 +158,12 @@ function checkAllowedPath(value, index) {
     throw fail(
       "INVALID_REPOS",
       `allowed_paths[${index}]: must be repo-relative; Windows-drive paths rejected`
+    );
+  }
+  if (URI_SCHEME_RE.test(value)) {
+    throw fail(
+      "INVALID_REPOS",
+      `allowed_paths[${index}]: must be repo-relative; URI schemes rejected`
     );
   }
   if (value.includes("\\")) {
@@ -187,6 +207,7 @@ function checkOptionalString(value, max, where, field) {
 
 function normalizeRepoRef(raw, where) {
   if (!isPlainObject(raw)) return null;
+  if (isEmptyRepoRef(raw)) return null;
   const root = trimOrEmpty(raw.root);
   const worktree = trimOrEmpty(raw.worktree);
   const branch = trimOrEmpty(raw.branch);
@@ -294,6 +315,15 @@ function normalizeCommandItem(row, where) {
     }
     if (cwd.startsWith("/")) {
       throw fail("INVALID_VERIFY", `${where}.cwd: must be repo-relative; must not start with "/"`);
+    }
+    if (WIN_DRIVE_RE.test(cwd)) {
+      throw fail("INVALID_VERIFY", `${where}.cwd: must be repo-relative; Windows-drive paths rejected`);
+    }
+    if (URI_SCHEME_RE.test(cwd)) {
+      throw fail("INVALID_VERIFY", `${where}.cwd: must be repo-relative; URI schemes rejected`);
+    }
+    if (cwd.includes("\\")) {
+      throw fail("INVALID_VERIFY", `${where}.cwd: must be repo-relative POSIX-style path; backslashes rejected`);
     }
     if (cwd.split("/").some((s) => s === "..")) {
       throw fail("INVALID_VERIFY", `${where}.cwd: must not contain ".." segment`);
