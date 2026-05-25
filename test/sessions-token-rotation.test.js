@@ -250,6 +250,39 @@ test("rotate appends session.token_rotated event with tokenHash; cleartext never
   }
 });
 
+test("rotate serializes concurrent requests so only one fresh token survives", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startApp();
+  try {
+    const session = await createSession(env);
+    const old = env.tokenStore.issue({ sessionId: session.id, capabilities: ["status"] });
+    const originalAppend = env.runtimeStore.append.bind(env.runtimeStore);
+    env.runtimeStore.append = async (event) => {
+      if (event?.type === "session.token_rotated") {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return originalAppend(event);
+    };
+
+    const [first, second] = await Promise.all([
+      postRotate(env.base, session.id, {}, { "X-LT-Session-Token": old.token }),
+      postRotate(env.base, session.id, {}, { "X-LT-Session-Token": old.token }),
+    ]);
+    const responses = [first, second].sort((a, b) => a.status - b.status);
+    assert.equal(responses[0].status, 200);
+    assert.equal(responses[1].status, 401);
+
+    const success = await responses[0].json();
+    const rejected = await responses[1].json();
+    assert.equal(rejected.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(rejected.error.details.reason, TOKEN_REJECT_REASONS.UNKNOWN);
+    assert.equal(env.tokenStore.validate(old.token).ok, false);
+    assert.equal(env.tokenStore.validate(success.token, { expectedSessionId: session.id }).ok, true);
+    assert.equal(env.appended.filter((e) => e.type === "session.token_rotated").length, 1);
+  } finally {
+    await env.close();
+  }
+});
+
 test("rotate 404 when sessionId does not exist", { timeout: TEST_TIMEOUT }, async () => {
   const env = await startApp();
   try {
