@@ -13,6 +13,10 @@ import { ConnectionPip, Drawer, EmptyState } from "./shell-chrome.js";
 import { AttentionStrip } from "./attention/AttentionStrip.js";
 import { TriagePage } from "./triage/TriagePage.js";
 import {
+  SessionGroupView,
+  applyRuntimeSessionsMessage,
+} from "./session-hub/SessionGroup.js";
+import {
   deleteProject,
   deleteTask,
   fetchFuzzySearch,
@@ -94,6 +98,13 @@ function App() {
   const [taskModal, setTaskModal] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [attentionItems, setAttentionItems] = useState([]);
+  const [runtimeSessions, setRuntimeSessions] = useState([]);
+  const [runtimeWsUp, setRuntimeWsUp] = useState(false);
+  const [sessionCardSize, setSessionCardSize] = useState(
+    ["compact", "normal", "large"].includes(initialSettings.sessionCardSize)
+      ? initialSettings.sessionCardSize
+      : "normal"
+  );
   const [triageOpen, setTriageOpen] = useState(false);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
@@ -125,8 +136,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView });
-  }, [theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView]);
+    saveSettings({ theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView, sessionCardSize });
+  }, [theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView, sessionCardSize]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -286,8 +297,10 @@ function App() {
     let closing = false;
     const connect = () => {
       ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/runtime/ws`);
+      ws.onopen = () => setRuntimeWsUp(true);
       ws.onclose = () => {
         if (closing) return;
+        setRuntimeWsUp(false);
         retryTimer = setTimeout(connect, 1000);
       };
       ws.onerror = () => {
@@ -299,6 +312,9 @@ function App() {
         const msg = JSON.parse(evt.data);
         if (msg.type === "runtime.snapshot") {
           setAttentionItems(Array.isArray(msg.snapshot?.attention) ? msg.snapshot.attention : []);
+          setRuntimeSessions(Array.isArray(msg.snapshot?.sessions) ? msg.snapshot.sessions : []);
+        } else if (msg.type === "runtime.event") {
+          setRuntimeSessions((prev) => applyRuntimeSessionsMessage(prev, msg));
         } else if (msg.type === "attention.updated") {
           setAttentionItems(Array.isArray(msg.items) ? msg.items : []);
         }
@@ -308,6 +324,7 @@ function App() {
     return () => {
       closing = true;
       clearTimeout(retryTimer);
+      setRuntimeWsUp(false);
       try {
         ws?.close();
       } catch {}
@@ -480,6 +497,13 @@ function App() {
 
   const slugs = Object.keys(projects).sort();
   const active = activeSlug ? projects[activeSlug] : null;
+  const visibleRuntimeSessions = useMemo(
+    () =>
+      runtimeSessions.filter(
+        (session) => !activeSlug || !session?.projectSlug || session.projectSlug === activeSlug
+      ),
+    [runtimeSessions, activeSlug]
+  );
   const fuzzyMatchMap = useMemo(
     () => new Map((fuzzyState.matches || []).map((match) => [match.id, match])),
     [fuzzyState.matches]
@@ -664,6 +688,16 @@ function App() {
       />
     </div>
   `;
+  const sessionGroupEl = html`
+    <div class="session-group-row">
+      <${SessionGroupView}
+        sessions=${visibleRuntimeSessions}
+        size=${sessionCardSize}
+        connected=${runtimeWsUp}
+        onSizeChange=${setSessionCardSize}
+      />
+    </div>
+  `;
   const triageEl = triageOpen
     ? html`
         <div class="triage-overlay" role="dialog" aria-modal="true" aria-label="Attention triage">
@@ -719,6 +753,7 @@ function App() {
           onTogglePinProject=${onTogglePinProject}
         />
         ${attentionStripEl}
+        ${sessionGroupEl}
         <${EmptyState} workspace=${workspace} onOpenHelp=${() => setHelpOpen(true)} />
         <${ConnectionPip} up=${wsUp} />
         ${drawerEl}
@@ -769,6 +804,7 @@ function App() {
           onTogglePinProject=${onTogglePinProject}
         />
         ${attentionStripEl}
+        ${sessionGroupEl}
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
         <div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>
         <${ConnectionPip} up=${wsUp} />
@@ -822,6 +858,7 @@ function App() {
           onTogglePinProject=${onTogglePinProject}
       />
       ${attentionStripEl}
+      ${sessionGroupEl}
       ${!headerCollapsed ? html`
         <${HeroStrip}
           project=${active}
