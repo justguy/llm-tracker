@@ -1,4 +1,4 @@
-// hub/api/run-session.js — sh-3-03 (TDD v0.5 §6.7, §8A.1, §12.0; PRD §6.7)
+// hub/api/run-session.js — sh-3-03 + sh-3-05 (TDD v0.5 §6.7, §8A.1, §12.0; PRD §6.7)
 //
 // HTTP routes for the Run Session funnel. Every task-card, swimlane, Hub,
 // CLI, and attach entry point converges on these endpoints:
@@ -9,17 +9,14 @@
 //   PATCH /api/run-session/drafts/:draftId
 //   POST  /api/run-session/launch
 //
-// Launch is intentionally a 501 LAUNCH_NOT_AVAILABLE stub: the full path
-// (sh-3-05 RunSessionService) requires JobRegistry (sh-5-01), VerifyPack
-// composition (sh-5-04 full impl), ContextPack (sh-8-01), and TaskClaim
-// (sh-3-04) — none of which exist on v2-t2t4 yet. The endpoint validates
-// the request shape so callers get the same INVALID_BODY errors they will
-// see once the underlying services are wired.
+// Launch is now live (sh-3-05) — RunSessionService composes the launch
+// result and this layer maps it to HTTP. The endpoint still owns body-shape
+// validation; the service owns task-claim, session/job creation, and
+// VerifyPack stamping.
 //
-// Active jobs are not yet available either: JobRegistry (sh-5-01) is not
-// implemented, so candidate scoring receives `jobs: []` and the
-// "task already has active job" penalty cannot fire. Sessions come from
-// the live RuntimeProjection (shared with /api/sessions).
+// Active jobs in candidate scoring: still pass-through `jobs: []` for the
+// scorer because sh-3-08 owns the live wiring. The launch path consumes the
+// JobRegistry directly through the service.
 //
 // Error envelope mirrors hub/api/sessions.js: `{ error: { code, message, details? } }`.
 
@@ -35,6 +32,8 @@ const LAUNCH_ALLOWED_FIELDS = new Set([
   "draftId",
   "expectedTrackerRev",
   "claimMode",
+  "forceReason",
+  "forceUser",
 ]);
 const LAUNCH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
 
@@ -46,6 +45,8 @@ const LAUNCH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
  * @property {{ toSnapshots(): { sessions: object[] } }} projection
  *   RuntimeProjection — supplies the active sessions list for worktree
  *   conflict scoring.
+ * @property {{ launch(input: object): Promise<object> }} runSessionService
+ *   sh-3-05 RunSessionService — orchestrates POST /api/run-session/launch.
  */
 
 /**
@@ -58,7 +59,7 @@ export function registerRunSessionRoutes(app, deps) {
   if (!app || typeof app.get !== "function" || typeof app.post !== "function") {
     throw new Error("registerRunSessionRoutes: express app required");
   }
-  const { store, draftStore, projection } = deps || {};
+  const { store, draftStore, projection, runSessionService } = deps || {};
   if (!store || typeof store.get !== "function") {
     throw new Error("registerRunSessionRoutes: store (with get) required");
   }
@@ -72,6 +73,9 @@ export function registerRunSessionRoutes(app, deps) {
   }
   if (!projection || typeof projection.toSnapshots !== "function") {
     throw new Error("registerRunSessionRoutes: projection (with toSnapshots) required");
+  }
+  if (!runSessionService || typeof runSessionService.launch !== "function") {
+    throw new Error("registerRunSessionRoutes: runSessionService (with launch) required");
   }
 
   // --- GET /api/run-candidates --------------------------------------------
@@ -189,10 +193,9 @@ export function registerRunSessionRoutes(app, deps) {
   });
 
   // --- POST /api/run-session/launch ---------------------------------------
-  // STUB: sh-3-05 RunSessionService is not yet implemented. Validate body
-  // shape so callers get a meaningful 4xx for bad inputs, then return 501
-  // with a code that documents the dependency.
-  app.post("/api/run-session/launch", (req, res) => {
+  // sh-3-05: live RunSessionService. Body validation lives here; the service
+  // returns a frozen RunLaunchResult that we translate into HTTP shapes.
+  app.post("/api/run-session/launch", async (req, res) => {
     const body = req.body;
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
@@ -204,7 +207,7 @@ export function registerRunSessionRoutes(app, deps) {
     if (unknown.length > 0) {
       return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
     }
-    const { draftId, expectedTrackerRev, claimMode } = body;
+    const { draftId, expectedTrackerRev, claimMode, forceReason, forceUser } = body;
     if (!isRunSessionDraftId(draftId)) {
       return sendError(res, 400, "INVALID_BODY", "`draftId` is required (draft_<24-hex>)");
     }
@@ -223,20 +226,73 @@ export function registerRunSessionRoutes(app, deps) {
         { allowed: [...LAUNCH_CLAIM_MODES] },
       );
     }
+    if (forceReason !== undefined && (typeof forceReason !== "string" || forceReason.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`forceReason` must be a non-empty string when present");
+    }
+    if (forceUser !== undefined && (typeof forceUser !== "string" || forceUser.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`forceUser` must be a non-empty string when present");
+    }
 
-    // Reject unknown drafts up-front so the 501 only fires when a launch
-    // *could* succeed once RunSessionService lands.
+    // Reject unknown drafts up-front so the service never wastes work on a
+    // dead launch. (The service also handles unknown_draft itself; this guard
+    // keeps the 404 path identical to the GET/PATCH endpoints.)
     if (!draftStore.get(draftId)) {
       return sendError(res, 404, "UNKNOWN_DRAFT", `draft not found or expired: ${draftId}`);
     }
 
-    return sendError(
-      res,
-      501,
-      "LAUNCH_NOT_AVAILABLE",
-      "RunSessionService (sh-3-05) is not yet wired; POST /api/run-session/launch is a stub",
-      { pendingTasks: ["sh-3-05", "sh-5-01", "sh-3-04"] },
-    );
+    const launchInput = {
+      draftId,
+      ...(expectedTrackerRev !== undefined ? { expectedTrackerRev } : {}),
+      ...(claimMode !== undefined ? { claimMode } : {}),
+      ...(forceReason !== undefined ? { forceReason } : {}),
+      ...(forceUser !== undefined ? { forceUser } : {}),
+    };
+
+    let result;
+    try {
+      result = await runSessionService.launch(launchInput);
+    } catch (err) {
+      return sendError(res, 500, "LAUNCH_FAILED", err.message || "RunSessionService.launch threw");
+    }
+
+    if (result.ok === true) {
+      // 201 for any successful launch (created/joined/untasked/attached); the
+      // body is the result without the `ok` discriminator so callers see the
+      // mode-shaped record directly.
+      const { ok: _ok, ...payload } = result;
+      return res.status(201).json(payload);
+    }
+
+    switch (result.error) {
+      case "stale_tracker_rev":
+        return sendError(
+          res,
+          409,
+          "STALE_TRACKER_REV",
+          `tracker rev has moved on (current: ${result.currentRev})`,
+          { currentRev: result.currentRev },
+        );
+      case "task_claim_conflict":
+        return sendError(
+          res,
+          409,
+          "TASK_CLAIM_CONFLICT",
+          `task already has an active job: ${result.activeJobId}`,
+          { activeJobId: result.activeJobId },
+        );
+      case "unknown_draft":
+        return sendError(res, 404, "UNKNOWN_DRAFT", `draft not found or expired: ${draftId}`);
+      case "unknown_project":
+        return sendError(res, 404, "UNKNOWN_PROJECT", "project referenced by draft not found");
+      case "unknown_task":
+        return sendError(res, 404, "UNKNOWN_TASK", "task referenced by draft not found");
+      case "unknown_session":
+        return sendError(res, 404, "UNKNOWN_SESSION", "session referenced by attach draft not found");
+      case "invalid_input":
+        return sendError(res, 400, "INVALID_BODY", result.detail || "invalid launch input");
+      default:
+        return sendError(res, 500, "LAUNCH_FAILED", `unknown launch result error: ${result.error}`);
+    }
   });
 }
 

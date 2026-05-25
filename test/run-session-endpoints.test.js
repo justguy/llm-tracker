@@ -1,17 +1,30 @@
-// test/run-session-endpoints.test.js — sh-3-03 (TDD v0.5 §6.7, §8A.1, §12.0)
+// test/run-session-endpoints.test.js — sh-3-03 + sh-3-05 (TDD v0.5 §6.7, §8A.1, §12.0)
 //
 // Acceptance tests for the Run Session HTTP routes. Each test stands up a
 // fresh Express app on a kernel-assigned port wired to a stub Store + real
-// in-memory draftStore + stub RuntimeProjection. We deliberately do NOT
+// in-memory draftStore + RuntimeProjection. We deliberately do NOT
 // boot the full daemon to keep these tests fast and free of the flaky
 // daemon-start race tracked in sh-0-09.
+//
+// sh-3-05: the launch endpoint is now live (was 501 LAUNCH_NOT_AVAILABLE).
+// startMiniApp grows a real RuntimeStore + JobRegistry + RunSessionService
+// so the launch tests exercise the full HTTP→service path.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import express from "express";
 
 import { registerRunSessionRoutes } from "../hub/api/run-session.js";
 import { createDraftStore } from "../hub/run-session/drafts.js";
+import { RunSessionService } from "../hub/run-session/service.js";
+import { JobRegistry } from "../hub/jobs/registry.js";
+import { RuntimeStore } from "../hub/runtime/store.js";
+import { RuntimeProjection } from "../hub/runtime/projection.js";
+import { makeRuntimeId } from "../hub/runtime/ids.js";
+import { validateRuntimeEvent } from "../hub/runtime/events.js";
 
 function makeStoreStub(projects) {
   const map = new Map();
@@ -21,14 +34,6 @@ function makeStoreStub(projects) {
   return {
     get(slug) {
       return map.get(slug) ?? null;
-    },
-  };
-}
-
-function makeProjectionStub(sessions = []) {
-  return {
-    toSnapshots() {
-      return { sessions };
     },
   };
 }
@@ -43,13 +48,39 @@ function fixedClock(start = 1_700_000_000_000) {
   return now;
 }
 
-async function startMiniApp({ projects = {}, sessions = [], draftStoreOptions = {} } = {}) {
+async function startMiniApp({ projects = {}, draftStoreOptions = {} } = {}) {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), "lt-rs-endpoint-"));
   const store = makeStoreStub(projects);
   const draftStore = createDraftStore(draftStoreOptions);
-  const projection = makeProjectionStub(sessions);
+  const projection = new RuntimeProjection();
+  const appendedEvents = [];
+  const runtimeStore = new RuntimeStore({
+    workspaceRoot,
+    onAppend: (event) => {
+      appendedEvents.push(event);
+      projection.apply(event);
+    },
+  });
+  const jobRegistry = new JobRegistry({
+    runtimeStore,
+    projection,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace: workspaceRoot,
+  });
+  const runSessionService = new RunSessionService({
+    store,
+    draftStore,
+    projection,
+    jobRegistry,
+    runtimeStore,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace: workspaceRoot,
+  });
   const app = express();
   app.use(express.json());
-  registerRunSessionRoutes(app, { store, draftStore, projection });
+  registerRunSessionRoutes(app, { store, draftStore, projection, runSessionService });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve, reject) => {
     server.once("listening", resolve);
@@ -60,7 +91,13 @@ async function startMiniApp({ projects = {}, sessions = [], draftStoreOptions = 
     base: `http://127.0.0.1:${port}`,
     store,
     draftStore,
-    close: () => new Promise((r) => server.close(() => r())),
+    projection,
+    jobRegistry,
+    appendedEvents,
+    close: async () => {
+      await new Promise((r) => server.close(() => r()));
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    },
   };
 }
 
@@ -99,7 +136,7 @@ function task(overrides) {
     repos: {
       primary: { root: "/tmp/repo", worktree: "/tmp/wt", allowed_paths: ["src/**"] },
     },
-    verify: { items: [{ kind: "test", command: "node --test" }] },
+    verify: { items: [{ kind: "command", id: "lt.test", required: true, cmd: "node --test" }] },
     ...overrides,
   };
 }
@@ -491,25 +528,175 @@ test("PATCH /api/run-session/drafts/:id rejects malformed ids", async () => {
   }
 });
 
-// --- POST /api/run-session/launch (stub) -------------------------------------
+// --- POST /api/run-session/launch (live, sh-3-05) ---------------------------
 
-test("POST /api/run-session/launch returns 501 LAUNCH_NOT_AVAILABLE for a valid body", async () => {
-  const app = await startMiniApp();
+test("POST /api/run-session/launch — task_backed happy path returns 201 with mode=created and well-formed ids", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: { tasks: [task({ id: "t1" })] },
+        rev: 0,
+      },
+    },
+  });
   try {
     const created = await postJson(app.base, "/api/run-session/draft", {
       source: "task_card",
       mode: "task_backed",
       taskId: "t1",
+      projectSlug: "proj",
     });
     const r = await postJson(app.base, "/api/run-session/launch", {
       draftId: created.body.draft.id,
-      expectedTrackerRev: 12,
       claimMode: "fail_if_active",
     });
-    assert.equal(r.status, 501);
-    assert.equal(r.body.error.code, "LAUNCH_NOT_AVAILABLE");
-    assert.ok(Array.isArray(r.body.error.details.pendingTasks));
-    assert.ok(r.body.error.details.pendingTasks.includes("sh-3-05"));
+    assert.equal(r.status, 201);
+    assert.equal(r.body.mode, "created");
+    assert.match(r.body.sessionId, /^ses_[0-9a-hjkmnp-tv-z]{26}$/);
+    assert.match(r.body.jobId, /^job_[0-9a-hjkmnp-tv-z]{26}$/);
+    assert.equal(r.body.taskClaimed, true);
+
+    // The session + job appear on the registry/projection.
+    assert.equal(app.projection.sessions.get(r.body.sessionId)?.id, r.body.sessionId);
+    assert.equal(app.jobRegistry.get(r.body.jobId)?.id, r.body.jobId);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/run-session/launch — stale expectedTrackerRev returns 409 STALE_TRACKER_REV with currentRev", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: { tasks: [task({ id: "t1" })] },
+        rev: 5,
+      },
+    },
+  });
+  try {
+    const created = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+      projectSlug: "proj",
+    });
+    const r = await postJson(app.base, "/api/run-session/launch", {
+      draftId: created.body.draft.id,
+      expectedTrackerRev: 4,
+    });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.error.code, "STALE_TRACKER_REV");
+    assert.equal(r.body.error.details.currentRev, 5);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/run-session/launch — fail_if_active with an active job returns 409 TASK_CLAIM_CONFLICT with activeJobId", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: { tasks: [task({ id: "t1" })] },
+        rev: 0,
+      },
+    },
+  });
+  try {
+    const first = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+      projectSlug: "proj",
+    });
+    const seeded = await postJson(app.base, "/api/run-session/launch", {
+      draftId: first.body.draft.id,
+    });
+    assert.equal(seeded.status, 201);
+
+    const second = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+      projectSlug: "proj",
+    });
+    const r = await postJson(app.base, "/api/run-session/launch", {
+      draftId: second.body.draft.id,
+      claimMode: "fail_if_active",
+    });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.error.code, "TASK_CLAIM_CONFLICT");
+    assert.equal(r.body.error.details.activeJobId, seeded.body.jobId);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/run-session/launch — claimMode=force with forceReason returns 201; sessions/jobs lists reflect both records", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: { tasks: [task({ id: "t1" })] },
+        rev: 0,
+      },
+    },
+  });
+  try {
+    // Seed an active job so force has something to override.
+    const firstDraft = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+      projectSlug: "proj",
+    });
+    const seeded = await postJson(app.base, "/api/run-session/launch", {
+      draftId: firstDraft.body.draft.id,
+    });
+    assert.equal(seeded.status, 201);
+
+    const forceDraft = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+      projectSlug: "proj",
+    });
+    const r = await postJson(app.base, "/api/run-session/launch", {
+      draftId: forceDraft.body.draft.id,
+      claimMode: "force",
+      forceReason: "operator override",
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.mode, "created");
+
+    // Registry sees both jobs; projection sees both sessions.
+    assert.equal(app.jobRegistry.list().length, 2);
+    assert.equal(app.projection.toSnapshots().sessions.length, 2);
+
+    // human.override event was appended through the launch path.
+    const overrides = app.appendedEvents.filter((e) => e.type === "human.override");
+    assert.equal(overrides.length, 1);
+    assert.equal(overrides[0].source, "http");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/run-session/launch — claimMode=force without forceReason returns 400 INVALID_BODY", async () => {
+  const app = await startMiniApp({
+    projects: { proj: { data: { tasks: [task({ id: "t1" })] }, rev: 0 } },
+  });
+  try {
+    const draft = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+      projectSlug: "proj",
+    });
+    const r = await postJson(app.base, "/api/run-session/launch", {
+      draftId: draft.body.draft.id,
+      claimMode: "force",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_BODY");
   } finally {
     await app.close();
   }

@@ -21,6 +21,7 @@ import { registerJobsRoutes } from "./api/jobs.js";
 import { registerRunSessionRoutes } from "./api/run-session.js";
 import { JobRegistry } from "./jobs/registry.js";
 import { createDraftStore } from "./run-session/drafts.js";
+import { RunSessionService } from "./run-session/service.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
 import { loadWorkspaceConfig } from "./config/loader.js";
@@ -468,10 +469,21 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     } catch {}
   }, RUN_SESSION_DRAFT_SWEEP_INTERVAL_MS);
   runSessionDraftSweepTimer.unref?.();
+  const runSessionService = new RunSessionService({
+    store,
+    draftStore: runSessionDraftStore,
+    projection: runtimeProjection,
+    jobRegistry,
+    runtimeStore,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace
+  });
   registerRunSessionRoutes(app, {
     store,
     draftStore: runSessionDraftStore,
-    projection: runtimeProjection
+    projection: runtimeProjection,
+    runSessionService
   });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {
