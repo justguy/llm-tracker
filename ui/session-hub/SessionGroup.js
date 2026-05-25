@@ -184,6 +184,7 @@ export function SessionGroupView({
   connected = false,
   error = null,
   onSizeChange,
+  onAttach,
 } = {}) {
   const cardSize = normalizeSessionCardSize(size);
   const list = normalizeSessionList(sessions);
@@ -195,20 +196,25 @@ export function SessionGroupView({
           <h2 class="session-group__title">Sessions</h2>
           <span class="session-group__count">${list.length}</span>
         </div>
-        <div class="session-group__sizes" role="group" aria-label="Session card size">
-          ${SESSION_CARD_SIZES.map((option) => html`
-            <button
-              key=${option}
-              type="button"
-              class=${`session-group__size ${option === cardSize ? "session-group__size--active" : ""}`}
-              aria-pressed=${option === cardSize ? "true" : "false"}
-              onClick=${() => {
-                if (typeof onSizeChange === "function") onSizeChange(option);
-              }}
-            >
-              ${option}
-            </button>
-          `)}
+        <div class="session-group__controls">
+          ${typeof onAttach === "function"
+            ? html`<button class="session-group__attach" type="button" onClick=${onAttach}>[ATTACH]</button>`
+            : null}
+          <div class="session-group__sizes" role="group" aria-label="Session card size">
+            ${SESSION_CARD_SIZES.map((option) => html`
+              <button
+                key=${option}
+                type="button"
+                class=${`session-group__size ${option === cardSize ? "session-group__size--active" : ""}`}
+                aria-pressed=${option === cardSize ? "true" : "false"}
+                onClick=${() => {
+                  if (typeof onSizeChange === "function") onSizeChange(option);
+                }}
+              >
+                ${option}
+              </button>
+            `)}
+          </div>
         </div>
       </header>
       ${error ? html`<div class="session-group__error" role="status">${error}</div>` : null}
@@ -234,6 +240,7 @@ export function SessionGroup({
   WebSocketCtor = globalThis.WebSocket,
   runtimeWsUrl = runtimeWebSocketUrl(),
   reconnectMs = 1000,
+  onAttach,
 } = {}) {
   const [sessions, setSessions] = useState(() => normalizeSessionList(initialSessions));
   const [connected, setConnected] = useState(false);
@@ -258,6 +265,7 @@ export function SessionGroup({
       connected=${connected}
       error=${error}
       onSizeChange=${onSizeChange}
+      onAttach=${onAttach}
     />
   `;
 }

@@ -32,6 +32,7 @@ const POST_ALLOWED_FIELDS = new Set([
   "model",
   "cwd",
   "repoRoot",
+  "worktreePath",
   "branch",
 ]);
 
@@ -85,6 +86,7 @@ const POST_OPTIONAL_STRING_FIELDS = [
   "model",
   "cwd",
   "repoRoot",
+  "worktreePath",
   "branch",
 ];
 

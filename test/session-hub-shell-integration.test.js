@@ -18,8 +18,11 @@ function read(rel) {
 test("ui app shell imports and mounts SessionGroupView", () => {
   const app = read("ui/app.js");
   assert.match(app, /SessionGroupView/);
+  assert.match(app, /AttachDialog/);
   assert.match(app, /applyRuntimeSessionsMessage/);
   assert.match(app, /<\$\{SessionGroupView\}/);
+  assert.match(app, /<\$\{AttachDialog\}/);
+  assert.match(app, /taskId=\$\{taskDrawer\?\.slug === activeSlug \? taskDrawer\.taskId/);
   assert.match(app, /session-group-row/);
 });
 
@@ -33,4 +36,5 @@ test("ui runtime websocket feeds sessions from snapshots and events", () => {
 test("ui shell loads session group stylesheet", () => {
   const html = read("ui/index.html");
   assert.match(html, /href="\/session-hub\/SessionGroup\.css"/);
+  assert.match(html, /href="\/session-hub\/AttachDialog\.css"/);
 });

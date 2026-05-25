@@ -1,0 +1,71 @@
+.attach-dialog {
+  max-width: 720px;
+}
+
+.attach-dialog__body {
+  gap: 14px;
+}
+
+.attach-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.attach-dialog__grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.attach-dialog__grid label span {
+  color: var(--muted, #8a8f98);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.attach-dialog__wide {
+  grid-column: 1 / -1;
+}
+
+.attach-dialog__repo,
+.attach-dialog__error,
+.attach-dialog__contract {
+  border: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.attach-dialog__repo {
+  color: var(--ink-2, #cbd5e1);
+}
+
+.attach-dialog__repo--unknown,
+.attach-dialog__error {
+  color: var(--amber, #f59e0b);
+}
+
+.attach-dialog__contract {
+  overflow: auto;
+  margin: 0;
+  background: var(--bg, #0b1020);
+  color: var(--white, #f8fafc);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.attach-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .attach-dialog__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

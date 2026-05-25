@@ -15,6 +15,7 @@ import { cmdNext } from "./commands/next.js";
 import { cmdPick } from "./commands/pick.js";
 import { cmdReload } from "./commands/reload.js";
 import { cmdSearch } from "./commands/search.js";
+import { cmdSession } from "./commands/session.js";
 import { cmdVerify } from "./commands/verify.js";
 import { cmdWhy } from "./commands/why.js";
 import { DEFAULT_PORT, httpRequest, resolvePort, resolveWorkspace } from "./workspace-client.js";
@@ -590,6 +591,7 @@ async function main() {
   if (cmd === "reload") return cmdReload(args, { resolveWorkspace, httpRequest });
   if (cmd === "pick" || cmd === "claim") return cmdPick(args, { resolveWorkspace, httpRequest });
   if (cmd === "next") return cmdNext(args, { resolveWorkspace, httpRequest });
+  if (cmd === "session") return cmdSession(args, { resolveWorkspace, httpRequest });
   if (cmd === "rollback") return cmdRollback(args);
   if (cmd === "restore") return cmdRestore(args);
   if (cmd === "since") return cmdSince(args);
@@ -623,6 +625,8 @@ Usage:
   llm-tracker search <slug> <query> [--json] [--limit N] Semantic task search with local embeddings (requires hub)
   llm-tracker fuzzy|fuzzy-search <slug> <query> [--json] [--limit N]  Fuzzy lexical task search (requires hub)
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)
+  llm-tracker session attach --project <slug> --task <taskId> --agent <id> [--cwd <path>] [--repo-root <path>] [--worktree <path>]
+                                                        Attach a manual session and print token contract (requires hub)
   llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)

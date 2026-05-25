@@ -41,6 +41,24 @@
   background: var(--panel, #111827);
 }
 
+.session-group__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-group__attach {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  border-radius: 4px;
+  background: var(--panel, #111827);
+  color: var(--ink-2, #cbd5e1);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .session-group__size {
   min-height: 26px;
   padding: 0 8px;
@@ -86,6 +104,11 @@
 
 @media (max-width: 760px) {
   .session-group__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-group__controls {
     align-items: stretch;
     flex-direction: column;
   }

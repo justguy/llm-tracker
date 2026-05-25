@@ -27,6 +27,11 @@ function warningEvidenceLabel(warning) {
   return null;
 }
 
+function repoLabel(session) {
+  if (typeof session?.repoRoot === "string" && session.repoRoot.length > 0) return session.repoRoot;
+  return "repo unknown";
+}
+
 export function SessionCard({ session, size = "normal" } = {}) {
   if (!session || typeof session !== "object") return null;
   const warnings = Array.isArray(session.warnings) ? session.warnings : [];
@@ -51,6 +56,9 @@ export function SessionCard({ session, size = "normal" } = {}) {
           ${session.status || "unknown"}
         </span>
         ${session.tier ? html`<span class="session-card__tier">${session.tier}</span>` : null}
+        <span class=${`session-card__repo ${session.repoRoot ? "session-card__repo--known" : "session-card__repo--unknown"}`}>
+          ${repoLabel(session)}
+        </span>
       </div>
 
       ${warnings.length

@@ -988,6 +988,7 @@ Error shape:
 | `llm-tracker execute <slug> <taskId> [--json]`            | Deterministic execution pack with readiness, guardrails, and reading list.    |    **yes**   |
 | `llm-tracker verify <slug> <taskId> [--json]`             | Deterministic verification checklist with tracker-backed evidence.             |    **yes**   |
 | `llm-tracker blockers <slug> [--json]`                    | Structural blockers: blocked tasks plus the tasks blocking them.              |    **yes**   |
+| `llm-tracker session attach --project <slug> --task <taskId> --agent <id> [--cwd <path>] [--repo-root <path>] [--worktree <path>]` | Attach a manual session and print the one-time token contract. |    **yes**   |
 | `llm-tracker changed <slug> [<fromRev>] [--json] [--limit N]` | Changed tasks since a rev, grouped by task.                               |    **yes**   |
 | `llm-tracker search <slug> <query> [--json] [--limit N]` | Semantic local-model search for feature-oriented questions.                  |    **yes**   |
 | `llm-tracker fuzzy-search <slug> <query> [--json] [--limit N]` | Deterministic fuzzy lexical search.                                      |    **yes**   |

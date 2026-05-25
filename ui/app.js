@@ -12,6 +12,7 @@ import { ScratchpadRow } from "./scratchpad-row.js";
 import { ConnectionPip, Drawer, EmptyState } from "./shell-chrome.js";
 import { AttentionStrip } from "./attention/AttentionStrip.js";
 import { TriagePage } from "./triage/TriagePage.js";
+import { AttachDialog } from "./session-hub/AttachDialog.js";
 import {
   SessionGroupView,
   applyRuntimeSessionsMessage,
@@ -96,6 +97,7 @@ function App() {
   const [projectIntel, setProjectIntel] = useState(null);
   const [taskDrawer, setTaskDrawer] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
+  const [attachOpen, setAttachOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [attentionItems, setAttentionItems] = useState([]);
   const [runtimeSessions, setRuntimeSessions] = useState([]);
@@ -130,6 +132,7 @@ function App() {
     historyOpen,
     projectIntel,
     taskModal,
+    attachOpen,
     drawerOpen,
     drawerPinned
   });
@@ -656,6 +659,28 @@ function App() {
         onClose=${() => setTaskModal(null)}
       />`
     : null;
+  const attachDialogEl = html`
+    <${AttachDialog}
+      open=${attachOpen}
+      projectSlug=${activeSlug || ""}
+      taskId=${taskDrawer?.slug === activeSlug ? taskDrawer.taskId : taskModal?.slug === activeSlug ? taskModal.task?.id : ""}
+      projectFile=${active?.file || ""}
+      workspacePath=${workspace?.workspace || ""}
+      onClose=${() => setAttachOpen(false)}
+      onAttached=${(body) => {
+        if (body?.session) setRuntimeSessions((prev) => applyRuntimeSessionsMessage(prev, {
+          type: "runtime.event",
+          event: {
+            id: body.eventId || "evt_attach_ui",
+            type: "session.started",
+            source: "http",
+            ts: new Date().toISOString(),
+            session: body.session,
+          },
+        }));
+      }}
+    />
+  `;
 
   const shellPinned = drawerOpen && drawerPinned;
   const shellClass = `app-shell ${shellPinned ? "drawer-pinned" : ""}`;
@@ -695,6 +720,7 @@ function App() {
         size=${sessionCardSize}
         connected=${runtimeWsUp}
         onSizeChange=${setSessionCardSize}
+        onAttach=${() => setAttachOpen(true)}
       />
     </div>
   `;
@@ -761,6 +787,7 @@ function App() {
         ${settingsEl}
         ${historyEl}
         ${taskModalEl}
+        ${attachDialogEl}
         ${paletteEl}
         ${triageEl}
       </div>
@@ -813,6 +840,7 @@ function App() {
         ${settingsEl}
         ${historyEl}
         ${projectIntelEl}
+        ${attachDialogEl}
         ${taskModalEl}
         ${paletteEl}
         ${triageEl}
@@ -941,6 +969,7 @@ function App() {
       ${historyEl}
       ${projectIntelEl}
       ${taskModalEl}
+      ${attachDialogEl}
       ${paletteEl}
       ${triageEl}
     </div>

@@ -78,6 +78,13 @@ test("SessionCard renders visible warning source and evidence labels", () => {
   assert.equal(vnode.props["data-card-size"], "large");
 });
 
+test("SessionCard renders repo unknown when repoRoot is absent", () => {
+  const vnode = SessionCard({
+    session: { id: "ses_unknown_repo", name: "Manual", tier: "manual" },
+  });
+  assert.match(collectVNodeText(vnode), /repo unknown/);
+});
+
 test("SessionGroupView exposes exactly the three card-size choices", () => {
   const vnode = SessionGroupView({
     size: "compact",
@@ -87,6 +94,22 @@ test("SessionGroupView exposes exactly the three card-size choices", () => {
   assert.equal(buttons.length, 3);
   assert.deepEqual(buttons.map((button) => collectVNodeText(button).trim()), ["compact", "normal", "large"]);
   assert.equal(buttons.filter((button) => button.props["aria-pressed"] === "true").length, 1);
+});
+
+test("SessionGroupView exposes attach action when supplied", () => {
+  let opened = false;
+  const vnode = SessionGroupView({
+    size: "compact",
+    sessions: [],
+    onAttach: () => {
+      opened = true;
+    },
+  });
+  const buttons = flattenRenderedNodes(vnode).filter((node) => node.type === "button");
+  const attach = buttons.find((button) => collectVNodeText(button).includes("[ATTACH]"));
+  assert.ok(attach, "attach button is rendered");
+  attach.props.onClick();
+  assert.equal(opened, true);
 });
 
 test("applyRuntimeSessionsMessage replaces sessions from runtime.snapshot", () => {

@@ -259,6 +259,7 @@ npx llm-tracker status --json       # machine-readable
 # Requires hub running
 npx llm-tracker help                     # local CLI usage help
 npx llm-tracker blockers <slug>        # structural blockers and what they are waiting on
+npx llm-tracker session attach --project <slug> --task <task-id> --agent codex  # attach manual session + token contract
 npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
 npx llm-tracker search <slug> <query>  # semantic local-model search (requires hub)
 npx llm-tracker fuzzy-search <slug> <query>  # deterministic fuzzy lexical search (requires hub)

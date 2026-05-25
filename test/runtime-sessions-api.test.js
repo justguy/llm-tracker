@@ -293,3 +293,26 @@ test("Round-trip POST -> PATCH -> GET: projection reflects both events", { timeo
     await env.close();
   }
 });
+
+test("POST accepts worktreePath for manual attach sessions", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp();
+  try {
+    const res = await postJson(env.base, "/api/sessions", {
+      name: "attach",
+      tier: "manual",
+      projectSlug: "demo",
+      taskId: "t-attach",
+      agent: "codex",
+      cwd: "/repo",
+      repoRoot: "/repo",
+      worktreePath: "/repo-wt",
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.equal(body.session.cwd, "/repo");
+    assert.equal(body.session.repoRoot, "/repo");
+    assert.equal(body.session.worktreePath, "/repo-wt");
+  } finally {
+    await env.close();
+  }
+});
