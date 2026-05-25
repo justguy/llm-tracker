@@ -11,6 +11,7 @@
 //   GET   /api/sessions                              — list SessionRecord[] + projection rev
 //   POST  /api/sessions                              — create session via session.started event
 //   GET   /api/sessions/:id                          — fetch single session by id
+//   GET   /api/sessions/:sessionId/task-ledger       — derived SessionTaskLedgerItem[]
 //   PATCH /api/sessions/:id                          — emit session.status event (status update)
 //   POST  /api/sessions/:sessionId/token/rotate      — rotate session token (gated on tokenStore dep)
 //   POST  /api/sessions/:sessionId/stdio/capture     — toggle stdio disk capture (gated on tokenStore dep)
@@ -20,6 +21,7 @@
 import { log } from "../logging/index.js";
 import { requireSessionToken } from "./middleware/session-token.js";
 import { createSessionStdioCaptureChangedEvent } from "../runtime/events.js";
+import { SessionTaskLedgerService } from "../sessions/task-ledger.js";
 
 // Allowed body fields on POST. Anything else triggers UNKNOWN_FIELDS (400).
 const POST_ALLOWED_FIELDS = new Set([
@@ -101,6 +103,9 @@ const POST_OPTIONAL_STRING_FIELDS = [
  *   When provided, mounts POST /api/sessions/:sessionId/token/rotate (SH-2-07).
  *   When omitted, the rotation route is not registered — existing routes work
  *   unchanged so older test fixtures don't have to wire token plumbing.
+ * @property {{ get(sessionId: string): object[] | null }} [taskLedgerService]
+ * @property {{ list(): object[] }} [jobRegistry]
+ * @property {{ get(slug: string): object | null }} [store]
  */
 
 /**
@@ -120,6 +125,9 @@ export function registerSessionsRoutes(app, deps) {
     validateRuntimeEvent,
     workspace,
     tokenStore,
+    taskLedgerService,
+    jobRegistry,
+    store,
   } = deps || {};
   if (!runtimeStore || typeof runtimeStore.append !== "function") {
     throw new Error("registerSessionsRoutes: runtimeStore (with append) required");
@@ -144,13 +152,40 @@ export function registerSessionsRoutes(app, deps) {
           makeRuntimeId,
           validateRuntimeEvent,
           workspace,
-        })
+      })
       : null;
+  const ledgerService = taskLedgerService || new SessionTaskLedgerService({
+    projection,
+    jobRegistry,
+    store,
+  });
 
   // --- GET /api/sessions --------------------------------------------------
   app.get("/api/sessions", (_req, res) => {
     const snap = projection.toSnapshots();
     res.status(200).json({ sessions: snap.sessions, rev: projection.rev });
+  });
+
+  // --- GET /api/sessions/:sessionId/task-ledger ---------------------------
+  app.get("/api/sessions/:sessionId/task-ledger", (req, res) => {
+    const { sessionId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+    if (!projection.sessions.get(sessionId)) {
+      return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+    }
+    let taskLedger;
+    try {
+      taskLedger = ledgerService.get(sessionId);
+    } catch (err) {
+      return sendError(res, 500, "TASK_LEDGER_FAILED", err.message || "task ledger projection failed");
+    }
+    res.status(200).json({
+      sessionId,
+      taskLedger: Array.isArray(taskLedger) ? taskLedger : [],
+      rev: projection.rev,
+    });
   });
 
   // --- GET /api/sessions/:id ----------------------------------------------

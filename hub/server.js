@@ -585,20 +585,22 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   registerLayoutsRoutes(app, { workspaceRoot: workspace });
   registerProvidersRoutes(app, { broker: providerBroker });
   registerAttentionRoutes(app, { runtimeStore, attentionEngine, workspace });
-  registerSessionsRoutes(app, {
-    runtimeStore,
-    projection: runtimeProjection,
-    makeRuntimeId,
-    validateRuntimeEvent,
-    workspace,
-    tokenStore: sessionTokenStore
-  });
   const jobRegistry = new JobRegistry({
     runtimeStore,
     projection: runtimeProjection,
     makeRuntimeId,
     validateRuntimeEvent,
     workspace
+  });
+  registerSessionsRoutes(app, {
+    runtimeStore,
+    projection: runtimeProjection,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace,
+    tokenStore: sessionTokenStore,
+    jobRegistry,
+    store
   });
   registerJobsRoutes(app, { jobRegistry });
   const runSessionDraftStore = createDraftStore();
