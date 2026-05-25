@@ -80,7 +80,7 @@ async function startMiniApp({ projects = {}, draftStoreOptions = {} } = {}) {
   });
   const app = express();
   app.use(express.json());
-  registerRunSessionRoutes(app, { store, draftStore, projection, runSessionService });
+  registerRunSessionRoutes(app, { store, draftStore, projection, jobRegistry, runSessionService });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve, reject) => {
     server.once("listening", resolve);
@@ -164,6 +164,36 @@ test("GET /api/run-candidates returns scored candidates for a project", async ()
       assert.ok(Array.isArray(c.reasons));
       assert.ok(Array.isArray(c.penalties));
     }
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/run-candidates includes active-job penalties from JobRegistry", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: { tasks: [task({ id: "t1" }), task({ id: "t2" })] },
+        rev: 17,
+      },
+    },
+  });
+  try {
+    const draft = await postJson(app.base, "/api/run-session/draft", {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t1",
+      projectSlug: "proj",
+    });
+    const launch = await postJson(app.base, "/api/run-session/launch", {
+      draftId: draft.body.draft.id,
+    });
+    assert.equal(launch.status, 201);
+
+    const r = await getJson(app.base, "/api/run-candidates?projectSlug=proj");
+    assert.equal(r.status, 200);
+    const t1 = r.body.candidates.find((c) => c.taskId === "t1");
+    assert.ok(t1.penalties.some((p) => p.includes("task already has active job")));
   } finally {
     await app.close();
   }
@@ -670,11 +700,15 @@ test("POST /api/run-session/launch — claimMode=force with forceReason returns 
     // Registry sees both jobs; projection sees both sessions.
     assert.equal(app.jobRegistry.list().length, 2);
     assert.equal(app.projection.toSnapshots().sessions.length, 2);
+    assert.equal(app.jobRegistry.get(seeded.body.jobId).status, "cancelled");
+    assert.equal(app.jobRegistry.get(r.body.jobId).status, "running");
+    assert.equal(app.jobRegistry.get(r.body.jobId).predecessorJobId, undefined);
 
     // human.override event was appended through the launch path.
     const overrides = app.appendedEvents.filter((e) => e.type === "human.override");
     assert.equal(overrides.length, 1);
     assert.equal(overrides[0].source, "http");
+    assert.equal(app.appendedEvents.filter((e) => e.type === "job.queued").length, 0);
   } finally {
     await app.close();
   }

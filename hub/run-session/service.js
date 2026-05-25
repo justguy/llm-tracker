@@ -57,6 +57,10 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }
 
+function packWithItemsOrNull(pack) {
+  return pack && Array.isArray(pack.items) && pack.items.length > 0 ? pack : null;
+}
+
 /**
  * Derive a SessionRecord.tier from a draft. Drafts use `runtime` to hint at
  * the launcher kind; we map that to the canonical SessionRecord tier enum.
@@ -105,7 +109,7 @@ function jobKindForProfile(profileId) {
  * @property {{ get(slug: string): { data?: object; rev?: number } | null }} store
  * @property {{ get(id: string): object | null }} draftStore
  * @property {{ sessions: Map<string, object>; toSnapshots(): object }} projection
- * @property {{ list(): object[]; create(input: object): Promise<{ jobId: string; rev: number; eventId: string; job: object | null }> }} jobRegistry
+ * @property {{ list(): object[]; create(input: object): Promise<{ jobId: string; rev: number; eventId: string; job: object | null }>; cancel(jobId: string, opts?: object): Promise<object> }} jobRegistry
  * @property {{ append(event: object): Promise<{ rev: number; eventId: string }> }} runtimeStore
  * @property {(prefix: string) => string} makeRuntimeId
  * @property {(event: object) => true} validateRuntimeEvent
@@ -166,8 +170,13 @@ export class RunSessionService {
     if (!projection || !(projection.sessions instanceof Map)) {
       throw new Error("RunSessionService: projection (with sessions Map) required");
     }
-    if (!jobRegistry || typeof jobRegistry.list !== "function" || typeof jobRegistry.create !== "function") {
-      throw new Error("RunSessionService: jobRegistry (with list + create) required");
+    if (
+      !jobRegistry ||
+      typeof jobRegistry.list !== "function" ||
+      typeof jobRegistry.create !== "function" ||
+      typeof jobRegistry.cancel !== "function"
+    ) {
+      throw new Error("RunSessionService: jobRegistry (with list + create + cancel) required");
     }
     if (!runtimeStore || typeof runtimeStore.append !== "function") {
       throw new Error("RunSessionService: runtimeStore (with append) required");
@@ -328,8 +337,8 @@ export class RunSessionService {
       });
     }
 
-    // Forced claim: append the override event before creating session/job so
-    // the audit record precedes the new records in the log.
+    // Forced claim: append the override event before cancelling the active job
+    // and creating the replacement so the audit record precedes mutations.
     if (claim.mode === "forced" && claim.overrideEvent) {
       const { source: _claimSource, ...overrideRest } = claim.overrideEvent;
       // task-claim emits source="system" because it lacks transport context;
@@ -345,26 +354,32 @@ export class RunSessionService {
       this.validateRuntimeEvent(overrideForValidation);
       const { id: _overrideId, ...overrideForAppend } = overrideForValidation;
       await this.runtimeStore.append(overrideForAppend);
+      if (isNonEmptyString(claim.activeJobId)) {
+        await this.jobRegistry.cancel(claim.activeJobId, {
+          source: "http",
+          summary: `pre-empted by forced launch for ${draft.projectSlug}/${draft.taskId}`,
+        });
+      }
     }
 
-    // Compose verify pack now that we have project + task. The helper
-    // tolerates a tracker shape with only meta.rev; SH-5-04 will widen this
-    // to include workspace/profile sources.
-    const verifyPack = stampVerifyPack({
+    // Compose verify pack now that we have project + task. Empty packs are
+    // legal because task.verify is optional; JobRegistry persists only
+    // non-empty packs.
+    const verifyPack = packWithItemsOrNull(stampVerifyPack({
       task,
       tracker: { meta: { rev: currentTrackerRev } },
       stampedAt: this.now(),
-    });
+    }));
 
     // Create session.
     const { sessionId, eventForAppend } = this.#buildSessionStartedEvent(draft, { withTaskId: true });
     await this.runtimeStore.append(eventForAppend);
 
-    // Create job. For joined/forced launches we attach as predecessor so the
-    // registry emits job.queued instead of job.started. The composed pack
-    // rides through to the projection (SH-5-04 DoD line 3).
+    // Create job. Joined launches attach as successor and queue behind the
+    // active job. Forced launches cancel the predecessor above, then start a
+    // fresh running job.
     const predecessor =
-      (claim.mode === "joined" || claim.mode === "forced") && isNonEmptyString(claim.activeJobId)
+      claim.mode === "joined" && isNonEmptyString(claim.activeJobId)
         ? claim.activeJobId
         : null;
     const created = await this.jobRegistry.create({
@@ -375,7 +390,7 @@ export class RunSessionService {
       kind: jobKindForProfile(draft.profileId),
       source: "http",
       ...(predecessor ? { predecessorJobId: predecessor } : {}),
-      verifyPack,
+      ...(verifyPack ? { verifyPack } : {}),
     });
 
     const contextPackRef = await this.#buildContextPackSafely({
@@ -386,7 +401,7 @@ export class RunSessionService {
 
     // Read the pack back from the projection so the launch result and the
     // JobRecord share a single source of truth (SH-5-04 DoD line 3).
-    const persistedPack = created.job?.verifyPack ?? verifyPack;
+    const persistedPack = created.job?.verifyPack ?? null;
 
     const resultMode = claim.mode === "joined" ? "joined" : "created";
     return freezeResult({
@@ -521,16 +536,22 @@ export class RunSessionService {
       this.validateRuntimeEvent(overrideForValidation);
       const { id: _overrideId, ...overrideForAppend } = overrideForValidation;
       await this.runtimeStore.append(overrideForAppend);
+      if (isNonEmptyString(claim.activeJobId)) {
+        await this.jobRegistry.cancel(claim.activeJobId, {
+          source: "http",
+          summary: `pre-empted by forced attach for ${draft.projectSlug}/${attachTaskId}`,
+        });
+      }
     }
 
-    const verifyPack = stampVerifyPack({
+    const verifyPack = packWithItemsOrNull(stampVerifyPack({
       task,
       tracker: { meta: { rev: currentTrackerRev } },
       stampedAt: this.now(),
-    });
+    }));
 
     const predecessor =
-      (claim.mode === "joined" || claim.mode === "forced") && isNonEmptyString(claim.activeJobId)
+      claim.mode === "joined" && isNonEmptyString(claim.activeJobId)
         ? claim.activeJobId
         : null;
     const created = await this.jobRegistry.create({
@@ -541,7 +562,7 @@ export class RunSessionService {
       kind: jobKindForProfile(draft.profileId),
       source: "http",
       ...(predecessor ? { predecessorJobId: predecessor } : {}),
-      verifyPack,
+      ...(verifyPack ? { verifyPack } : {}),
     });
 
     const contextPackRef = await this.#buildContextPackSafely({
@@ -551,7 +572,7 @@ export class RunSessionService {
     });
 
     // Single source of truth: prefer the pack now persisted on the JobRecord.
-    const persistedPack = created.job?.verifyPack ?? verifyPack;
+    const persistedPack = created.job?.verifyPack ?? null;
 
     return freezeResult({
       ok: true,
