@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -64,8 +65,7 @@ test("symlink target edits propagate through the dedicated polling watcher", asy
   writeFileSync(targetPath, JSON.stringify({ ...validProject(), meta: { ...validProject().meta, slug: "linked" } }, null, 2));
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port });
 
     const link = runCli(["link", "linked", targetPath, "--path", workspace, "--port", String(port)]);
     assert.equal(link.status, 0, link.stderr || link.stdout);

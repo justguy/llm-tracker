@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,28 +49,13 @@ function findFreePort() {
   });
 }
 
-async function waitForProject(port, slug) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/projects/${slug}`);
-      if (res.status === 200) return;
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`timed out waiting for project ${slug}`);
-}
-
 test("llm-tracker pick claims the top ready task atomically", async () => {
   const workspace = setupWorkspace();
   const port = await findFreePort();
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
-
-    await waitForProject(port, "test-project");
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const picked = runCli(["pick", "test-project", "--path", workspace, "--assignee", "codex"]);
     assert.equal(picked.status, 0, picked.stderr || picked.stdout);

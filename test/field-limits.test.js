@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { Store, trackerPath } from "../hub/store.js";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -54,8 +55,7 @@ test("oversized meta.scratchpad in patch is rejected at the route layer", async 
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const big = "x".repeat(6000);
     const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
@@ -83,8 +83,7 @@ test("oversized task.comment in patch is rejected at the route layer", async () 
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const big = "c".repeat(600);
     const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
@@ -112,8 +111,7 @@ test("oversized task.blocker_reason in patch is rejected at the route layer", as
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const big = "b".repeat(2100);
     const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
@@ -141,16 +139,12 @@ test("JSON body limit is enforced with machine-readable response", async () => {
   );
 
   try {
-    const started = runCli([
-      "--path",
+    await startDaemonAndWait(runCli, {
       workspace,
-      "--port",
-      String(port),
-      "--daemon"
-    ], {
-      env: { ...process.env, LLM_TRACKER_BODY_LIMIT: "4kb" }
+      port,
+      projectSlug: "test-project",
+      options: { env: { ...process.env, LLM_TRACKER_BODY_LIMIT: "4kb" } }
     });
-    assert.equal(started.status, 0, started.stderr || started.stdout);
 
     const payload = JSON.stringify({ meta: { scratchpad: "y".repeat(5000) } });
     const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {

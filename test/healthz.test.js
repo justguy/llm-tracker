@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,8 +49,7 @@ test("GET /healthz returns 200 with ok/projects/uptimeSeconds — no auth needed
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port });
 
     const res = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(res.status, 200);
@@ -72,10 +72,11 @@ test("GET /healthz is reachable without bearer token when LLM_TRACKER_TOKEN is s
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"], {
-      env: { ...process.env, LLM_TRACKER_TOKEN: "s3cret" }
+    await startDaemonAndWait(runCli, {
+      workspace,
+      port,
+      options: { env: { ...process.env, LLM_TRACKER_TOKEN: "s3cret" } }
     });
-    assert.equal(started.status, 0, started.stderr || started.stdout);
 
     // No Authorization header — must still get 200.
     const res = await fetch(`http://127.0.0.1:${port}/healthz`);

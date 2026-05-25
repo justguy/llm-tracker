@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -413,8 +414,7 @@ test("tracker_pick goes through the running hub from MCP", async () => {
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const client = startMcp(workspace);
     try {
@@ -448,8 +448,7 @@ test("tracker_patch goes through the running hub from MCP", async () => {
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const client = startMcp(workspace);
     try {
@@ -495,8 +494,7 @@ test("tracker_history, tracker_undo, and tracker_redo work through MCP", async (
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const client = startMcp(workspace);
     try {

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { Store, trackerPath } from "../hub/store.js";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -172,8 +173,7 @@ test("restore endpoint + CLI round-trip through the running hub", async () => {
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const del = await fetch(`http://127.0.0.1:${port}/api/projects/test-project`, {
       method: "DELETE"

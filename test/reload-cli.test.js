@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,18 +49,6 @@ function findFreePort() {
   });
 }
 
-async function waitForProject(port, slug) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/projects/${slug}`);
-      if (res.status === 200) return;
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`timed out waiting for project ${slug}`);
-}
-
 test("llm-tracker link eagerly loads a symlinked tracker without waiting for watcher add", async () => {
   const workspace = setupWorkspace("llm-tracker-link-cli-");
   const externalRoot = setupWorkspace("llm-tracker-link-target-");
@@ -75,8 +64,7 @@ test("llm-tracker link eagerly loads a symlinked tracker without waiting for wat
     });
     writeFileSync(join(externalRoot, "external-project.json"), JSON.stringify(external, null, 2));
 
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port });
 
     const linked = runCli([
       "link",
@@ -102,8 +90,7 @@ test("slug routes auto-reload a tracker from disk before polling catches up", as
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port });
 
     const project = validProject({
       meta: {
@@ -131,8 +118,7 @@ test("project list refreshes from disk before returning projects", async () => {
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port });
 
     const project = validProject({
       meta: {
@@ -162,10 +148,7 @@ test("llm-tracker reload reloads a tracker from disk on demand", async () => {
   writeFileSync(trackerFile, JSON.stringify(project, null, 2));
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
-
-    await waitForProject(port, "test-project");
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     project.tasks[0].comment = "Reloaded from disk";
     writeFileSync(trackerFile, JSON.stringify(project, null, 2));

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -80,8 +81,7 @@ test("cross-origin POST is blocked with 403", async () => {
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const res = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
       method: "POST",
@@ -109,8 +109,7 @@ test("same-origin and no-origin POST are allowed", async () => {
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const sameOrigin = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
       method: "POST",
@@ -143,10 +142,12 @@ test("same-origin POST is allowed for an explicit non-loopback host origin", asy
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"], {
-      env: { ...process.env, LLM_TRACKER_HOST: "0.0.0.0" }
+    await startDaemonAndWait(runCli, {
+      workspace,
+      port,
+      projectSlug: "test-project",
+      options: { env: { ...process.env, LLM_TRACKER_HOST: "0.0.0.0" } }
     });
-    assert.equal(started.status, 0, started.stderr || started.stdout);
 
     const res = await sendHttpRequest({
       port,
@@ -175,10 +176,12 @@ test("bearer token is required and browser UI uses a session cookie without expo
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"], {
-      env: { ...process.env, LLM_TRACKER_TOKEN: "s3cret" }
+    await startDaemonAndWait(runCli, {
+      workspace,
+      port,
+      projectSlug: "test-project",
+      options: { env: { ...process.env, LLM_TRACKER_TOKEN: "s3cret" } }
     });
-    assert.equal(started.status, 0, started.stderr || started.stdout);
 
     const unauth = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/patch`, {
       method: "POST",
@@ -249,8 +252,7 @@ test("websocket rejects cross-origin upgrade with 403", async () => {
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     for (const path of ["/ws", "/runtime/ws"]) {
       const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, {
@@ -284,8 +286,7 @@ test("websocket allows same-origin upgrade", async () => {
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     for (const path of ["/ws", "/runtime/ws"]) {
       const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, {
@@ -312,10 +313,12 @@ test("websocket requires bearer token when LLM_TRACKER_TOKEN is set", async () =
   );
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"], {
-      env: { ...process.env, LLM_TRACKER_TOKEN: "wsauth" }
+    await startDaemonAndWait(runCli, {
+      workspace,
+      port,
+      projectSlug: "test-project",
+      options: { env: { ...process.env, LLM_TRACKER_TOKEN: "wsauth" } }
     });
-    assert.equal(started.status, 0, started.stderr || started.stdout);
 
     for (const path of ["/ws", "/runtime/ws"]) {
       const unauth = new WebSocket(`ws://127.0.0.1:${port}${path}`);

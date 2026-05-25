@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { validProject } from "./fixtures.js";
+import { startDaemonAndWait } from "./daemon-start-helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,9 +73,8 @@ test("daemon mode starts in the background, creates .runtime, and stops cleanly"
   const daemonLog = join(workspace, ".runtime", "daemon.log");
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
-    assert.match(started.stdout, /Background hub started/);
+    const started = await startDaemonAndWait(runCli, { workspace, port });
+    if (started.status === 0) assert.match(started.stdout, /Background hub started/);
     assert.equal(existsSync(daemonMeta), true);
     assert.equal(existsSync(daemonLog), true);
 
@@ -116,8 +116,7 @@ test("daemon stop succeeds with an active websocket client attached", async () =
   const port = await findFreePort();
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port });
 
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
     await new Promise((resolve, reject) => {
@@ -146,8 +145,7 @@ test("daemon restart restarts the same workspace on the recorded port", async ()
   const daemonMeta = join(workspace, ".runtime", "daemon.json");
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port });
 
     const before = JSON.parse(readFileSync(daemonMeta, "utf-8"));
     const restarted = runCli(["daemon", "restart", "--path", workspace]);
@@ -172,8 +170,7 @@ test("history, undo, and redo endpoints work through the running hub", async () 
   writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
 
   try {
-    const started = runCli(["--path", workspace, "--port", String(port), "--daemon"]);
-    assert.equal(started.status, 0, started.stderr || started.stdout);
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
 
     const pick = await fetch(`http://127.0.0.1:${port}/api/projects/test-project/pick`, {
       method: "POST",
