@@ -27,7 +27,9 @@
  *   | "done_needs_closeout"
  *   | "done_claimed_verify_missing"
  *   | "verify_missing"
- *   | "unbound_session"} AttentionKind
+ *   | "unbound_session"
+ *   | "sandbox_escape_requested"
+ *   | "provider_error"} AttentionKind
  */
 
 /**
@@ -99,7 +101,9 @@
  */
 
 /**
- * Frozen list of the 11 AttentionKind values from TDD §6.8.
+ * Frozen list of the AttentionKind values. The first 11 entries mirror TDD
+ * §6.8; `sandbox_escape_requested` and `provider_error` are appended per
+ * addendum §15.
  * @type {readonly AttentionKind[]}
  */
 export const ATTENTION_KINDS = Object.freeze([
@@ -114,6 +118,8 @@ export const ATTENTION_KINDS = Object.freeze([
   "done_claimed_verify_missing",
   "verify_missing",
   "unbound_session",
+  "sandbox_escape_requested",
+  "provider_error",
 ]);
 
 /**
