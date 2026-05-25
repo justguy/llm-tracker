@@ -47,6 +47,67 @@ For this repo specifically:
 - do not use `dependencies` to express grouping, and do not use `parent_id` to express blocking; if no explicit groups exist, the UI tree view treats swimlanes as the root groups
 - treat the dependency graph view as derived UI only: it reads existing `dependencies[]` blocker edges, adds no schema or data fields, and keeps its optional `parent_id` containment overlay visual-only
 
+## Autonomous tracker-track execution
+
+Use this section only when the human explicitly asks an agent to complete one
+or more tracker tracks autonomously.
+
+### Authority and scope
+
+- Treat the human's named project, track, swimlane, branch, and worktree as the execution boundary.
+- Treat tracker state as the source of truth for task order, dependencies, definitions of done, allowed paths, and verification notes.
+- Start by reading the live contract through `/help` or `tracker_help`, then use `tracker_next`, `tracker_execute`, `tracker_verify`, `tracker_brief`, `tracker_blockers`, and `tracker_decisions` before broad file reads.
+- Claim one bounded task at a time with `tracker_pick` unless batching is clearly safe from dependencies and allowed paths.
+- Continue to the next unblocked in-scope task after green verification, tracker closeout, and commit/push policy have been satisfied.
+
+### Subagent review policy
+
+- Use subagents when available for independent review of work done by other agents and of newly completed work before task closeout; this is required for autonomous multi-track execution unless the subagent tool is unavailable.
+- Use subagents with focused, relevant reasoning prompts to protect the primary agent's context window and token budget. Ask each subagent to inspect a bounded concern and return concise findings with file/line evidence, severity, and recommended fixes.
+- Prefer focused reviewers by domain: backend/runtime, UI/frontend, tests/contracts, and tracker-state closeout.
+- Treat subagent output as advisory evidence, not as authority to skip local verification.
+- Fix valid high- and medium-severity review findings before closing a task, or record a tracker comment explaining why the finding is intentionally deferred.
+- Do not mark a task complete solely because a subagent says it is complete; verify against `tracker_verify` and the task's definition of done.
+
+### Execution loop
+
+For each in-scope task:
+
+1. Fetch `tracker_execute` and `tracker_verify`; inspect only the files needed for the task.
+2. Set tracker status/assignee with `tracker_pick` or `tracker_patch`.
+3. Implement surgically inside `allowed_paths`, preserving unrelated user or agent changes.
+4. Run the task-specific checks first, then broader relevant suites when the change touches shared behavior.
+5. Spawn or consult review subagents for non-trivial implementation work, cross-worktree review, and merge readiness checks.
+6. Apply valid review fixes and rerun verification.
+7. Update tracker with references, findings, verification evidence, and remaining blockers.
+8. Commit a logical slice after tracker state and tests are green.
+9. Push the active branch when the human requested autonomous completion or push, unless the run's instructions say not to push.
+
+### Stop conditions
+
+Stop and ask the human only when progress requires one of these:
+
+- destructive operations such as forced resets, broad deletes, or discarding unowned changes
+- sandbox, filesystem, network, or shell escalation that has not been pre-approved
+- missing credentials, secrets, services, or external accounts
+- merge conflicts or remote divergence that cannot be resolved without policy risk
+- product ambiguity not resolved by tracker goals, definitions of done, decisions, or docs
+- repeated unrecoverable verification failures after a focused fix attempt
+- required edits outside tracker `allowed_paths` with no explicit approval
+
+### Shell and approval limits
+
+- `AGENTS.md` defines workflow authority only; it does not bypass the host sandbox, network policy, or shell approval gates.
+- Continue using the repo command rules, including the `TPF_LLM_TOOL=codex tpf` prefix policy.
+- If unattended execution is expected, the environment must pre-approve normal non-destructive prefixes for the run, such as relevant test commands, `git add`, `git commit`, `git push origin`, server start commands, and tracker daemon commands.
+- Never work around approval gates by using alternate shell tricks. If a required command is blocked and not pre-approved, stop at the stop condition above.
+
+### Closeout
+
+- Before ending an autonomous track run, verify that no in-scope task is accidentally left `in_progress`.
+- Use `tracker_project_status`, `tracker_blockers`, and targeted `tracker_brief` calls to confirm remaining blocked work is represented by dependencies or explicit blocker reasons.
+- Leave unrelated untracked files and unrelated dirty worktree changes untouched, and mention them in the final handoff.
+
 ## Behavioral guidelines to reduce common LLM coding mistakes
 
 Merge these with project-specific instructions as needed.
