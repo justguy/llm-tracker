@@ -424,6 +424,10 @@ export function createSessionStdioCaptureChangedEvent(input) {
     captureToDisk,
     capture: { enabled: captureToDisk },
   };
+  if (reason !== undefined) event.reason = reason;
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
   if (event.id === undefined) {
     validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
   } else {

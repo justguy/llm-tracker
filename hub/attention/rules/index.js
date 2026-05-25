@@ -22,6 +22,8 @@ import { contextHighRule } from "./context_high.js";
 import { doneNeedsCloseoutRule } from "./done_needs_closeout.js";
 import { doneClaimedVerifyMissingRule } from "./done_claimed_verify_missing.js";
 import { verifyMissingRule } from "./verify_missing.js";
+import { sandboxEscapeRequestedRule } from "./sandbox_escape_requested.js";
+import { providerErrorRule } from "./provider_error.js";
 
 export {
   approvalNeededRule,
@@ -34,6 +36,8 @@ export {
   doneNeedsCloseoutRule,
   doneClaimedVerifyMissingRule,
   verifyMissingRule,
+  sandboxEscapeRequestedRule,
+  providerErrorRule,
 };
 
 /**
@@ -58,4 +62,6 @@ export function registerAllRules(engine) {
   engine.registerRule("done_needs_closeout", doneNeedsCloseoutRule);
   engine.registerRule("done_claimed_verify_missing", doneClaimedVerifyMissingRule);
   engine.registerRule("verify_missing", verifyMissingRule);
+  engine.registerRule("sandbox_escape_requested", sandboxEscapeRequestedRule);
+  engine.registerRule("provider_error", providerErrorRule);
 }

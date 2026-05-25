@@ -18,7 +18,7 @@ import { computeAttentionDedupeKey } from "../hub/attention/dedupe.js";
 
 // --- enum sets: literal-array regressions ----------------------------------
 
-test("ATTENTION_KINDS matches TDD §6.8 exactly", () => {
+test("ATTENTION_KINDS matches TDD §6.8 + addendum §15", () => {
   assert.ok(Object.isFrozen(ATTENTION_KINDS));
   assert.deepEqual([...ATTENTION_KINDS], [
     "approval_needed",
@@ -32,6 +32,8 @@ test("ATTENTION_KINDS matches TDD §6.8 exactly", () => {
     "done_claimed_verify_missing",
     "verify_missing",
     "unbound_session",
+    "sandbox_escape_requested",
+    "provider_error",
   ]);
 });
 

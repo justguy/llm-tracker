@@ -83,6 +83,7 @@ const UNBOUND_SKIP_STATUSES = Object.freeze(["archived", "done", "stopped"]);
  */
 export const PRIORITY_RANK = Object.freeze({
   approval_needed: 1,
+  sandbox_escape_requested: 1,
   conflict: 2,
   outside_allowed_paths: 2,
   blocked: 3,
@@ -91,6 +92,7 @@ export const PRIORITY_RANK = Object.freeze({
   done_claimed_verify_missing: 6,
   done_needs_closeout: 7,
   verify_missing: 8,
+  provider_error: 8,
   quiet: 9,
   unbound_session: 10,
 });
