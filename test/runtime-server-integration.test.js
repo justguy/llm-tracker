@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 
 import { startHub } from "../hub/server.js";
+import { createSessionWarningEvent } from "../hub/runtime/events.js";
 import { SESSION_ID_RE, JOB_ID_RE } from "../hub/runtime/ids.js";
 
 const TEST_TIMEOUT = 10000;
@@ -46,6 +47,34 @@ function waitForMessage(ws) {
       }
     });
     ws.once("error", reject);
+  });
+}
+
+function waitForMessageType(ws, type) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+    };
+    const onError = (err) => {
+      cleanup();
+      reject(err);
+    };
+    const onMessage = (raw) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(raw.toString("utf8"));
+      } catch (err) {
+        cleanup();
+        reject(err);
+        return;
+      }
+      if (parsed.type !== type) return;
+      cleanup();
+      resolve(parsed);
+    };
+    ws.on("message", onMessage);
+    ws.on("error", onError);
   });
 }
 
@@ -179,6 +208,53 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     assert.equal(legacyInitial.type, "SNAPSHOT");
     assert.ok(legacyInitial.projects);
 
+    const layoutGet = await fetch(`${base}/api/layouts/session-hub`);
+    assert.equal(layoutGet.status, 200);
+    const layoutGetBody = await layoutGet.json();
+    assert.equal(layoutGetBody.layout.version, 1);
+    assert.equal(layoutGetBody.layout.global.cardSizeDefault, "normal");
+
+    const layoutPut = await fetch(`${base}/api/layouts/session-hub`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({
+        version: 1,
+        global: { cardSizeDefault: "compact" },
+        views: { hub: { groupBy: "project" } },
+      }),
+    });
+    assert.equal(layoutPut.status, 200);
+    const layoutPutBody = await layoutPut.json();
+    assert.equal(layoutPutBody.layout.global.cardSizeDefault, "compact");
+
+    const layoutPatch = await fetch(`${base}/api/layouts/session-hub`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ views: { hub: { groupBy: "urgency" } } }),
+    });
+    assert.equal(layoutPatch.status, 200);
+    const layoutPatchBody = await layoutPatch.json();
+    assert.equal(layoutPatchBody.layout.global.cardSizeDefault, "compact");
+    assert.equal(layoutPatchBody.layout.views.hub.groupBy, "urgency");
+
+    const providersRes = await fetch(`${base}/api/providers`);
+    assert.equal(providersRes.status, 200);
+    const providersBody = await providersRes.json();
+    assert.deepEqual(providersBody.providers, [
+      { id: "manual", label: "Manual (advisory)" },
+      { id: "codex_cli", label: "Codex CLI" },
+      { id: "claude_code", label: "Claude Code" },
+      { id: "kimi", label: "Kimi" },
+      { id: "gemini", label: "Gemini" },
+    ]);
+
+    const manualCapabilitiesRes = await fetch(`${base}/api/providers/manual/capabilities`);
+    assert.equal(manualCapabilitiesRes.status, 200);
+    const manualCapabilitiesBody = await manualCapabilitiesRes.json();
+    assert.equal(manualCapabilitiesBody.providerId, "manual");
+    assert.equal(manualCapabilitiesBody.capabilities.rawStdio, false);
+    assert.equal(manualCapabilitiesBody.capabilities.processLifecycle, false);
+
     const eventPromise = waitForMessage(runtimeWs);
     const createRes = await postJson(base, "/api/sessions", {
       name: "prod-smoke",
@@ -193,6 +269,16 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     assert.equal(eventMsg.type, "runtime.event");
     assert.equal(eventMsg.event.type, "session.started");
     assert.equal(eventMsg.event.session.id, createBody.session.id);
+
+    const rotateMissingTokenRes = await fetch(`${base}/api/sessions/${createBody.session.id}/token/rotate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({}),
+    });
+    assert.equal(rotateMissingTokenRes.status, 401);
+    const rotateMissingTokenBody = await rotateMissingTokenRes.json();
+    assert.equal(rotateMissingTokenBody.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(rotateMissingTokenBody.error.details.reason, "missing");
 
     const listRes = await fetch(`${base}/api/sessions`);
     assert.equal(listRes.status, 200);
@@ -209,6 +295,69 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
   } finally {
     if (runtimeWs) runtimeWs.close();
     if (legacyWs) legacyWs.close();
+    await hub.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("startHub wires attention routes to runtime attention broadcasts", { timeout: TEST_TIMEOUT }, async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const hub = await startHub({ workspace, port, uiDir: join(process.cwd(), "ui") });
+  let runtimeWs;
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const runtimeConn = await openWsWithFirstMessage(`ws://127.0.0.1:${port}/runtime/ws`, {
+      headers: { Origin: base },
+    });
+    runtimeWs = runtimeConn.ws;
+    assert.equal(runtimeConn.firstMessage.type, "runtime.snapshot");
+    assert.deepEqual(runtimeConn.firstMessage.snapshot.attention, []);
+
+    const sessionEvent = waitForMessageType(runtimeWs, "runtime.event");
+    const createRes = await postJson(base, "/api/sessions", {
+      name: "attention-smoke",
+      tier: "manual",
+    });
+    assert.equal(createRes.status, 201);
+    const createBody = await createRes.json();
+    assert.ok(SESSION_ID_RE.test(createBody.session.id));
+    assert.equal((await sessionEvent).event.type, "session.started");
+
+    const warningRuntimeEvent = waitForMessageType(runtimeWs, "runtime.event");
+    const warningAttentionUpdate = waitForMessageType(runtimeWs, "attention.updated");
+    await hub.runtimeStore.append(
+      createSessionWarningEvent({
+        sessionId: createBody.session.id,
+        workspace,
+        source: "system",
+        warning: { kind: "approval_needed", source: "app_server", actionId: "act_1" },
+      }),
+    );
+
+    assert.equal((await warningRuntimeEvent).event.type, "session.warning");
+    const createdUpdate = await warningAttentionUpdate;
+    assert.equal(createdUpdate.scope, "global");
+    assert.equal(createdUpdate.items.length, 1);
+    const [item] = createdUpdate.items;
+    assert.equal(item.kind, "approval_needed");
+    assert.equal(item.sessionId, createBody.session.id);
+
+    const ackRuntimeEvent = waitForMessageType(runtimeWs, "runtime.event");
+    const ackAttentionUpdate = waitForMessageType(runtimeWs, "attention.updated");
+    const ackRes = await postJson(base, `/api/attention/${item.id}/ack`, {
+      dedupeKey: item.dedupeKey,
+      actor: "test",
+    });
+    assert.equal(ackRes.status, 201);
+    assert.equal((await ackRuntimeEvent).event.type, "attention.ack");
+    const ackUpdate = await ackAttentionUpdate;
+    const ackedItem = ackUpdate.items.find((i) => i.id === item.id);
+    assert.ok(ackedItem, "acknowledged attention item should remain in the active set");
+    assert.equal(typeof ackedItem.acknowledgedAt, "string");
+  } finally {
+    if (runtimeWs) runtimeWs.close();
     await hub.close();
     rmSync(workspace, { recursive: true, force: true });
   }

@@ -1,7 +1,19 @@
-// hub/attention/index.js — Session Hub Phase 4: Attention strip + Triage (TDD v0.5 §21). Placeholder scaffold.
-export default function attentionPlaceholder() {
-  throw new Error(
-    'hub/attention is a placeholder scaffold (SH-0-01). ' +
-      'Implement the attention engine/projection/actions modules before importing it.',
-  );
-}
+// hub/attention/index.js — public exports for attention model/projection/engine.
+
+export {
+  ATTENTION_ACTION_KINDS,
+  ATTENTION_KINDS,
+  ATTENTION_SEVERITIES,
+  ATTENTION_SOURCES,
+  assertValidAttentionAction,
+  assertValidAttentionItem,
+} from "./types.js";
+export { computeAttentionDedupeKey } from "./dedupe.js";
+export { AttentionProjection } from "./projection.js";
+export {
+  AttentionEngine,
+  DEFAULT_UNTASKED_SESSIONS_CONFIG,
+  PRIORITY_RANK,
+  compareByPriority,
+  unboundSessionRule,
+} from "./engine.js";

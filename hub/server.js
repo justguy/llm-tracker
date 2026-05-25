@@ -16,25 +16,35 @@ import express from "express";
 import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
 import { buildTrackerErrorBody } from "./error-payload.js";
+import { registerAttentionRoutes } from "./api/attention.js";
 import { registerSessionsRoutes } from "./api/sessions.js";
 import { registerJobsRoutes } from "./api/jobs.js";
 import { registerRunSessionRoutes } from "./api/run-session.js";
+import { registerLayoutsRoutes } from "./api/layouts.js";
+import { registerProvidersRoutes } from "./api/providers.js";
 import { JobRegistry } from "./jobs/registry.js";
 import { createDraftStore } from "./run-session/drafts.js";
 import { RunSessionService } from "./run-session/service.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
+import { AttentionEngine } from "./attention/engine.js";
+import { registerAllRules } from "./attention/rules/index.js";
+import { ProviderBroker } from "./providers/broker.js";
+import { createGenericPtyProvider } from "./providers/generic-pty.js";
+import { createManualProvider } from "./providers/manual.js";
+import { ProviderRegistry } from "./providers/registry.js";
 import { loadWorkspaceConfig } from "./config/loader.js";
 import { atomicWriteJson } from "./runtime/atomic.js";
 import { validateRuntimeEvent } from "./runtime/events.js";
 import { makeRuntimeId } from "./runtime/ids.js";
 import { makePaths } from "./runtime/paths.js";
 import { RuntimeProjection } from "./runtime/projection.js";
-import { appendJsonlLine } from "./runtime/snapshots.js";
+import { appendJsonlLine, readJsonlLines } from "./runtime/snapshots.js";
 import { RuntimeStore } from "./runtime/store.js";
 import { rebuildRuntimeFromDisk, wrapSnapshot } from "./runtime/startup.js";
 import { RuntimeBroadcaster } from "./runtime/ws.js";
 import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
+import { SessionTokenStore } from "./sessions/auth/tokens.js";
 import { Store, slugFromFile } from "./store.js";
 
 // Watcher tuning: ignore obviously-irrelevant paths anywhere in the tree. The
@@ -140,6 +150,38 @@ function rejectOversizedMutableFields(req, res, next) {
   });
 }
 
+function providerLabel(providerId) {
+  const builtIn = {
+    codex_cli: "Codex CLI",
+    claude_code: "Claude Code",
+    kimi: "Kimi",
+    gemini: "Gemini"
+  };
+  if (builtIn[providerId]) return builtIn[providerId];
+  return providerId
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function registerConfiguredGenericPtyProviders(registry, providerConfigs, processLifecycle) {
+  if (!providerConfigs || typeof providerConfigs !== "object") return;
+  for (const [providerId, cfg] of Object.entries(providerConfigs)) {
+    if (!cfg || typeof cfg !== "object") continue;
+    if (cfg.kind !== "generic_pty") continue;
+    registry.register(createGenericPtyProvider({
+      providerId,
+      label: providerLabel(providerId),
+      commandTemplate: {
+        command: cfg.command,
+        mcpContract: cfg.mcpContract === true
+      },
+      sigintGraceMs: processLifecycle?.sigintGraceMs
+    }));
+  }
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -202,13 +244,42 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   const runtimeStartup = await rebuildRuntimeFromDisk({ workspaceRoot: workspace, projection: runtimeProjection });
   const runtimePaths = makePaths({ workspaceRoot: workspace });
   const runtimeBroadcaster = new RuntimeBroadcaster();
+  const attentionEngine = new AttentionEngine({
+    onChange: ({ items, scope }) => runtimeBroadcaster.broadcastAttention({ items, scope }),
+  });
+  registerAllRules(attentionEngine);
+  const sessionTokenStore = new SessionTokenStore();
+  const providerRegistry = new ProviderRegistry();
+  providerRegistry.register(createManualProvider());
+  registerConfiguredGenericPtyProviders(
+    providerRegistry,
+    workspaceConfig.resolved.sessionHub.providers,
+    workspaceConfig.resolved.sessionHub.processLifecycle
+  );
+  const providerBroker = new ProviderBroker({ registry: providerRegistry });
   let lastRuntimeEventId = null;
 
   const runtimeSnapshot = () => ({
     ...runtimeProjection.toSnapshots(),
+    attention: attentionEngine.getAll(),
     rev: runtimeProjection.rev,
     startup: runtimeStartup
   });
+
+  const recomputeAttention = () => {
+    const snapshots = runtimeProjection.toSnapshots();
+    attentionEngine.compute({
+      sessions: snapshots.sessions,
+      jobs: snapshots.jobs,
+    });
+  };
+  const replayAttentionOverlays = async () => {
+    recomputeAttention();
+    const jsonl = await readJsonlLines(runtimePaths.runtimeEvents);
+    for (const event of jsonl.events) {
+      attentionEngine.applyRuntimeEvent(event);
+    }
+  };
 
   const writeRuntimeSnapshots = async () => {
     const snapshots = runtimeProjection.toSnapshots();
@@ -237,9 +308,13 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       runtimeProjection.apply(event);
       lastRuntimeEventId = event.id;
       runtimeBroadcaster.handleAppend(event);
+      if (!attentionEngine.applyRuntimeEvent(event)) {
+        recomputeAttention();
+      }
     }
   });
   runtimeStore.rev = runtimeProjection.rev;
+  await replayAttentionOverlays();
 
   const store = new Store(workspace);
   const app = express();
@@ -447,12 +522,16 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   });
   registerIntelligenceRoutes(app, { workspace, store });
   registerWorkspaceConfigRoutes(app, { workspace });
+  registerLayoutsRoutes(app, { workspaceRoot: workspace });
+  registerProvidersRoutes(app, { broker: providerBroker });
+  registerAttentionRoutes(app, { runtimeStore, attentionEngine, workspace });
   registerSessionsRoutes(app, {
     runtimeStore,
     projection: runtimeProjection,
     makeRuntimeId,
     validateRuntimeEvent,
-    workspace
+    workspace,
+    tokenStore: sessionTokenStore
   });
   const jobRegistry = new JobRegistry({
     runtimeStore,
@@ -1279,6 +1358,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     runtimeStore,
     runtimeProjection,
     runtimeBroadcaster,
+    attentionEngine,
     close: () => closeHub({ exit: false })
   };
 }

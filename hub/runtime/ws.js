@@ -118,23 +118,30 @@ export class RuntimeBroadcaster {
    */
   broadcast(event) {
     const payload = JSON.stringify({ type: "runtime.event", event });
-    for (const entry of this.clients) {
-      const { ws } = entry;
-      if (ws.readyState !== WS_OPEN) continue;
-      if (ws.bufferedAmount > this.slowClientThresholdBytes) {
-        this.#handleSlowClient(entry);
-        continue;
-      }
-      try {
-        // Healthy clients: reset the slow-client counters so a brief slowness
-        // episode doesn't trigger a perpetual lag report.
-        if (entry.sinceLastReport !== 0) entry.sinceLastReport = 0;
-        ws.send(payload);
-      } catch {
-        // Drop silently — the 'error' handler we registered in subscribe()
-        // will clean up the entry.
-      }
+    this.#fanout(payload);
+  }
+
+  /**
+   * Broadcast a `{type:"attention.updated", items, scope}` message to every
+   * subscribed client (SH-4-09, TDD §15, §8A.4). SYNCHRONOUS, reuses the
+   * same slow-client policy as `broadcast()`.
+   *
+   * @param {{ items: object[], scope: ("global"|"project") }} payload
+   * @returns {void}
+   */
+  broadcastAttention({ items, scope } = {}) {
+    if (!Array.isArray(items)) {
+      throw new TypeError(
+        "RuntimeBroadcaster.broadcastAttention: items must be an array",
+      );
     }
+    if (scope !== "global" && scope !== "project") {
+      throw new TypeError(
+        `RuntimeBroadcaster.broadcastAttention: scope must be 'global' or 'project' (got ${JSON.stringify(scope)})`,
+      );
+    }
+    const wire = JSON.stringify({ type: "attention.updated", items, scope });
+    this.#fanout(wire);
   }
 
   /**
@@ -152,6 +159,33 @@ export class RuntimeBroadcaster {
   /** Current number of subscribed clients. */
   get clientCount() {
     return this.clients.size;
+  }
+
+  /**
+   * Fan a pre-serialized payload string out to every open subscriber.
+   * Shared by `broadcast()` and `broadcastAttention()` so both honour the
+   * same slow-client policy.
+   *
+   * @param {string} payload
+   */
+  #fanout(payload) {
+    for (const entry of this.clients) {
+      const { ws } = entry;
+      if (ws.readyState !== WS_OPEN) continue;
+      if (ws.bufferedAmount > this.slowClientThresholdBytes) {
+        this.#handleSlowClient(entry);
+        continue;
+      }
+      try {
+        // Healthy clients: reset the slow-client counters so a brief slowness
+        // episode doesn't trigger a perpetual lag report.
+        if (entry.sinceLastReport !== 0) entry.sinceLastReport = 0;
+        ws.send(payload);
+      } catch {
+        // Drop silently — the 'error' handler we registered in subscribe()
+        // will clean up the entry.
+      }
+    }
   }
 
   /**
