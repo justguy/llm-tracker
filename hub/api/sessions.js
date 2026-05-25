@@ -390,20 +390,8 @@ export function registerSessionsRoutes(app, deps) {
   // Mounted only when `tokenStore` is wired so the older four routes keep
   // working in test fixtures that don't carry token plumbing.
   if (tokenMiddleware) {
-    const captureToggleChains = new Map();
-    const runSerializedCaptureToggle = (sessionId, fn) => {
-      const previous = captureToggleChains.get(sessionId) || Promise.resolve();
-      const next = previous.catch(() => {}).then(fn);
-      captureToggleChains.set(sessionId, next);
-      next
-        .finally(() => {
-          if (captureToggleChains.get(sessionId) === next) {
-            captureToggleChains.delete(sessionId);
-          }
-        })
-        .catch(() => {});
-      return next;
-    };
+    const runSerializedTokenRotation = createPerSessionSerializer();
+    const runSerializedCaptureToggle = createPerSessionSerializer();
 
     app.post("/api/sessions/:sessionId/token/rotate", tokenMiddleware, async (req, res) => {
       const { sessionId } = req.params;
@@ -435,15 +423,13 @@ export function registerSessionsRoutes(app, deps) {
 
       // Capabilities: when omitted, inherit from the presented token so
       // rotation preserves effective rights unless the caller narrows them.
-      let capabilities;
+      let requestedCapabilities;
       if ("capabilities" in bodyObj) {
         const caps = bodyObj.capabilities;
         if (!Array.isArray(caps) || caps.some((c) => typeof c !== "string" || c.length === 0)) {
           return sendError(res, 400, "INVALID_BODY", "`capabilities` must be a non-empty string[]");
         }
-        capabilities = caps;
-      } else {
-        capabilities = [...(req.sessionToken?.capabilities || [])];
+        requestedCapabilities = caps;
       }
 
       let lifetimeMinutes;
@@ -455,71 +441,90 @@ export function registerSessionsRoutes(app, deps) {
         lifetimeMinutes = lt;
       }
 
-      // 404 if the session doesn't exist — don't append a rotation event for
-      // a phantom session.
-      if (!projection.sessions.get(sessionId)) {
-        return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
-      }
+      return runSerializedTokenRotation(sessionId, async () => {
+        const presentedToken = readSessionTokenHeader(req);
+        const freshCheck = tokenStore.validate(presentedToken, { expectedSessionId: sessionId });
+        if (!freshCheck.ok) {
+          return sendError(
+            res,
+            401,
+            "SESSION_TOKEN_REJECTED",
+            sessionTokenRejectMessage(freshCheck.reason),
+            { reason: freshCheck.reason },
+          );
+        }
 
-      let issued;
-      try {
-        issued = tokenStore.issue({
+        // 404 if the session doesn't exist — don't append a rotation event for
+        // a phantom session.
+        if (!projection.sessions.get(sessionId)) {
+          return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+        }
+
+        const capabilities =
+          requestedCapabilities !== undefined
+            ? requestedCapabilities
+            : [...freshCheck.record.capabilities];
+
+        let issued;
+        try {
+          issued = tokenStore.issue({
+            sessionId,
+            capabilities,
+            ...(lifetimeMinutes !== undefined ? { lifetimeMinutes } : {}),
+          });
+        } catch (err) {
+          return sendError(res, 500, "TOKEN_ISSUE_FAILED", err.message || "failed to issue rotated token");
+        }
+
+        // Build the event with placeholder id for schema validation — same
+        // dance as POST/PATCH above. Payload includes sessionId + the NEW
+        // tokenHash. The cleartext is NEVER included in the event.
+        const eventForValidation = {
+          schemaVersion: 1,
+          id: makeRuntimeId("evt"),
+          ts: new Date().toISOString(),
+          type: "session.token_rotated",
+          source: "http",
+          workspace,
           sessionId,
-          capabilities,
-          ...(lifetimeMinutes !== undefined ? { lifetimeMinutes } : {}),
-        });
-      } catch (err) {
-        return sendError(res, 500, "TOKEN_ISSUE_FAILED", err.message || "failed to issue rotated token");
-      }
+          tokenHash: issued.tokenHash,
+        };
 
-      // Build the event with placeholder id for schema validation — same
-      // dance as POST/PATCH above. Payload includes sessionId + the NEW
-      // tokenHash. The cleartext is NEVER included in the event.
-      const eventForValidation = {
-        schemaVersion: 1,
-        id: makeRuntimeId("evt"),
-        ts: new Date().toISOString(),
-        type: "session.token_rotated",
-        source: "http",
-        workspace,
-        sessionId,
-        tokenHash: issued.tokenHash,
-      };
-
-      try {
-        validateRuntimeEvent(eventForValidation);
-      } catch (err) {
-        if (typeof tokenStore.revokeTokenHash === "function") {
-          tokenStore.revokeTokenHash(issued.tokenHash);
+        try {
+          validateRuntimeEvent(eventForValidation);
+        } catch (err) {
+          if (typeof tokenStore.revokeTokenHash === "function") {
+            tokenStore.revokeTokenHash(issued.tokenHash);
+          }
+          return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
+            errors: err.errors,
+          });
         }
-        return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
-          errors: err.errors,
-        });
-      }
 
-      const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
+        const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
 
-      let appendResult;
-      try {
-        appendResult = await runtimeStore.append(eventForAppend);
-      } catch (err) {
-        if (typeof tokenStore.revokeTokenHash === "function") {
-          tokenStore.revokeTokenHash(issued.tokenHash);
+        let appendResult;
+        try {
+          appendResult = await runtimeStore.append(eventForAppend);
+        } catch (err) {
+          if (typeof tokenStore.revokeTokenHash === "function") {
+            tokenStore.revokeTokenHash(issued.tokenHash);
+          }
+          return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
         }
-        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
-      }
 
-      tokenStore.revoke(sessionId, { exceptTokenHash: issued.tokenHash });
+        tokenStore.revoke(sessionId, { exceptTokenHash: issued.tokenHash });
 
-      res.status(200).json({
-        token: issued.token,
-        tokenHash: issued.tokenHash,
-        sessionId: issued.sessionId,
-        capabilities: [...issued.capabilities],
-        issuedAt: issued.issuedAt,
-        expiresAt: issued.expiresAt,
-        rev: appendResult.rev,
-        eventId: appendResult.eventId,
+        res.status(200).json({
+          token: issued.token,
+          tokenHash: issued.tokenHash,
+          sessionId: issued.sessionId,
+          capabilities: [...issued.capabilities],
+          issuedAt: issued.issuedAt,
+          expiresAt: issued.expiresAt,
+          rev: appendResult.rev,
+          eventId: appendResult.eventId,
+        });
       });
     });
 
@@ -620,6 +625,41 @@ export function registerSessionsRoutes(app, deps) {
 const SESSION_ID_SHAPE = /^ses_[0-9a-hjkmnp-tv-z]{26}$/;
 function isSessionIdShape(value) {
   return typeof value === "string" && SESSION_ID_SHAPE.test(value);
+}
+
+function createPerSessionSerializer() {
+  const chains = new Map();
+  return (sessionId, fn) => {
+    const previous = chains.get(sessionId) || Promise.resolve();
+    const next = previous.catch(() => {}).then(fn);
+    chains.set(sessionId, next);
+    next
+      .finally(() => {
+        if (chains.get(sessionId) === next) {
+          chains.delete(sessionId);
+        }
+      })
+      .catch(() => {});
+    return next;
+  };
+}
+
+function readSessionTokenHeader(req) {
+  return (
+    (typeof req.get === "function" && req.get("X-LT-Session-Token")) ||
+    (req.headers && req.headers["x-lt-session-token"])
+  );
+}
+
+function sessionTokenRejectMessage(reason) {
+  switch (reason) {
+    case "missing": return "session token required";
+    case "unknown": return "session token not recognized";
+    case "expired": return "session token expired";
+    case "session_mismatch": return "session token does not match session";
+    case "revoked": return "session token has been revoked";
+    default: return "session token rejected";
+  }
 }
 
 function sendError(res, status, code, message, details) {
