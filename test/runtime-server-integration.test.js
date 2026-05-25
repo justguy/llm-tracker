@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 
 import { startHub } from "../hub/server.js";
+import { createSessionWarningEvent } from "../hub/runtime/events.js";
 import { SESSION_ID_RE } from "../hub/runtime/ids.js";
 
 const TEST_TIMEOUT = 10000;
@@ -46,6 +47,34 @@ function waitForMessage(ws) {
       }
     });
     ws.once("error", reject);
+  });
+}
+
+function waitForMessageType(ws, type) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+    };
+    const onError = (err) => {
+      cleanup();
+      reject(err);
+    };
+    const onMessage = (raw) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(raw.toString("utf8"));
+      } catch (err) {
+        cleanup();
+        reject(err);
+        return;
+      }
+      if (parsed.type !== type) return;
+      cleanup();
+      resolve(parsed);
+    };
+    ws.on("message", onMessage);
+    ws.on("error", onError);
   });
 }
 
@@ -189,6 +218,69 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
   } finally {
     if (runtimeWs) runtimeWs.close();
     if (legacyWs) legacyWs.close();
+    await hub.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("startHub wires attention routes to runtime attention broadcasts", { timeout: TEST_TIMEOUT }, async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const hub = await startHub({ workspace, port, uiDir: join(process.cwd(), "ui") });
+  let runtimeWs;
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const runtimeConn = await openWsWithFirstMessage(`ws://127.0.0.1:${port}/runtime/ws`, {
+      headers: { Origin: base },
+    });
+    runtimeWs = runtimeConn.ws;
+    assert.equal(runtimeConn.firstMessage.type, "runtime.snapshot");
+    assert.deepEqual(runtimeConn.firstMessage.snapshot.attention, []);
+
+    const sessionEvent = waitForMessageType(runtimeWs, "runtime.event");
+    const createRes = await postJson(base, "/api/sessions", {
+      name: "attention-smoke",
+      tier: "manual",
+    });
+    assert.equal(createRes.status, 201);
+    const createBody = await createRes.json();
+    assert.ok(SESSION_ID_RE.test(createBody.session.id));
+    assert.equal((await sessionEvent).event.type, "session.started");
+
+    const warningRuntimeEvent = waitForMessageType(runtimeWs, "runtime.event");
+    const warningAttentionUpdate = waitForMessageType(runtimeWs, "attention.updated");
+    await hub.runtimeStore.append(
+      createSessionWarningEvent({
+        sessionId: createBody.session.id,
+        workspace,
+        source: "system",
+        warning: { kind: "approval_needed", source: "app_server", actionId: "act_1" },
+      }),
+    );
+
+    assert.equal((await warningRuntimeEvent).event.type, "session.warning");
+    const createdUpdate = await warningAttentionUpdate;
+    assert.equal(createdUpdate.scope, "global");
+    assert.equal(createdUpdate.items.length, 1);
+    const [item] = createdUpdate.items;
+    assert.equal(item.kind, "approval_needed");
+    assert.equal(item.sessionId, createBody.session.id);
+
+    const ackRuntimeEvent = waitForMessageType(runtimeWs, "runtime.event");
+    const ackAttentionUpdate = waitForMessageType(runtimeWs, "attention.updated");
+    const ackRes = await postJson(base, `/api/attention/${item.id}/ack`, {
+      dedupeKey: item.dedupeKey,
+      actor: "test",
+    });
+    assert.equal(ackRes.status, 201);
+    assert.equal((await ackRuntimeEvent).event.type, "attention.ack");
+    const ackUpdate = await ackAttentionUpdate;
+    const ackedItem = ackUpdate.items.find((i) => i.id === item.id);
+    assert.ok(ackedItem, "acknowledged attention item should remain in the active set");
+    assert.equal(typeof ackedItem.acknowledgedAt, "string");
+  } finally {
+    if (runtimeWs) runtimeWs.close();
     await hub.close();
     rmSync(workspace, { recursive: true, force: true });
   }

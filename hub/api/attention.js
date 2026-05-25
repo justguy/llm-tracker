@@ -29,6 +29,7 @@ const CLEAR_ALLOWED_FIELDS = new Set(["dedupeKey", "reason", "actor", "idempoten
 /**
  * @typedef {object} RegisterAttentionDeps
  * @property {import("../runtime/store.js").RuntimeStore} runtimeStore
+ * @property {{ getAll: () => object[] }} attentionEngine
  * @property {string} workspace
  */
 
@@ -42,13 +43,49 @@ export function registerAttentionRoutes(app, deps) {
   if (!app || typeof app.post !== "function") {
     throw new Error("registerAttentionRoutes: express app required");
   }
-  const { runtimeStore, workspace } = deps || {};
+  const { runtimeStore, attentionEngine, workspace } = deps || {};
   if (!runtimeStore || typeof runtimeStore.append !== "function") {
     throw new Error("registerAttentionRoutes: runtimeStore (with append) required");
+  }
+  if (!attentionEngine || typeof attentionEngine.getAll !== "function") {
+    throw new Error("registerAttentionRoutes: attentionEngine (with getAll) required");
   }
   if (typeof workspace !== "string" || workspace.length === 0) {
     throw new Error("registerAttentionRoutes: workspace string required");
   }
+
+  // --- GET /api/attention --------------------------------------------------
+  app.get("/api/attention", (req, res) => {
+    const scope = firstQueryValue(req.query.scope) || "global";
+    if (scope !== "global" && scope !== "project") {
+      return sendError(res, 400, "INVALID_QUERY", "`scope` must be 'global' or 'project'");
+    }
+    const limitRaw = firstQueryValue(req.query.limit);
+    const limit = limitRaw === undefined ? null : Number.parseInt(limitRaw, 10);
+    if (limitRaw !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) {
+      return sendError(res, 400, "INVALID_QUERY", "`limit` must be an integer between 1 and 100");
+    }
+    const projectSlug = firstQueryValue(req.query.projectSlug);
+    let items = attentionEngine.getAll();
+    if (scope === "project" && typeof projectSlug === "string" && projectSlug.length > 0) {
+      items = items.filter((item) => item && item.projectSlug === projectSlug);
+    }
+    if (limit !== null) items = items.slice(0, limit);
+    res.json({ ok: true, scope, items });
+  });
+
+  // --- GET /api/attention/:id ---------------------------------------------
+  app.get("/api/attention/:id", (req, res) => {
+    const { id } = req.params;
+    if (!isAttentionItemIdShape(id)) {
+      return sendError(res, 400, "INVALID_ATTENTION_ID", `not a valid att_ id: ${id}`);
+    }
+    const item = attentionEngine.getAll().find((candidate) => candidate && candidate.id === id);
+    if (!item) {
+      return sendError(res, 404, "NOT_FOUND", `attention item not found: ${id}`);
+    }
+    res.json({ ok: true, item });
+  });
 
   // --- POST /api/attention/:id/ack ----------------------------------------
   app.post("/api/attention/:id/ack", async (req, res) => {
@@ -240,7 +277,8 @@ function isAttentionItemIdShape(value) {
 }
 
 function parseBodyObject(raw) {
-  if (raw === undefined || raw === null) return {};
+  if (raw === undefined) return {};
+  if (raw === null) return null;
   if (typeof raw !== "object" || Array.isArray(raw)) return null;
   return raw;
 }
@@ -251,6 +289,10 @@ function rejectUnknownFields(body, allowed) {
     if (!allowed.has(key)) unknown.push(key);
   }
   return unknown;
+}
+
+function firstQueryValue(value) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function sendError(res, status, code, message, details) {

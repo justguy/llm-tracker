@@ -185,6 +185,64 @@ test(
 );
 
 test(
+  "attention overlay events require attentionItemId and dedupeKey to identify the same item",
+  () => {
+    const calls = [];
+    const engine = new AttentionEngine({
+      now: () => clockAfterMinutes(5),
+      makeId: testMakeId,
+      onChange: (p) => calls.push(p),
+    });
+    engine.registerRule("blocked", ({ now }) => [
+      {
+        id: "att_a",
+        kind: "blocked",
+        severity: "medium",
+        title: "blocked a",
+        detail: "blocked a",
+        source: "derived",
+        sessionId: "ses_a",
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        dedupeKey: "blocked|||||a",
+        recommendedActions: [],
+      },
+      {
+        id: "att_b",
+        kind: "blocked",
+        severity: "medium",
+        title: "blocked b",
+        detail: "blocked b",
+        source: "derived",
+        sessionId: "ses_b",
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        dedupeKey: "blocked|||||b",
+        recommendedActions: [],
+      },
+    ]);
+
+    engine.compute({ sessions: [] });
+    assert.equal(calls.length, 1);
+    assert.equal(
+      engine.applyRuntimeEvent({
+        type: "attention.ack",
+        attentionItemId: "att_a",
+        dedupeKey: "blocked|||||b",
+        acknowledgedAt: "2026-05-24T12:05:00.000Z",
+        ts: "2026-05-24T12:05:00.000Z",
+      }),
+      true,
+    );
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      engine.getAll().map((item) => item.acknowledgedAt),
+      [undefined, undefined],
+    );
+  },
+);
+
+test(
   "item disappears from new set -> removed.length === 1",
   () => {
     const calls = [];

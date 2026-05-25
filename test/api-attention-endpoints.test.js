@@ -22,7 +22,7 @@ import { makeRuntimeId } from "../hub/runtime/ids.js";
 
 const TEST_TIMEOUT = 8000;
 
-async function startMiniApp() {
+async function startMiniApp({ attentionItems = [] } = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "lt-attention-api-"));
   const appended = [];
   const runtimeStore = new RuntimeStore({
@@ -31,9 +31,10 @@ async function startMiniApp() {
       appended.push(event);
     },
   });
+  const attentionEngine = { getAll: () => attentionItems };
   const app = express();
-  app.use(express.json());
-  registerAttentionRoutes(app, { runtimeStore, workspace: workspaceRoot });
+  app.use(express.json({ strict: false }));
+  registerAttentionRoutes(app, { runtimeStore, attentionEngine, workspace: workspaceRoot });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve, reject) => {
     server.once("listening", resolve);
@@ -59,6 +60,54 @@ async function postJson(base, path, body) {
     body: JSON.stringify(body),
   });
 }
+
+// --- get -------------------------------------------------------------------
+
+test("GET /api/attention: returns current attention items with optional limit", { timeout: TEST_TIMEOUT }, async () => {
+  const first = { id: makeRuntimeId("att"), kind: "blocked", projectSlug: "p1" };
+  const second = { id: makeRuntimeId("att"), kind: "quiet", projectSlug: "p2" };
+  const env = await startMiniApp({ attentionItems: [first, second] });
+  try {
+    const res = await fetch(`${env.base}/api/attention?scope=global&limit=1`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.scope, "global");
+    assert.deepEqual(body.items, [first]);
+  } finally {
+    await env.close();
+  }
+});
+
+test("GET /api/attention: filters project scope when projectSlug is supplied", { timeout: TEST_TIMEOUT }, async () => {
+  const first = { id: makeRuntimeId("att"), kind: "blocked", projectSlug: "p1" };
+  const second = { id: makeRuntimeId("att"), kind: "quiet", projectSlug: "p2" };
+  const env = await startMiniApp({ attentionItems: [first, second] });
+  try {
+    const res = await fetch(`${env.base}/api/attention?scope=project&projectSlug=p2`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(body.items, [second]);
+  } finally {
+    await env.close();
+  }
+});
+
+test("GET /api/attention/:id: returns one item or 404", { timeout: TEST_TIMEOUT }, async () => {
+  const item = { id: makeRuntimeId("att"), kind: "blocked" };
+  const missing = makeRuntimeId("att");
+  const env = await startMiniApp({ attentionItems: [item] });
+  try {
+    const found = await fetch(`${env.base}/api/attention/${item.id}`);
+    assert.equal(found.status, 200);
+    assert.deepEqual((await found.json()).item, item);
+
+    const notFound = await fetch(`${env.base}/api/attention/${missing}`);
+    assert.equal(notFound.status, 404);
+  } finally {
+    await env.close();
+  }
+});
 
 // --- ack -------------------------------------------------------------------
 
@@ -109,6 +158,21 @@ test("POST /api/attention/:id/ack: 400 on missing dedupeKey", { timeout: TEST_TI
     const body = await res.json();
     assert.equal(body.error.code, "INVALID_BODY");
     assert.match(body.error.message, /dedupeKey/);
+    assert.equal(env.appended.length, 0);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/attention/:id/ack: 400 on JSON null body", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp();
+  try {
+    const attId = makeRuntimeId("att");
+    const res = await postJson(env.base, `/api/attention/${attId}/ack`, null);
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.error.code, "INVALID_BODY");
+    assert.match(body.error.message, /JSON object/);
     assert.equal(env.appended.length, 0);
   } finally {
     await env.close();
@@ -299,13 +363,28 @@ test("POST /api/attention/:id/clear: 400 on body being an array", { timeout: TES
 
 test("registerAttentionRoutes: throws when runtimeStore is missing", () => {
   const app = express();
-  assert.throws(() => registerAttentionRoutes(app, { workspace: "/tmp/x" }), /runtimeStore/);
+  assert.throws(
+    () => registerAttentionRoutes(app, { attentionEngine: { getAll: () => [] }, workspace: "/tmp/x" }),
+    /runtimeStore/,
+  );
+});
+
+test("registerAttentionRoutes: throws when attentionEngine is missing", () => {
+  const app = express();
+  assert.throws(
+    () => registerAttentionRoutes(app, { runtimeStore: { append: () => {} }, workspace: "/tmp/x" }),
+    /attentionEngine/,
+  );
 });
 
 test("registerAttentionRoutes: throws when workspace is missing", () => {
   const app = express();
   assert.throws(
-    () => registerAttentionRoutes(app, { runtimeStore: { append: () => {} } }),
+    () =>
+      registerAttentionRoutes(app, {
+        runtimeStore: { append: () => {} },
+        attentionEngine: { getAll: () => [] },
+      }),
     /workspace/,
   );
 });

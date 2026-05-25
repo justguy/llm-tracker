@@ -15,7 +15,8 @@
 //   - Compute items. The engine owns rule evaluation; the projection only
 //     stores what the engine produced.
 //   - Persist anything durable. Per §8A.3 the engine is a projection; ack /
-//     snooze events are sh-4-05 territory.
+//     snooze events are sh-4-05 territory. `clearedAt` is a one-shot source
+//     clear marker and must not stick to a later re-raise of the same key.
 //   - Validate item shapes. The engine validates via `assertValidAttentionItem`
 //     before handing items off; projection trusts its input.
 
@@ -60,6 +61,10 @@ export class AttentionProjection {
       if (typeof item.id !== "string" || item.id.length === 0) continue;
       if (nextByDedupe.has(item.dedupeKey)) continue; // dedupe within tick
       const previous = previousByDedupe.get(item.dedupeKey);
+      const keepPriorSnooze =
+        previous?.snoozedUntil !== undefined &&
+        item.snoozedUntil === undefined &&
+        !isSeverityEscalation(previous.severity, item.severity);
       const stableItem = previous
         ? {
             ...item,
@@ -68,11 +73,8 @@ export class AttentionProjection {
             ...(previous.acknowledgedAt !== undefined && item.acknowledgedAt === undefined
               ? { acknowledgedAt: previous.acknowledgedAt }
               : {}),
-            ...(previous.snoozedUntil !== undefined && item.snoozedUntil === undefined
+            ...(keepPriorSnooze
               ? { snoozedUntil: previous.snoozedUntil }
-              : {}),
-            ...(previous.clearedAt !== undefined && item.clearedAt === undefined
-              ? { clearedAt: previous.clearedAt }
               : {}),
           }
         : item;
@@ -152,4 +154,17 @@ export class AttentionProjection {
     this._byId = new Map();
     this._order = [];
   }
+}
+
+const SEVERITY_RANK = Object.freeze({
+  critical: 1,
+  high: 2,
+  medium: 3,
+  low: 4,
+});
+
+function isSeverityEscalation(previousSeverity, nextSeverity) {
+  const prev = SEVERITY_RANK[previousSeverity] || Number.MAX_SAFE_INTEGER;
+  const next = SEVERITY_RANK[nextSeverity] || Number.MAX_SAFE_INTEGER;
+  return next < prev;
 }

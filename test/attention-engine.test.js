@@ -194,6 +194,55 @@ test("AttentionProjection dedupes within a single apply tick", () => {
   assert.equal(p.getById("att_b"), null);
 });
 
+test("AttentionProjection keeps ack/snooze overlays but drops snooze when severity escalates", () => {
+  const p = new AttentionProjection();
+  const base = stubItem("quiet", {
+    id: "att_one",
+    severity: "low",
+    dedupeKey: "quiet|||||a",
+    acknowledgedAt: "2026-05-24T12:01:00.000Z",
+    snoozedUntil: "2026-05-24T13:00:00.000Z",
+  });
+  p.apply([base]);
+
+  const sameSeverity = stubItem("quiet", {
+    id: "att_two",
+    severity: "low",
+    dedupeKey: "quiet|||||a",
+  });
+  p.apply([sameSeverity]);
+  const retained = p.getByDedupeKey("quiet|||||a");
+  assert.equal(retained.id, "att_one");
+  assert.equal(retained.acknowledgedAt, "2026-05-24T12:01:00.000Z");
+  assert.equal(retained.snoozedUntil, "2026-05-24T13:00:00.000Z");
+
+  const escalated = stubItem("quiet", {
+    id: "att_three",
+    severity: "medium",
+    dedupeKey: "quiet|||||a",
+  });
+  p.apply([escalated]);
+  const visible = p.getByDedupeKey("quiet|||||a");
+  assert.equal(visible.id, "att_one");
+  assert.equal(visible.acknowledgedAt, "2026-05-24T12:01:00.000Z");
+  assert.equal(visible.snoozedUntil, undefined);
+});
+
+test("AttentionProjection treats clearedAt as a one-shot marker, not a retained overlay", () => {
+  const p = new AttentionProjection();
+  p.apply([
+    stubItem("quiet", {
+      id: "att_one",
+      dedupeKey: "quiet|||||a",
+      clearedAt: "2026-05-24T12:01:00.000Z",
+    }),
+  ]);
+  p.apply([stubItem("quiet", { id: "att_two", dedupeKey: "quiet|||||a" })]);
+  const reraised = p.getByDedupeKey("quiet|||||a");
+  assert.equal(reraised.id, "att_one");
+  assert.equal(reraised.clearedAt, undefined);
+});
+
 // ---------------------------------------------------------------------------
 // unbound_session — pure rule
 // ---------------------------------------------------------------------------

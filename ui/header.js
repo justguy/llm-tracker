@@ -36,6 +36,7 @@ export function Header({
   onOpenSettings,
   onOpenHistory,
   onOpenIntel,
+  onOpenTriage,
   onUndo,
   onRedo,
   onDeleteProject,
@@ -103,6 +104,11 @@ export function Header({
             onClick=${() => onOpenIntel("next")}
             disabled=${!hasProject}
             title="Recommended next task"
+          />
+          <${Bracket}
+            label="ATTN"
+            onClick=${onOpenTriage}
+            title="Open attention triage"
           />
           <${Bracket}
             label="⌘K"
@@ -218,6 +224,11 @@ export function Header({
             onClick=${() => onOpenIntel("decisions")}
             disabled=${!hasProject}
             title="Recent decision notes"
+          />
+          <${Bracket}
+            label="TRIAGE"
+            onClick=${onOpenTriage}
+            title="Open attention triage"
           />
         </div>
 

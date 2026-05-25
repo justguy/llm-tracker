@@ -66,6 +66,11 @@ export const DEFAULT_UNTASKED_SESSIONS_CONFIG = Object.freeze({
  * @type {readonly string[]}
  */
 const UNBOUND_SKIP_STATUSES = Object.freeze(["archived", "done", "stopped"]);
+const ATTENTION_OVERLAY_EVENT_TYPES = new Set([
+  "attention.ack",
+  "attention.snoozed",
+  "attention.cleared",
+]);
 
 /**
  * §8A.3 priority order. Lower rank = higher priority (closer to "Critical").
@@ -472,6 +477,44 @@ export class AttentionEngine {
   }
 
   /**
+   * Apply an attention lifecycle runtime event to the current active projection.
+   *
+   * These events are overlays: the source rule still owns whether the item is
+   * active. Ack/snooze state is retained across recompute ticks by
+   * AttentionProjection.apply(); clearedAt is a one-shot marker so a source
+   * re-raise can surface again.
+   *
+   * @param {object} event
+   * @returns {boolean} true when the event was an attention overlay event
+   */
+  applyRuntimeEvent(event) {
+    if (!event || typeof event !== "object") return false;
+    if (!ATTENTION_OVERLAY_EVENT_TYPES.has(event.type)) return false;
+
+    const current = this.projection.getAll();
+    let changed = false;
+    const next = current.map((item) => {
+      if (!attentionEventMatchesItem(event, item)) return item;
+      const patch = attentionOverlayPatch(event, item);
+      if (!patch) return item;
+      changed = true;
+      return { ...item, ...patch, updatedAt: event.ts || item.updatedAt };
+    });
+
+    if (!changed) return true;
+    this.projection.apply(next);
+    this.#emitChangesIfAny(this.projection.getAll());
+    return true;
+  }
+
+  /**
+   * @returns {import("./types.js").AttentionItem[]}
+   */
+  getAll() {
+    return this.projection.getAll();
+  }
+
+  /**
    * SH-4-09: diff `nextItems` against `this._prior`; if any of the DoD-listed
    * user-visible changes is present (created / cleared / ack-ed / snoozed /
    * severity flipped), invoke `this.onChange(payload)`. Always updates
@@ -507,13 +550,14 @@ export class AttentionEngine {
         clearedAt: item.clearedAt,
         item,
       };
-      nextPrior.set(key, snap);
 
       const prev = this._prior.get(key);
       if (!prev) {
         added.push(item);
-        // A newly-arrived item that's already ack'd / snoozed / cleared still
-        // counts as a "created" event only (avoid double-firing).
+        // A newly-arrived item that's already ack'd / snoozed still counts as
+        // a "created" event only (avoid double-firing). Cleared items are
+        // one-shot removal markers and are not retained in _prior below.
+        if (item.clearedAt === undefined) nextPrior.set(key, snap);
         continue;
       }
       if (prev.severity !== item.severity) {
@@ -531,6 +575,7 @@ export class AttentionEngine {
       if (prev.clearedAt === undefined && item.clearedAt !== undefined) {
         removed.push(item);
       }
+      if (item.clearedAt === undefined) nextPrior.set(key, snap);
     }
 
     for (const [key, prev] of this._prior) {
@@ -628,6 +673,37 @@ function resolveUntaskedConfig(engineConfig) {
     DEFAULT_UNTASKED_SESSIONS_CONFIG.unboundAutoArchiveAfterHours,
   );
   return { unboundAttentionAfterMinutes: mins, unboundAutoArchiveAfterHours: hours };
+}
+
+function attentionEventMatchesItem(event, item) {
+  if (!item || typeof item !== "object") return false;
+  const hasDedupeKey = typeof event.dedupeKey === "string" && event.dedupeKey.length > 0;
+  const hasItemId = typeof event.attentionItemId === "string" && event.attentionItemId.length > 0;
+  const dedupeMatches = hasDedupeKey && event.dedupeKey === item.dedupeKey;
+  const idMatches = hasItemId && typeof item.id === "string" && event.attentionItemId === item.id;
+  if (hasDedupeKey && hasItemId) {
+    return dedupeMatches && idMatches;
+  }
+  return dedupeMatches || idMatches;
+}
+
+function attentionOverlayPatch(event, item) {
+  if (event.type === "attention.ack") {
+    if (typeof event.acknowledgedAt !== "string" || event.acknowledgedAt.length === 0) return null;
+    if (item.acknowledgedAt === event.acknowledgedAt) return null;
+    return { acknowledgedAt: event.acknowledgedAt };
+  }
+  if (event.type === "attention.snoozed") {
+    if (typeof event.snoozedUntil !== "string" || event.snoozedUntil.length === 0) return null;
+    if (item.snoozedUntil === event.snoozedUntil) return null;
+    return { snoozedUntil: event.snoozedUntil };
+  }
+  if (event.type === "attention.cleared") {
+    if (typeof event.clearedAt !== "string" || event.clearedAt.length === 0) return null;
+    if (item.clearedAt === event.clearedAt) return null;
+    return { clearedAt: event.clearedAt };
+  }
+  return null;
 }
 
 function positiveNumber(v, fallback) {

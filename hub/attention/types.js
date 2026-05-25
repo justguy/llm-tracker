@@ -1,4 +1,4 @@
-// hub/attention/types.js — SH-4-01 (TDD v0.5 §6.8)
+// hub/attention/types.js — SH-4-01 (TDD v0.5 §6.8) + SH-4-12 (addendum §15)
 //
 // AttentionItem + AttentionAction model. Mirrors the §6.8 shape verbatim.
 // JSDoc typedefs stand in for the TypeScript declarations; frozen arrays
@@ -8,9 +8,15 @@
 // What this module is responsible for:
 //   - Declaring the AttentionKind, AttentionSource, AttentionSeverity and
 //     AttentionAction kind enum sets exactly as §6.8 lists them.
+//   - Providing the per-kind default clearCondition strings (addendum §15
+//     requires every item to carry one) and a `defaultClearConditionForKind`
+//     helper for UI fallbacks.
 //   - Providing runtime validators (`assertValidAttentionItem`,
 //     `assertValidAttentionAction`) that the attention projection / API
 //     layers can call before persisting or shipping records.
+//     `assertValidAttentionItem` default-fills `clearCondition` from
+//     CLEAR_CONDITIONS_BY_KIND when the caller omitted it, then enforces a
+//     non-empty string — see §15 ("every item to have one").
 //
 // What this module does NOT do:
 //   - Build dedupe keys (that lives in `./dedupe.js`).
@@ -92,7 +98,7 @@
  * @property {string} createdAt
  * @property {string} updatedAt
  * @property {string} dedupeKey
- * @property {string} [clearCondition]
+ * @property {string} clearCondition  Human-readable §15 clear condition. Required on the wire; `assertValidAttentionItem` default-fills from CLEAR_CONDITIONS_BY_KIND when omitted.
  * @property {AttentionAction[]} recommendedActions
  * @property {boolean} [autoArchive]
  * @property {string} [acknowledgedAt]
@@ -145,6 +151,47 @@ export const ATTENTION_SEVERITIES = Object.freeze([
   "medium",
   "low",
 ]);
+
+/**
+ * Per-kind default `clearCondition` strings, sourced from TDD §8A.3 "Clear
+ * rules" and addendum §15. The active rules (and engine.js for
+ * `unbound_session`) each emit their own kind-appropriate string; this map
+ * provides a safe fallback for any code path that constructs an item without
+ * one, so the §15 requirement "every item to have one" holds at the wire
+ * boundary.
+ *
+ * @type {Readonly<Record<AttentionKind, string>>}
+ */
+export const CLEAR_CONDITIONS_BY_KIND = Object.freeze({
+  approval_needed: "structured approval resolution or human clear",
+  blocked: "structured status change, human resolution, or job completion/cancel",
+  conflict: "watcher/git evidence no longer shows the conflict, or human ack",
+  outside_allowed_paths:
+    "watcher/git evidence no longer shows out-of-bounds writes, or human ack with reason",
+  not_responding: "next structured heartbeat or event",
+  quiet: "next raw output for dumb-terminal sessions",
+  context_high: "rollover, archive, or structured context drops below threshold",
+  done_needs_closeout: "closeout/handoff/archive gate satisfied or overridden",
+  done_claimed_verify_missing: "verify gates satisfied or task status changed",
+  verify_missing: "verify pack populated with at least one required gate",
+  unbound_session: "session.taskId is set or session reaches a terminal status",
+  sandbox_escape_requested:
+    "structured escape resolution (granted/denied) or human ack",
+  provider_error: "provider error resolves (retry success or human ack)",
+});
+
+/**
+ * Lookup the §15 default clearCondition string for `kind`. Returns `undefined`
+ * for unknown kinds so the validator's enum check can flag them rather than
+ * silently masking the violation.
+ *
+ * @param {string} kind
+ * @returns {string | undefined}
+ */
+export function defaultClearConditionForKind(kind) {
+  if (typeof kind !== "string") return undefined;
+  return CLEAR_CONDITIONS_BY_KIND[/** @type {AttentionKind} */ (kind)];
+}
 
 /**
  * Frozen list of every AttentionAction.kind from TDD §6.8 (14 base kinds plus
@@ -299,8 +346,16 @@ export function assertValidAttentionItem(item) {
   if (!isNonEmptyString(i.dedupeKey)) {
     throw new Error("AttentionItem.dedupeKey required (non-empty string)");
   }
-  if (i.clearCondition !== undefined && !isNonEmptyString(i.clearCondition)) {
-    throw new Error("AttentionItem.clearCondition must be a non-empty string when present");
+  if (i.clearCondition === undefined) {
+    const fallback = CLEAR_CONDITIONS_BY_KIND[/** @type {AttentionKind} */ (i.kind)];
+    if (typeof fallback === "string" && fallback.length > 0) {
+      i.clearCondition = fallback;
+    }
+  }
+  if (!isNonEmptyString(i.clearCondition)) {
+    throw new Error(
+      "AttentionItem.clearCondition required (non-empty string; addendum §15)",
+    );
   }
   if (i.autoArchive !== undefined && typeof i.autoArchive !== "boolean") {
     throw new Error("AttentionItem.autoArchive must be a boolean when present");

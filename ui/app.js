@@ -10,6 +10,8 @@ import { CommandPalette } from "./palette.js";
 import { ProjectPane } from "./project-pane.js";
 import { ScratchpadRow } from "./scratchpad-row.js";
 import { ConnectionPip, Drawer, EmptyState } from "./shell-chrome.js";
+import { AttentionStrip } from "./attention/AttentionStrip.js";
+import { TriagePage } from "./triage/TriagePage.js";
 import {
   deleteProject,
   deleteTask,
@@ -91,6 +93,8 @@ function App() {
   const [taskDrawer, setTaskDrawer] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [attentionItems, setAttentionItems] = useState([]);
+  const [triageOpen, setTriageOpen] = useState(false);
   const [statusFilters, setStatusFilters] = useState(() => new Set());
   const [blockFilters, setBlockFilters] = useState(() => new Set());
 
@@ -158,6 +162,21 @@ function App() {
 
   useEffect(() => {
     fetchWorkspace().then(setWorkspace).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/attention?scope=global")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelled) return;
+        const items = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : [];
+        setAttentionItems(items);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -248,6 +267,40 @@ function App() {
             delete next[msg.slug];
             return next;
           });
+        }
+      };
+    };
+    connect();
+    return () => {
+      closing = true;
+      clearTimeout(retryTimer);
+      try {
+        ws?.close();
+      } catch {}
+    };
+  }, []);
+
+  useEffect(() => {
+    let ws;
+    let retryTimer;
+    let closing = false;
+    const connect = () => {
+      ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/runtime/ws`);
+      ws.onclose = () => {
+        if (closing) return;
+        retryTimer = setTimeout(connect, 1000);
+      };
+      ws.onerror = () => {
+        try {
+          ws.close();
+        } catch {}
+      };
+      ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === "runtime.snapshot") {
+          setAttentionItems(Array.isArray(msg.snapshot?.attention) ? msg.snapshot.attention : []);
+        } else if (msg.type === "attention.updated") {
+          setAttentionItems(Array.isArray(msg.items) ? msg.items : []);
         }
       };
     };
@@ -603,6 +656,27 @@ function App() {
       onToggleCollapse=${onToggleCollapse}
     />
   `;
+  const attentionStripEl = html`
+    <div class="attention-strip-row">
+      <${AttentionStrip}
+        items=${attentionItems.slice(0, 5)}
+        onItemClick=${() => setTriageOpen(true)}
+      />
+    </div>
+  `;
+  const triageEl = triageOpen
+    ? html`
+        <div class="triage-overlay" role="dialog" aria-modal="true" aria-label="Attention triage">
+          <div class="triage-shell">
+            <div class="triage-shell__bar">
+              <span class="triage-shell__title">Attention triage</span>
+              <button class="triage-shell__close" type="button" onClick=${() => setTriageOpen(false)} aria-label="Close triage">×</button>
+            </div>
+            <${TriagePage} items=${attentionItems} />
+          </div>
+        </div>
+      `
+    : null;
   const validPinned = pinnedSlugs.filter((s) => projects[s]);
   const paneSlugs = validPinned.length > 0 ? validPinned : [activeSlug];
   const pinnedProjectNames = paneSlugs
@@ -634,6 +708,7 @@ function App() {
           onOpenSettings=${() => setSettingsOpen(true)}
           onOpenHistory=${() => setHistoryOpen(true)}
           onOpenIntel=${onOpenProjectIntel}
+          onOpenTriage=${() => setTriageOpen(true)}
           onUndo=${onUndo}
           onRedo=${onRedo}
           onDeleteProject=${onDeleteProject}
@@ -643,6 +718,7 @@ function App() {
           pinnedSlugs=${pinnedSlugs}
           onTogglePinProject=${onTogglePinProject}
         />
+        ${attentionStripEl}
         <${EmptyState} workspace=${workspace} onOpenHelp=${() => setHelpOpen(true)} />
         <${ConnectionPip} up=${wsUp} />
         ${drawerEl}
@@ -651,6 +727,7 @@ function App() {
         ${historyEl}
         ${taskModalEl}
         ${paletteEl}
+        ${triageEl}
       </div>
     `;
   }
@@ -681,6 +758,7 @@ function App() {
           onOpenSettings=${() => setSettingsOpen(true)}
           onOpenHistory=${() => setHistoryOpen(true)}
           onOpenIntel=${onOpenProjectIntel}
+          onOpenTriage=${() => setTriageOpen(true)}
           onUndo=${onUndo}
           onRedo=${onRedo}
           onDeleteProject=${onDeleteProject}
@@ -690,6 +768,7 @@ function App() {
           pinnedSlugs=${pinnedSlugs}
           onTogglePinProject=${onTogglePinProject}
         />
+        ${attentionStripEl}
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
         <div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>
         <${ConnectionPip} up=${wsUp} />
@@ -700,6 +779,7 @@ function App() {
         ${projectIntelEl}
         ${taskModalEl}
         ${paletteEl}
+        ${triageEl}
       </div>
     `;
   }
@@ -731,6 +811,7 @@ function App() {
         onOpenSettings=${() => setSettingsOpen(true)}
         onOpenHistory=${() => setHistoryOpen(true)}
         onOpenIntel=${onOpenProjectIntel}
+        onOpenTriage=${() => setTriageOpen(true)}
         onUndo=${onUndo}
         onRedo=${onRedo}
         onDeleteProject=${onDeleteProject}
@@ -740,6 +821,7 @@ function App() {
           pinnedSlugs=${pinnedSlugs}
           onTogglePinProject=${onTogglePinProject}
       />
+      ${attentionStripEl}
       ${!headerCollapsed ? html`
         <${HeroStrip}
           project=${active}
@@ -823,6 +905,7 @@ function App() {
       ${projectIntelEl}
       ${taskModalEl}
       ${paletteEl}
+      ${triageEl}
     </div>
   `;
 }
