@@ -85,6 +85,61 @@ test("llm-tracker link eagerly loads a symlinked tracker without waiting for wat
   }
 });
 
+test("DELETE /api/projects/:slug removes a dangling symlink registration so the slug can be relinked", async () => {
+  const workspace = setupWorkspace("llm-tracker-relink-cli-");
+  const externalRoot = setupWorkspace("llm-tracker-relink-target-");
+  const port = await findFreePort();
+  const targetPath = join(externalRoot, "external-project.json");
+
+  try {
+    const external = validProject({
+      meta: {
+        ...validProject().meta,
+        name: "External Project",
+        slug: "external-project"
+      }
+    });
+    writeFileSync(targetPath, JSON.stringify(external, null, 2));
+
+    await startDaemonAndWait(runCli, { workspace, port });
+
+    const linked = runCli([
+      "link",
+      "external-project",
+      targetPath,
+      "--path",
+      workspace
+    ]);
+    assert.equal(linked.status, 0, linked.stderr || linked.stdout);
+
+    rmSync(targetPath, { force: true });
+
+    const deleted = await fetch(`http://127.0.0.1:${port}/api/projects/external-project`, {
+      method: "DELETE"
+    });
+    assert.equal(deleted.status, 200);
+
+    writeFileSync(targetPath, JSON.stringify(external, null, 2));
+
+    const relinked = runCli([
+      "link",
+      "external-project",
+      targetPath,
+      "--path",
+      workspace
+    ]);
+    assert.equal(relinked.status, 0, relinked.stderr || relinked.stdout);
+    assert.match(relinked.stdout, /loaded: yes/);
+
+    const project = await fetch(`http://127.0.0.1:${port}/api/projects/external-project`);
+    assert.equal(project.status, 200);
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(externalRoot, { recursive: true, force: true });
+  }
+});
+
 test("slug routes auto-reload a tracker from disk before polling catches up", async () => {
   const workspace = setupWorkspace("llm-tracker-auto-slug-");
   const port = await findFreePort();

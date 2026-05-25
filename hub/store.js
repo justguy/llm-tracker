@@ -44,6 +44,16 @@ export function trackerPath(workspace, slug) {
   return join(workspace, "trackers", `${slug}.json`);
 }
 
+function pathExistsOrSymlink(file) {
+  if (existsSync(file)) return true;
+  try {
+    lstatSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function errorPath(workspace, slug) {
   return join(workspace, "trackers", `${slug}.errors.json`);
 }
@@ -518,7 +528,7 @@ export class Store {
       }
 
       const linkPath = trackerPath(this.workspace, slug);
-      if (existsSync(linkPath) || (() => { try { lstatSync(linkPath); return true; } catch { return false; } })()) {
+      if (pathExistsOrSymlink(linkPath)) {
         return {
           ok: false,
           status: 409,
@@ -613,7 +623,7 @@ export class Store {
         };
       }
       const file = trackerPath(this.workspace, slug);
-      if (existsSync(file)) {
+      if (pathExistsOrSymlink(file)) {
         return {
           ok: false,
           status: 409,
@@ -686,7 +696,7 @@ export class Store {
   async deleteProject(slug) {
     return this.withLock(slug, async () => {
       const file = trackerPath(this.workspace, slug);
-      if (!existsSync(file)) {
+      if (!pathExistsOrSymlink(file)) {
         return { ok: false, status: 404, message: "project not found" };
       }
       const current = this.projects.get(slug);

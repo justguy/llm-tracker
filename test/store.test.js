@@ -1,6 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  mkdirSync,
+  lstatSync,
+  symlinkSync,
+  unlinkSync
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Store, trackerPath, errorPath } from "../hub/store.js";
@@ -521,6 +531,27 @@ test("deleteProject removes tracker file", async () => {
     const missing = await store.deleteProject("test-project");
     assert.equal(missing.ok, false);
     assert.equal(missing.status, 404);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("deleteProject removes dangling symlink registration", async () => {
+  const ws = setupWorkspace();
+  try {
+    const store = new Store(ws);
+    const file = trackerPath(ws, "test-project");
+    const target = join(ws, "external-project.json");
+    writeFileSync(target, JSON.stringify(validProject()));
+    symlinkSync(target, file);
+    unlinkSync(target);
+
+    assert.equal(lstatSync(file).isSymbolicLink(), true);
+
+    const r = await store.deleteProject("test-project");
+    assert.equal(r.ok, true);
+    assert.equal(existsSync(file), false);
+    assert.throws(() => lstatSync(file));
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
