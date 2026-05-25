@@ -691,6 +691,104 @@ test("launch() result is frozen (Object.isFrozen)", async () => {
   }
 });
 
+// --- task_backed: verifyPack persistence on JobRecord (SH-5-04 DoD line 3) --
+
+test("task_backed: launchResult.verifyPack is persisted onto the JobRecord projection", async () => {
+  const h = await makeHarness({
+    projects: { proj: { data: { tasks: [task({ id: "t-1" })] }, rev: 0 } },
+  });
+  try {
+    const draft = makeDraft(h, {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t-1",
+      projectSlug: "proj",
+    });
+    const r = await h.service.launch({ draftId: draft.id });
+    assert.equal(r.ok, true);
+    const job = h.projection.jobs.get(r.jobId);
+    assert.ok(job.verifyPack, "JobRecord carries verifyPack");
+    assert.equal(job.verifyPack.items[0].id, "lt.test");
+    assert.equal(job.verifyPack.items[0].id, r.verifyPack.items[0].id);
+  } finally {
+    h.close();
+  }
+});
+
+test("task_backed: launch result verifyPack === JobRecord.verifyPack (same frozen reference)", async () => {
+  const h = await makeHarness({
+    projects: { proj: { data: { tasks: [task({ id: "t-1" })] }, rev: 0 } },
+  });
+  try {
+    const draft = makeDraft(h, {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t-1",
+      projectSlug: "proj",
+    });
+    const r = await h.service.launch({ draftId: draft.id });
+    assert.equal(r.ok, true);
+    const job = h.projection.jobs.get(r.jobId);
+    assert.equal(r.verifyPack, job.verifyPack, "single source of truth (reference identity)");
+    assert.equal(Object.isFrozen(r.verifyPack), true);
+    assert.equal(Object.isFrozen(job.verifyPack), true);
+  } finally {
+    h.close();
+  }
+});
+
+test("task_backed: mutating project.tasks[i].verify after launch does not alter the stamped pack (DoD 4)", async () => {
+  // Build a mutable project entry so we can push onto verify.items after launch.
+  const mutableTask = task({
+    id: "t-1",
+    verify: { items: [{ kind: "command", id: "lt.original", required: true, cmd: "node --test" }] },
+  });
+  const project = { data: { tasks: [mutableTask] }, rev: 0 };
+  const h = await makeHarness({ projects: { proj: project } });
+  try {
+    const draft = makeDraft(h, {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t-1",
+      projectSlug: "proj",
+    });
+    const r = await h.service.launch({ draftId: draft.id });
+    assert.equal(r.ok, true);
+    const beforeIds = h.projection.jobs.get(r.jobId).verifyPack.items.map((i) => i.id);
+    assert.deepEqual(beforeIds, ["lt.original"]);
+
+    // Mutate the project AFTER launch — push a new verify item onto the task.
+    project.data.tasks[0].verify.items.push({
+      kind: "command",
+      id: "lt.added_later",
+      required: false,
+      cmd: "echo nope",
+    });
+
+    // Re-fetch the job's pack: still the original, single-item pack.
+    const afterIds = h.projection.jobs.get(r.jobId).verifyPack.items.map((i) => i.id);
+    assert.deepEqual(afterIds, ["lt.original"], "in-flight pack is immutable to upstream task.verify edits");
+    assert.equal(h.projection.jobs.get(r.jobId).verifyPack.items.length, 1);
+  } finally {
+    h.close();
+  }
+});
+
+test("untasked launch: no job created, projection has no verifyPack to surface", async () => {
+  const h = await makeHarness();
+  try {
+    const draft = makeDraft(h, { source: "global_new_session", mode: "untasked" });
+    const r = await h.service.launch({ draftId: draft.id });
+    assert.equal(r.ok, true);
+    assert.equal(r.jobId, null);
+    assert.equal(r.verifyPack, undefined, "untasked launch result has no verifyPack");
+    // And of course no projection job exists either.
+    assert.equal(h.projection.toSnapshots().jobs.length, 0);
+  } finally {
+    h.close();
+  }
+});
+
 // --- context-pack composer tolerance ----------------------------------------
 
 test("contextPackService that throws NOT_IMPLEMENTED still yields a successful launch with contextPackRef=null", async () => {

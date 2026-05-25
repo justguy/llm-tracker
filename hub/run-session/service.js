@@ -14,9 +14,11 @@
 //   - ContextPack composition — SH-8-02 owns the composer. We try the
 //     contextPackService when supplied but never fail the launch if it
 //     throws NOT_IMPLEMENTED. Returned `contextPackRef` is null until then.
-//   - VerifyPack persistence onto JobRecord — SH-5-04 will teach JobRegistry
-//     to accept + persist the pack. For now the service composes the pack
-//     via stampVerifyPack() and returns it on the launch result.
+//   - VerifyPack persistence onto JobRecord — DONE in SH-5-04: the composed
+//     pack is passed into jobRegistry.create() and re-read from the
+//     projection so the launch result's `verifyPack` field is the SAME
+//     frozen reference now stored immutably on the JobRecord. Later patches
+//     to task.verify cannot widen or alter the in-flight pack.
 
 import { stampVerifyPack } from "../jobs/verify-pack.js";
 import { BUILT_IN_PROFILES_BY_ID } from "../jobs/profiles.js";
@@ -359,7 +361,8 @@ export class RunSessionService {
     await this.runtimeStore.append(eventForAppend);
 
     // Create job. For joined/forced launches we attach as predecessor so the
-    // registry emits job.queued instead of job.started.
+    // registry emits job.queued instead of job.started. The composed pack
+    // rides through to the projection (SH-5-04 DoD line 3).
     const predecessor =
       (claim.mode === "joined" || claim.mode === "forced") && isNonEmptyString(claim.activeJobId)
         ? claim.activeJobId
@@ -372,6 +375,7 @@ export class RunSessionService {
       kind: jobKindForProfile(draft.profileId),
       source: "http",
       ...(predecessor ? { predecessorJobId: predecessor } : {}),
+      verifyPack,
     });
 
     const contextPackRef = await this.#buildContextPackSafely({
@@ -380,6 +384,10 @@ export class RunSessionService {
       draft,
     });
 
+    // Read the pack back from the projection so the launch result and the
+    // JobRecord share a single source of truth (SH-5-04 DoD line 3).
+    const persistedPack = created.job?.verifyPack ?? verifyPack;
+
     const resultMode = claim.mode === "joined" ? "joined" : "created";
     return freezeResult({
       ok: true,
@@ -387,7 +395,7 @@ export class RunSessionService {
       sessionId,
       jobId: created.jobId,
       taskClaimed: resultMode === "created",
-      verifyPack,
+      verifyPack: persistedPack,
       contextPackRef,
     });
   }
@@ -533,6 +541,7 @@ export class RunSessionService {
       kind: jobKindForProfile(draft.profileId),
       source: "http",
       ...(predecessor ? { predecessorJobId: predecessor } : {}),
+      verifyPack,
     });
 
     const contextPackRef = await this.#buildContextPackSafely({
@@ -541,13 +550,16 @@ export class RunSessionService {
       draft,
     });
 
+    // Single source of truth: prefer the pack now persisted on the JobRecord.
+    const persistedPack = created.job?.verifyPack ?? verifyPack;
+
     return freezeResult({
       ok: true,
       mode: "attached",
       sessionId: existingSessionId,
       jobId: created.jobId,
       taskClaimed: claim.mode !== "joined",
-      verifyPack,
+      verifyPack: persistedPack,
       contextPackRef,
     });
   }

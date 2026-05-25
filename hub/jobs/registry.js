@@ -212,6 +212,13 @@ export class JobRegistry {
    * supplied, and to `job.queued` (status `queued`) when one is supplied —
    * matching TDD §23.2 #35 and the JobQueuedEvent variant in §6.6.
    *
+   * SH-5-04: optional `verifyPack` rides through the create event into the
+   * projection, stamping an immutable VerifyPack onto the JobRecord. The
+   * pack must be a plain object with a non-empty `items` array; item-shape
+   * is already validated by SH-5-07's `stampVerifyPack`, so we don't
+   * re-validate here. `completionGates` and `skillPlan` slots (mentioned in
+   * the module preamble) remain unwired — see SH-5-03 follow-up.
+   *
    * @param {object} input
    * @param {string} input.sessionId
    * @param {string} input.projectSlug
@@ -219,6 +226,7 @@ export class JobRegistry {
    * @param {string} input.profileId
    * @param {JobKind} input.kind
    * @param {string} [input.predecessorJobId]
+   * @param {object} [input.verifyPack]      Immutable VerifyPack from SH-5-04.
    * @param {string} [input.source]
    * @param {string} [input.idempotencyKey]
    * @returns {Promise<{ jobId: string; rev: number; eventId: string; job: object | null }>}
@@ -234,6 +242,7 @@ export class JobRegistry {
       profileId,
       kind,
       predecessorJobId,
+      verifyPack,
       source = "system",
       idempotencyKey,
     } = input;
@@ -264,6 +273,21 @@ export class JobRegistry {
         );
       }
     }
+    if (verifyPack !== undefined) {
+      if (
+        !verifyPack ||
+        typeof verifyPack !== "object" ||
+        Array.isArray(verifyPack) ||
+        !Array.isArray(verifyPack.items) ||
+        verifyPack.items.length === 0
+      ) {
+        throw makeError(
+          "create: verifyPack must be an object with a non-empty items array",
+          "INVALID_INPUT",
+          { field: "verifyPack" },
+        );
+      }
+    }
 
     const jobId = this.makeRuntimeId("job");
     const queued = predecessorJobId !== undefined;
@@ -283,6 +307,7 @@ export class JobRegistry {
       profileId,
       kind,
       ...(queued ? { predecessorJobId } : {}),
+      ...(verifyPack !== undefined ? { verifyPack } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     };
     this.validateRuntimeEvent(eventForValidation);

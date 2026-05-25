@@ -562,6 +562,148 @@ test("JobRegistry.listBySession: filters projection jobs by sessionId", async ()
   }
 });
 
+// --- verifyPack persistence (SH-5-04 DoD line 3) ---------------------------
+
+function makeVerifyPack(overrides = {}) {
+  return {
+    jobId: null,
+    stampedAt: "2026-05-24T17:00:00.000Z",
+    stampedFromRev: 7,
+    items: [
+      { id: "v1", kind: "command", cmd: "echo ok", required: true },
+    ],
+    ...overrides,
+  };
+}
+
+test("JobRegistry.create: verifyPack persists onto the JobRecord projection", async () => {
+  const env = startEnv();
+  try {
+    const pack = makeVerifyPack();
+    const created = await env.registry.create(validJob({ verifyPack: pack }));
+    assert.ok(created.job.verifyPack, "create result carries verifyPack");
+    assert.equal(created.job.verifyPack.stampedFromRev, 7);
+    assert.deepEqual(
+      created.job.verifyPack.items.map((i) => i.id),
+      ["v1"],
+    );
+
+    const refetched = env.registry.get(created.jobId);
+    assert.ok(refetched.verifyPack, "get() also returns verifyPack");
+    assert.deepEqual(
+      refetched.verifyPack.items.map((i) => i.id),
+      ["v1"],
+    );
+
+    // The pack rides through the job.started event for audit.
+    const started = env.appendedEvents.find((e) => e.type === "job.started");
+    assert.ok(started.verifyPack, "job.started event carries verifyPack");
+    assert.equal(started.verifyPack.items[0].id, "v1");
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.create: without verifyPack the JobRecord has no verifyPack field", async () => {
+  const env = startEnv();
+  try {
+    const created = await env.registry.create(validJob());
+    assert.equal(created.job.verifyPack, undefined);
+    const refetched = env.registry.get(created.jobId);
+    assert.equal(refetched.verifyPack, undefined);
+    const started = env.appendedEvents.find((e) => e.type === "job.started");
+    assert.equal(started.verifyPack, undefined);
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.create: rejects verifyPack with non-array items", async () => {
+  const env = startEnv();
+  try {
+    await assert.rejects(
+      env.registry.create(validJob({ verifyPack: { items: "nope" } })),
+      /verifyPack must be an object with a non-empty items array/,
+    );
+    await assert.rejects(
+      env.registry.create(validJob({ verifyPack: { items: [] } })),
+      /verifyPack must be an object with a non-empty items array/,
+    );
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.create: rejects verifyPack as a string / number / array", async () => {
+  const env = startEnv();
+  try {
+    await assert.rejects(
+      env.registry.create(validJob({ verifyPack: "not-an-object" })),
+      /verifyPack must be an object with a non-empty items array/,
+    );
+    await assert.rejects(
+      env.registry.create(validJob({ verifyPack: 42 })),
+      /verifyPack must be an object with a non-empty items array/,
+    );
+    await assert.rejects(
+      env.registry.create(validJob({ verifyPack: [{ id: "v1", kind: "command" }] })),
+      /verifyPack must be an object with a non-empty items array/,
+    );
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.checkpoint preserves verifyPack on the JobRecord", async () => {
+  const env = startEnv();
+  try {
+    const pack = makeVerifyPack();
+    const created = await env.registry.create(validJob({ verifyPack: pack }));
+    await env.registry.checkpoint(created.jobId, { status: "blocked", summary: "ext dep" });
+    const after = env.registry.get(created.jobId);
+    assert.equal(after.status, "blocked");
+    assert.ok(after.verifyPack, "verifyPack survives checkpoint");
+    assert.equal(after.verifyPack.items[0].id, "v1");
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.complete preserves verifyPack on the JobRecord", async () => {
+  const env = startEnv();
+  try {
+    const pack = makeVerifyPack();
+    const created = await env.registry.create(validJob({ verifyPack: pack }));
+    await env.registry.complete(created.jobId, { status: "completed", summary: "done" });
+    const after = env.registry.get(created.jobId);
+    assert.equal(after.status, "completed");
+    assert.ok(after.verifyPack, "verifyPack survives terminal complete");
+    assert.equal(after.verifyPack.items[0].id, "v1");
+  } finally {
+    env.close();
+  }
+});
+
+test("JobRegistry.create: verifyPack flows through job.queued (predecessor) path too", async () => {
+  const env = startEnv();
+  try {
+    const first = await env.registry.create(validJob({ taskId: "t-pred" }));
+    const pack = makeVerifyPack({ items: [{ id: "q1", kind: "command", cmd: "echo q", required: false }] });
+    const second = await env.registry.create(
+      validJob({ taskId: "t-succ", predecessorJobId: first.jobId, verifyPack: pack }),
+    );
+    assert.ok(second.job.verifyPack, "queued job has verifyPack");
+    assert.equal(second.job.verifyPack.items[0].id, "q1");
+    assert.equal(second.job.status, "queued");
+
+    const queuedEvt = env.appendedEvents.find((e) => e.type === "job.queued");
+    assert.ok(queuedEvt.verifyPack, "job.queued event carries verifyPack");
+    assert.equal(queuedEvt.verifyPack.items[0].id, "q1");
+  } finally {
+    env.close();
+  }
+});
+
 // --- now() injection --------------------------------------------------------
 
 test("JobRegistry: injected now() is used for event ts", async () => {
