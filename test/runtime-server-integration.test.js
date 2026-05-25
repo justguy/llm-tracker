@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 
 import { startHub } from "../hub/server.js";
-import { SESSION_ID_RE } from "../hub/runtime/ids.js";
+import { SESSION_ID_RE, JOB_ID_RE } from "../hub/runtime/ids.js";
 
 const TEST_TIMEOUT = 10000;
 
@@ -74,6 +74,83 @@ async function patchJson(base, path, body) {
     body: JSON.stringify(body),
   });
 }
+
+function waitForEventOfType(ws, eventType) {
+  return new Promise((resolve, reject) => {
+    const onMessage = (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString("utf8"));
+      } catch (err) {
+        ws.off("message", onMessage);
+        reject(err);
+        return;
+      }
+      if (msg && msg.type === "runtime.event" && msg.event && msg.event.type === eventType) {
+        ws.off("message", onMessage);
+        resolve(msg);
+      }
+    };
+    ws.on("message", onMessage);
+    ws.once("error", (err) => {
+      ws.off("message", onMessage);
+      reject(err);
+    });
+  });
+}
+
+test("startHub mounts /api/jobs routes live — create + PATCH drive runtime events", { timeout: TEST_TIMEOUT }, async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const hub = await startHub({ workspace, port, uiDir: join(process.cwd(), "ui") });
+  const base = `http://127.0.0.1:${port}`;
+  let runtimeWs;
+
+  try {
+    const runtimeConn = await openWsWithFirstMessage(`ws://127.0.0.1:${port}/runtime/ws`, {
+      headers: { Origin: base },
+    });
+    runtimeWs = runtimeConn.ws;
+    assert.equal(runtimeConn.firstMessage.type, "runtime.snapshot");
+
+    // The registry needs a real session id; mint one via the live sessions API.
+    const sessionRes = await postJson(base, "/api/sessions", { name: "jobs-smoke", tier: "manual" });
+    assert.equal(sessionRes.status, 201);
+    const sessionBody = await sessionRes.json();
+    const sessionId = sessionBody.session.id;
+    assert.ok(SESSION_ID_RE.test(sessionId));
+
+    const jobStartedPromise = waitForEventOfType(runtimeWs, "job.started");
+    const createRes = await postJson(base, "/api/projects/demo/tasks/t-1/jobs", {
+      sessionId,
+      profileId: "code-implementer",
+      kind: "code",
+    });
+    assert.equal(createRes.status, 201);
+    const createBody = await createRes.json();
+    assert.ok(JOB_ID_RE.test(createBody.jobId));
+    assert.equal(createBody.job.status, "running");
+
+    const startedMsg = await jobStartedPromise;
+    assert.equal(startedMsg.event.type, "job.started");
+    assert.equal(startedMsg.event.jobId, createBody.jobId);
+
+    const checkpointPromise = waitForEventOfType(runtimeWs, "job.checkpoint");
+    const patchRes = await patchJson(base, `/api/jobs/${createBody.jobId}`, { status: "blocked" });
+    assert.equal(patchRes.status, 200);
+    const patchBody = await patchRes.json();
+    assert.equal(patchBody.job.status, "blocked");
+
+    const cpMsg = await checkpointPromise;
+    assert.equal(cpMsg.event.type, "job.checkpoint");
+    assert.equal(cpMsg.event.jobId, createBody.jobId);
+    assert.equal(cpMsg.event.status, "blocked");
+  } finally {
+    if (runtimeWs) runtimeWs.close();
+    await hub.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
 
 test("startHub mounts runtime sessions API and runtime websocket without changing legacy /ws", { timeout: TEST_TIMEOUT }, async () => {
   const workspace = setupWorkspace();

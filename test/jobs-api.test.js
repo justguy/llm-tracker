@@ -93,6 +93,17 @@ async function postJson(base, path, body) {
   return { status: res.status, body: json };
 }
 
+async function patchJson(base, path, body) {
+  const init = {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+  };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const res = await fetch(`${base}${path}`, init);
+  const json = await res.json().catch(() => null);
+  return { status: res.status, body: json };
+}
+
 // --- constructor wiring -----------------------------------------------------
 
 test("registerJobsRoutes: rejects missing deps", () => {
@@ -493,6 +504,199 @@ test("GET /api/jobs/:id/context-pack rejects malformed jobId before stubbing 501
     const r = await getJson(app.base, "/api/jobs/not-a-job/context-pack?kind=start");
     assert.equal(r.status, 400);
     assert.equal(r.body.error.code, "INVALID_JOB_ID");
+  } finally {
+    await app.close();
+  }
+});
+
+// --- POST /api/projects/:slug/tasks/:taskId/jobs (SH-5-18) ------------------
+
+test("POST /api/projects/:slug/tasks/:taskId/jobs — happy path: 201, registry.list contains it, job.started emitted", async () => {
+  const app = await startApp();
+  try {
+    const r = await postJson(app.base, "/api/projects/demo/tasks/t-1/jobs", {
+      sessionId: SES,
+      profileId: "code-implementer",
+      kind: "code",
+    });
+    assert.equal(r.status, 201);
+    assert.equal(typeof r.body.jobId, "string");
+    assert.match(r.body.jobId, /^job_/);
+    assert.equal(typeof r.body.rev, "number");
+    assert.equal(typeof r.body.eventId, "string");
+    assert.equal(r.body.job.id, r.body.jobId);
+    assert.equal(r.body.job.status, "running");
+    assert.equal(r.body.job.projectSlug, "demo");
+    assert.equal(r.body.job.taskId, "t-1");
+
+    const listed = app.jobRegistry.list();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].id, r.body.jobId);
+
+    const started = app.appendedEvents.filter((e) => e.type === "job.started");
+    assert.equal(started.length, 1);
+    assert.equal(started[0].source, "http");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/projects/:slug/tasks/:taskId/jobs — with predecessor emits job.queued", async () => {
+  const app = await startApp();
+  try {
+    const pred = await app.jobRegistry.create(validJobInput({ taskId: "t-pred" }));
+    const r = await postJson(app.base, "/api/projects/demo/tasks/t-succ/jobs", {
+      sessionId: SES,
+      profileId: "code-implementer",
+      kind: "code",
+      predecessorJobId: pred.jobId,
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.job.status, "queued");
+
+    const queued = app.appendedEvents.filter((e) => e.type === "job.queued");
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "http");
+    assert.equal(queued[0].predecessorJobId, pred.jobId);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/projects/:slug/tasks/:taskId/jobs — body `projectSlug`/`taskId` → 400 UNKNOWN_FIELDS (URL wins)", async () => {
+  const app = await startApp();
+  try {
+    const r = await postJson(app.base, "/api/projects/demo/tasks/t-1/jobs", {
+      sessionId: SES,
+      profileId: "code-implementer",
+      kind: "code",
+      projectSlug: "other",
+      taskId: "t-other",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "UNKNOWN_FIELDS");
+    // Both echoed back so callers see exactly which fields were rejected.
+    assert.deepEqual(
+      r.body.error.details.unknown.sort(),
+      ["projectSlug", "taskId"].sort(),
+    );
+    assert.equal(app.jobRegistry.list().length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/projects/:slug/tasks/:taskId/jobs — missing sessionId → 400 INVALID_SESSION_ID", async () => {
+  const app = await startApp();
+  try {
+    const r = await postJson(app.base, "/api/projects/demo/tasks/t-1/jobs", {
+      profileId: "code-implementer",
+      kind: "code",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_SESSION_ID");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/projects/:slug/tasks/:taskId/jobs — bad `kind` → 400 INVALID_JOB_KIND", async () => {
+  const app = await startApp();
+  try {
+    const r = await postJson(app.base, "/api/projects/demo/tasks/t-1/jobs", {
+      sessionId: SES,
+      profileId: "code-implementer",
+      kind: "nope",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_JOB_KIND");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/projects/:slug/tasks/:taskId/jobs — unknown predecessor → 404 UNKNOWN_PREDECESSOR", async () => {
+  const app = await startApp();
+  try {
+    const r = await postJson(app.base, "/api/projects/demo/tasks/t-1/jobs", {
+      sessionId: SES,
+      profileId: "code-implementer",
+      kind: "code",
+      predecessorJobId: GHOST_JOB,
+    });
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error.code, "UNKNOWN_PREDECESSOR");
+  } finally {
+    await app.close();
+  }
+});
+
+// --- PATCH /api/jobs/:jobId (SH-5-18) ---------------------------------------
+
+test("PATCH /api/jobs/:jobId — non-terminal status change → 200; emits job.checkpoint", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const r = await patchJson(app.base, `/api/jobs/${created.jobId}`, {
+      status: "blocked",
+      summary: "waiting on review",
+    });
+    assert.equal(r.status, 200);
+    assert.equal(typeof r.body.eventId, "string");
+    assert.equal(typeof r.body.rev, "number");
+    assert.equal(r.body.job.id, created.jobId);
+    assert.equal(r.body.job.status, "blocked");
+
+    const cps = app.appendedEvents.filter((e) => e.type === "job.checkpoint");
+    assert.equal(cps.length, 1);
+    assert.equal(cps[0].source, "http");
+    assert.equal(cps[0].status, "blocked");
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH /api/jobs/:jobId — terminal status → 400 TERMINAL_STATUS_FORBIDDEN", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const r = await patchJson(app.base, `/api/jobs/${created.jobId}`, {
+      status: "completed",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "TERMINAL_STATUS_FORBIDDEN");
+    assert.equal(app.appendedEvents.filter((e) => e.type === "job.checkpoint").length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH /api/jobs/:jobId — unknown body fields → 400 UNKNOWN_FIELDS", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const r = await patchJson(app.base, `/api/jobs/${created.jobId}`, {
+      kind: "code",
+      sessionId: SES,
+      profileId: "code-implementer",
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "UNKNOWN_FIELDS");
+    assert.deepEqual(
+      r.body.error.details.unknown.sort(),
+      ["kind", "profileId", "sessionId"].sort(),
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH /api/jobs/:jobId — unknown job → 404 JOB_NOT_FOUND", async () => {
+  const app = await startApp();
+  try {
+    const r = await patchJson(app.base, `/api/jobs/${GHOST_JOB}`, { status: "running" });
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error.code, "JOB_NOT_FOUND");
   } finally {
     await app.close();
   }

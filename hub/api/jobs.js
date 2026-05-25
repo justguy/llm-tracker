@@ -6,7 +6,9 @@
 //
 // Endpoints (TDD §12.2):
 //   GET    /api/jobs                            — list JobRecord[]
+//   POST   /api/projects/:slug/tasks/:taskId/jobs — create JobRecord (SH-5-18)
 //   GET    /api/jobs/:jobId                     — fetch a single JobRecord
+//   PATCH  /api/jobs/:jobId                     — checkpoint delegate (SH-5-18)
 //   POST   /api/jobs/:jobId/checkpoint          — emit job.checkpoint
 //   POST   /api/jobs/:jobId/complete            — JobCompleteResult union
 //   POST   /api/jobs/:jobId/cancel              — emit job.completed (cancelled)
@@ -25,6 +27,19 @@
 import { isJobId } from "../runtime/ids.js";
 
 const CHECKPOINT_ALLOWED_FIELDS = new Set(["status", "summary", "idempotencyKey"]);
+// SH-5-18: PATCH /api/jobs/:jobId reconciles with checkpoint semantics, so it
+// accepts the same fields as POST /:jobId/checkpoint.
+const PATCH_ALLOWED_FIELDS = new Set(["status", "summary", "idempotencyKey"]);
+// SH-5-18: POST /api/projects/:slug/tasks/:taskId/jobs. `projectSlug`/`taskId`
+// come from the URL — they are not accepted in the body so the URL is the
+// single source of truth.
+const CREATE_ALLOWED_FIELDS = new Set([
+  "sessionId",
+  "profileId",
+  "kind",
+  "predecessorJobId",
+  "idempotencyKey",
+]);
 const COMPLETE_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
 const CANCEL_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
 const ROLLOVER_ALLOWED_FIELDS = new Set(["reason", "idempotencyKey"]);
@@ -70,6 +85,44 @@ export function registerJobsRoutes(app, deps) {
     res.status(200).json({ jobs: jobRegistry.list() });
   });
 
+  // --- POST /api/projects/:slug/tasks/:taskId/jobs ------------------------
+  // SH-5-18. §12.2 start/create route — JobRegistry.create() picks the right
+  // verb (`job.started` vs `job.queued`) based on `predecessorJobId`.
+  app.post("/api/projects/:slug/tasks/:taskId/jobs", async (req, res) => {
+    const { slug, taskId } = req.params;
+    if (typeof slug !== "string" || slug.length === 0) {
+      return sendError(res, 400, "INVALID_INPUT", "slug path param required");
+    }
+    if (typeof taskId !== "string" || taskId.length === 0) {
+      return sendError(res, 400, "INVALID_INPUT", "taskId path param required");
+    }
+    const bodyOrErr = requireObjectBody(req, res);
+    if (bodyOrErr === undefined) return;
+    const unknown = rejectUnknownFields(bodyOrErr, CREATE_ALLOWED_FIELDS);
+    if (unknown) return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+
+    try {
+      const result = await jobRegistry.create({
+        sessionId: bodyOrErr.sessionId,
+        projectSlug: slug,
+        taskId,
+        profileId: bodyOrErr.profileId,
+        kind: bodyOrErr.kind,
+        ...(bodyOrErr.predecessorJobId !== undefined ? { predecessorJobId: bodyOrErr.predecessorJobId } : {}),
+        ...(bodyOrErr.idempotencyKey !== undefined ? { idempotencyKey: bodyOrErr.idempotencyKey } : {}),
+        source: "http",
+      });
+      return res.status(201).json({
+        jobId: result.jobId,
+        rev: result.rev,
+        eventId: result.eventId,
+        job: result.job,
+      });
+    } catch (err) {
+      return mapRegistryError(res, err);
+    }
+  });
+
   // --- GET /api/jobs/:jobId -----------------------------------------------
   app.get("/api/jobs/:jobId", (req, res) => {
     const { jobId } = req.params;
@@ -81,6 +134,32 @@ export function registerJobsRoutes(app, deps) {
       return sendError(res, 404, "JOB_NOT_FOUND", `job not found: ${jobId}`);
     }
     res.status(200).json(job);
+  });
+
+  // --- PATCH /api/jobs/:jobId ---------------------------------------------
+  // SH-5-18. Thin delegation to JobRegistry.checkpoint — reconciles §12.2's
+  // generic lifecycle update with the explicit checkpoint route below.
+  app.patch("/api/jobs/:jobId", async (req, res) => {
+    const { jobId } = req.params;
+    if (!isJobId(jobId)) {
+      return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
+    }
+    const bodyOrErr = requireObjectBody(req, res);
+    if (bodyOrErr === undefined) return;
+    const unknown = rejectUnknownFields(bodyOrErr, PATCH_ALLOWED_FIELDS);
+    if (unknown) return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+
+    try {
+      const result = await jobRegistry.checkpoint(jobId, {
+        ...(bodyOrErr.status !== undefined ? { status: bodyOrErr.status } : {}),
+        ...(bodyOrErr.summary !== undefined ? { summary: bodyOrErr.summary } : {}),
+        ...(bodyOrErr.idempotencyKey !== undefined ? { idempotencyKey: bodyOrErr.idempotencyKey } : {}),
+        source: "http",
+      });
+      return res.status(200).json({ rev: result.rev, eventId: result.eventId, job: result.job });
+    } catch (err) {
+      return mapRegistryError(res, err);
+    }
   });
 
   // --- POST /api/jobs/:jobId/checkpoint -----------------------------------
@@ -295,8 +374,12 @@ function rejectUnknownFields(body, allowed) {
  *   INVALID_JOB_STATUS        -> 400
  *   TERMINAL_STATUS_FORBIDDEN -> 400
  *   INVALID_INPUT             -> 400
+ *   INVALID_SESSION_ID        -> 400 (SH-5-18, create-time)
+ *   INVALID_PREDECESSOR_ID    -> 400 (SH-5-18, create-time)
+ *   INVALID_JOB_KIND          -> 400 (SH-5-18, create-time)
  *   INVALID_JOB_STATE         -> 409
  *   UNKNOWN_JOB               -> 404 (JOB_NOT_FOUND in the HTTP envelope)
+ *   UNKNOWN_PREDECESSOR       -> 404 (SH-5-18, create-time)
  *   JOB_TERMINAL              -> 409
  */
 function mapRegistryError(res, err) {
@@ -308,11 +391,16 @@ function mapRegistryError(res, err) {
     case "INVALID_JOB_STATUS":
     case "TERMINAL_STATUS_FORBIDDEN":
     case "INVALID_INPUT":
+    case "INVALID_SESSION_ID":
+    case "INVALID_PREDECESSOR_ID":
+    case "INVALID_JOB_KIND":
       return sendError(res, 400, code, err.message, details);
     case "INVALID_JOB_STATE":
       return sendError(res, 409, code, err.message, details);
     case "UNKNOWN_JOB":
       return sendError(res, 404, "JOB_NOT_FOUND", err.message, details);
+    case "UNKNOWN_PREDECESSOR":
+      return sendError(res, 404, "UNKNOWN_PREDECESSOR", err.message, details);
     case "JOB_TERMINAL":
       return sendError(res, 409, "JOB_TERMINAL", err.message, details);
     default:
