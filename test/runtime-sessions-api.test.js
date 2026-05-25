@@ -233,6 +233,66 @@ test("PATCH status: 200 + projection reflects new status", { timeout: TEST_TIMEO
   }
 });
 
+test("PATCH contextUsage below threshold updates structured timestamp without warning", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp();
+  try {
+    const postRes = await postJson(env.base, "/api/sessions", { name: "context-low", tier: "mcp_tracked" });
+    assert.equal(postRes.status, 201);
+    const { session } = await postRes.json();
+
+    const patchRes = await patchJson(env.base, `/api/sessions/${session.id}`, {
+      status: "active",
+      contextUsage: { percent: 84, used: 84000, limit: 100000, source: "mcp" },
+    });
+    assert.equal(patchRes.status, 200);
+    const patchBody = await patchRes.json();
+    assert.equal(patchBody.session.status, "active");
+    assert.equal(patchBody.session.statusSource.kind, "mcp");
+    assert.deepEqual(patchBody.session.contextUsage, {
+      percent: 84,
+      used: 84000,
+      limit: 100000,
+      source: "mcp",
+    });
+    assert.equal(patchBody.session.lastStructuredEventAt, patchBody.session.lastActivityAt);
+    assert.deepEqual(patchBody.session.warnings, []);
+    assert.equal(patchBody.warningEventId, undefined);
+    assert.equal(patchBody.rev, 2);
+  } finally {
+    await env.close();
+  }
+});
+
+test("PATCH contextUsage promotes context_high and emits mcp warning", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp();
+  try {
+    const postRes = await postJson(env.base, "/api/sessions", { name: "context", tier: "mcp_tracked" });
+    assert.equal(postRes.status, 201);
+    const { session } = await postRes.json();
+
+    const patchRes = await patchJson(env.base, `/api/sessions/${session.id}`, {
+      status: "active",
+      contextUsage: { percent: 85, used: 85000, limit: 100000, source: "mcp" },
+    });
+    assert.equal(patchRes.status, 200);
+    const patchBody = await patchRes.json();
+    assert.equal(patchBody.session.status, "context_high");
+    assert.equal(patchBody.session.statusSource.kind, "mcp");
+    assert.equal(typeof patchBody.warningEventId, "string");
+    assert.deepEqual(patchBody.session.contextUsage, {
+      percent: 85,
+      used: 85000,
+      limit: 100000,
+      source: "mcp",
+    });
+    assert.equal(patchBody.session.lastStructuredEventAt, patchBody.session.lastActivityAt);
+    assert.deepEqual(patchBody.session.warnings, [{ kind: "context_high", source: "mcp", percent: 85 }]);
+    assert.equal(patchBody.rev, 3);
+  } finally {
+    await env.close();
+  }
+});
+
 test("PATCH 400 on invalid status enum", { timeout: TEST_TIMEOUT }, async () => {
   const env = await startMiniApp();
   try {

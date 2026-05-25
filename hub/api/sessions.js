@@ -20,8 +20,10 @@
 
 import { log } from "../logging/index.js";
 import { requireSessionToken } from "./middleware/session-token.js";
-import { createSessionStdioCaptureChangedEvent } from "../runtime/events.js";
+import { createSessionStdioCaptureChangedEvent, createSessionWarningEvent } from "../runtime/events.js";
 import { SessionTaskLedgerService } from "../sessions/task-ledger.js";
+import { DEFAULT_THRESHOLDS } from "../sessions/activity.js";
+import { contextHighWarning } from "../sessions/warnings.js";
 
 // Allowed body fields on POST. Anything else triggers UNKNOWN_FIELDS (400).
 const POST_ALLOWED_FIELDS = new Set([
@@ -106,6 +108,7 @@ const POST_OPTIONAL_STRING_FIELDS = [
  * @property {{ get(sessionId: string): object[] | null }} [taskLedgerService]
  * @property {{ list(): object[] }} [jobRegistry]
  * @property {{ get(slug: string): object | null }} [store]
+ * @property {{ contextHighPercent?: number }} [activityThresholds]
  */
 
 /**
@@ -128,6 +131,7 @@ export function registerSessionsRoutes(app, deps) {
     taskLedgerService,
     jobRegistry,
     store,
+    activityThresholds,
   } = deps || {};
   if (!runtimeStore || typeof runtimeStore.append !== "function") {
     throw new Error("registerSessionsRoutes: runtimeStore (with append) required");
@@ -379,15 +383,24 @@ export function registerSessionsRoutes(app, deps) {
     // Placeholder id for schema validation only — stripped before append so
     // the store can assign its own canonical evt_ id (see POST handler comment
     // above for the same dance).
+    const contextHighPercent = resolveContextHighPercent(activityThresholds);
+    const shouldWarnContextHigh =
+      contextUsageShape.value &&
+      typeof contextUsageShape.value.percent === "number" &&
+      contextUsageShape.value.percent >= contextHighPercent &&
+      contextUsageShape.value.source === "mcp";
+    const eventSource = contextUsageShape.value?.source === "mcp" ? "mcp" : "http";
+    const statusForEvent = shouldWarnContextHigh ? "context_high" : status;
+    const ts = new Date().toISOString();
     const eventForValidation = {
       schemaVersion: 1,
       id: makeRuntimeId("evt"),
-      ts: new Date().toISOString(),
+      ts,
       type: "session.status",
-      source: "http",
+      source: eventSource,
       workspace,
       sessionId,
-      status,
+      status: statusForEvent,
       ...(comment ? { comment } : {}),
       ...(contextUsageShape.value ? { contextUsage: contextUsageShape.value } : {}),
     };
@@ -409,11 +422,39 @@ export function registerSessionsRoutes(app, deps) {
       return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
     }
 
-    const session = projection.sessions.get(sessionId) || { id: sessionId, status };
+    let finalRev = appendResult.rev;
+    let warningEventId = null;
+    if (shouldWarnContextHigh) {
+      let warningEvent;
+      try {
+        warningEvent = createSessionWarningEvent({
+          sessionId,
+          workspace,
+          source: "mcp",
+          ts,
+          warning: contextHighWarning({
+            source: "mcp",
+            percent: contextUsageShape.value.percent,
+          }),
+        });
+      } catch (err) {
+        return sendError(res, 500, "CONTEXT_WARNING_FAILED", err.message || "failed to create context warning");
+      }
+      try {
+        const warningAppendResult = await runtimeStore.append(warningEvent);
+        finalRev = warningAppendResult.rev;
+        warningEventId = warningAppendResult.eventId;
+      } catch (err) {
+        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+      }
+    }
+
+    const session = projection.sessions.get(sessionId) || { id: sessionId, status: statusForEvent };
     res.status(200).json({
       session,
-      rev: appendResult.rev,
+      rev: finalRev,
       eventId: appendResult.eventId,
+      ...(warningEventId ? { warningEventId } : {}),
     });
   };
   if (tokenMiddleware) {
@@ -734,6 +775,17 @@ function validateContextUsage(value) {
     return { error: "`contextUsage` requires at least one of percent, used, or limit" };
   }
   return { value: output };
+}
+
+function resolveContextHighPercent(thresholds) {
+  const percent =
+    thresholds &&
+    typeof thresholds === "object" &&
+    typeof thresholds.contextHighPercent === "number"
+      ? thresholds.contextHighPercent
+      : DEFAULT_THRESHOLDS.contextHighPercent;
+  if (Number.isFinite(percent) && percent > 0 && percent <= 100) return percent;
+  return DEFAULT_THRESHOLDS.contextHighPercent;
 }
 
 function sendError(res, status, code, message, details) {

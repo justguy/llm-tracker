@@ -155,12 +155,13 @@ function handleSessionStatus(p, e) {
   if (!isSessionId(id)) return;
   const existing = p.sessions.get(id);
   if (!existing) return; // out-of-order / stale — ignore
+  const hasContextUsage = e.contextUsage && typeof e.contextUsage === "object";
   p.sessions.set(id, {
     ...existing,
     status: e.status,
     statusSource: { kind: e.source, eventId: e.id, eventType: e.type },
     lastActivityAt: e.ts,
-    ...(e.contextUsage && typeof e.contextUsage === "object" ? { contextUsage: { ...e.contextUsage } } : {}),
+    ...(hasContextUsage ? { contextUsage: { ...e.contextUsage }, lastStructuredEventAt: e.ts } : {}),
   });
 }
 

@@ -73,8 +73,7 @@ function contextUsageText(args) {
   if (Number.isFinite(args.percent)) bits.push(`percent=${args.percent}`);
   if (Number.isFinite(args.used)) bits.push(`used=${args.used}`);
   if (Number.isFinite(args.limit)) bits.push(`limit=${args.limit}`);
-  const source = nonEmptyString(args.source);
-  if (source) bits.push(`source=${source}`);
+  bits.push("source=mcp");
   return bits.length ? `context_usage: ${bits.join(", ")}` : "context_usage reported";
 }
 
@@ -265,21 +264,20 @@ export function createSessionTools(workspace, portFlag) {
       portFlag,
       "tracker_session_context_usage",
       "Report structured context usage for a session.",
-      (args) => Number.isFinite(args.percent) && args.percent >= 80 ? "context_high" : "active",
+      () => "active",
       contextUsageText,
       {
         percent: { type: "number", description: "Context usage percent" },
         used: { type: "number", description: "Optional used context units" },
         limit: { type: "number", description: "Optional maximum context units" },
-        source: optionalStringProperty("Optional usage source, such as mcp")
+        source: optionalStringProperty("Optional legacy field; recorded source is always mcp")
       },
       (args = {}) => {
         const contextUsage = {};
         if (Number.isFinite(args.percent)) contextUsage.percent = args.percent;
         if (Number.isFinite(args.used)) contextUsage.used = args.used;
         if (Number.isFinite(args.limit)) contextUsage.limit = args.limit;
-        const source = nonEmptyString(args.source);
-        if (source) contextUsage.source = source;
+        contextUsage.source = "mcp";
         return { contextUsage };
       }
     ),

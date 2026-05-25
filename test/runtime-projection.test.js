@@ -34,8 +34,8 @@ function sessionStarted({ sessionId, name = "S", tier = "codex_app_server", proj
   });
 }
 
-function sessionStatus({ sessionId, status = "active", ts = "2026-05-23T12:01:00Z", source = "adapter" } = {}) {
-  return baseEvent("session.status", { source, ts, sessionId, status });
+function sessionStatus({ sessionId, status = "active", ts = "2026-05-23T12:01:00Z", source = "adapter", contextUsage } = {}) {
+  return baseEvent("session.status", { source, ts, sessionId, status, ...(contextUsage ? { contextUsage } : {}) });
 }
 
 function sessionWarning({ sessionId, warning, ts = "2026-05-23T12:02:00Z" } = {}) {
@@ -152,6 +152,25 @@ test("session.warning appends and session.warning_cleared removes matching kind"
   p.apply(sessionWarningCleared({ sessionId: ses, warningKind: "approval_needed" }));
   [s] = p.toSnapshots().sessions;
   assert.equal(s.warnings.length, 1);
+});
+
+test("session.status with contextUsage updates lastStructuredEventAt", () => {
+  const p = new RuntimeProjection();
+  const ses = makeRuntimeId("ses");
+  p.apply(sessionStarted({ sessionId: ses }));
+  p.apply(
+    sessionStatus({
+      sessionId: ses,
+      source: "mcp",
+      ts: "2026-05-23T12:06:00Z",
+      status: "context_high",
+      contextUsage: { percent: 87, used: 87000, limit: 100000, source: "mcp" },
+    }),
+  );
+  const [s] = p.toSnapshots().sessions;
+  assert.equal(s.status, "context_high");
+  assert.equal(s.lastStructuredEventAt, "2026-05-23T12:06:00Z");
+  assert.deepEqual(s.contextUsage, { percent: 87, used: 87000, limit: 100000, source: "mcp" });
 });
 
 test("session.stopped sets status='stopped' + stoppedAt + reason/exitCode", () => {

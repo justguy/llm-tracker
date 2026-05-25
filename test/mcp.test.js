@@ -558,6 +558,29 @@ test("tracker_session_status forwards sessionToken to the running hub", async ()
       const acceptedPayload = JSON.parse(accepted.result.content[0].text);
       assert.equal(acceptedPayload.session.status, "quiet");
 
+      const usageBelow = await client.request("tools/call", {
+        name: "tracker_session_context_usage",
+        arguments: {
+          sessionId,
+          sessionToken,
+          percent: 84,
+          used: 84000,
+          limit: 100000
+        }
+      });
+      assert.notEqual(usageBelow.result.isError, true);
+      const usageBelowPayload = JSON.parse(usageBelow.result.content[0].text);
+      assert.equal(usageBelowPayload.session.status, "active");
+      assert.equal(usageBelowPayload.session.statusSource.kind, "mcp");
+      assert.deepEqual(usageBelowPayload.session.contextUsage, {
+        percent: 84,
+        used: 84000,
+        limit: 100000,
+        source: "mcp"
+      });
+      assert.equal(usageBelowPayload.session.lastStructuredEventAt, usageBelowPayload.session.lastActivityAt);
+      assert.deepEqual(usageBelowPayload.session.warnings, []);
+
       const usage = await client.request("tools/call", {
         name: "tracker_session_context_usage",
         arguments: {
@@ -565,19 +588,21 @@ test("tracker_session_status forwards sessionToken to the running hub", async ()
           sessionToken,
           percent: 85,
           used: 85000,
-          limit: 100000,
-          source: "mcp"
+          limit: 100000
         }
       });
       assert.notEqual(usage.result.isError, true);
       const usagePayload = JSON.parse(usage.result.content[0].text);
       assert.equal(usagePayload.session.status, "context_high");
+      assert.equal(usagePayload.session.statusSource.kind, "mcp");
       assert.deepEqual(usagePayload.session.contextUsage, {
         percent: 85,
         used: 85000,
         limit: 100000,
         source: "mcp"
       });
+      assert.equal(usagePayload.session.lastStructuredEventAt, usagePayload.session.lastActivityAt);
+      assert.deepEqual(usagePayload.session.warnings, [{ kind: "context_high", source: "mcp", percent: 85 }]);
     } finally {
       await client.close();
     }
