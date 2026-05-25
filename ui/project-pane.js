@@ -36,6 +36,11 @@ export function ProjectPane({
   const data = project?.data;
   const derived = project?.derived;
   const meta = data?.meta;
+  const projectName = meta?.name || slug;
+  const completeCount = derived?.counts?.complete || 0;
+  const totalCount = derived?.total || data?.tasks?.length || 0;
+  const pct = derived?.pct ?? (totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0);
+  const progressText = `${completeCount} of ${totalCount} task${totalCount === 1 ? "" : "s"} complete.`;
   const activeTask = openTaskId
     ? data?.tasks?.find((task) => task.id === openTaskId) || null
     : null;
@@ -45,6 +50,30 @@ export function ProjectPane({
       class=${`project-pane ${isActive ? "active" : ""} ${solo ? "solo" : ""}`}
       onMouseDown=${() => onFocus && onFocus(slug)}
     >
+      ${pinned
+        ? html`
+          <div class="project-pane-header">
+            <span class="project-pane-name" title=${projectName}>${projectName}</span>
+            <span class="project-pane-progress" title=${`${pct}% · ${progressText}`}>
+              <span class="project-pane-progress-pct">${pct}%</span>
+              <span class="project-pane-progress-text">${progressText}</span>
+            </span>
+            <button
+              class="icon-btn small"
+              type="button"
+              title="Unpin from workspace"
+              aria-label=${`Unpin ${projectName} from workspace`}
+              onMouseDown=${(e) => e.stopPropagation()}
+              onClick=${(e) => {
+                e.stopPropagation();
+                onTogglePin && onTogglePin(slug);
+              }}
+            >
+              [UNPIN]
+            </button>
+          </div>
+        `
+        : null}
       ${project?.error
         ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
         : null}

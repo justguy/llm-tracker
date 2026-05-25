@@ -23,6 +23,7 @@ For this repo specifically:
 - if MCP resources are available, prefer `tracker://help` for the contract and `tracker://workspace/runtime` for daemon + patch workflow details before rereading the full README
 - if MCP prompts are available, start with `tracker_start_here` and use the workflow prompts instead of inventing your own tool order
 - remember the MCP daemon rule: read tools work directly from workspace files; write tools (`tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, `tracker_reload`) require the hub or daemon to be reachable
+- treat `next` / `tracker_next` as project-scoped only: choose the slug explicitly first, and do not use or claim a recommended task whose `projectSlug` does not match the target project
 - remind agents to use `/help`, `next`, `search` or `fuzzy-search`, `brief`, `why`, `decisions`, `execute`, `verify`, `blockers`, `changed`, and `pick` before they fall back to broad file reads
 - if the human wants direct zero-token terminal shortcuts in Codex or Claude, use `llm-tracker shortcuts`; prompt/skill helpers still spend model tokens
 - when adding tasks through patch mode, only append genuinely open work; brand-new patch tasks must start as `not_started` or `in_progress`, not `complete` or `deferred`

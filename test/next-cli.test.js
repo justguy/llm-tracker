@@ -63,10 +63,14 @@ test("llm-tracker next renders ranked tasks from the hub", async () => {
 
     const next = runCli(["next", "test-project", "--path", workspace]);
     assert.equal(next.status, 0, next.stderr || next.stdout);
-    assert.match(next.stdout, /test-project/);
-    assert.match(next.stdout, /t1/);
+    assert.match(next.stdout, /project test-project/);
+    assert.match(next.stdout, /test-project\/t1/);
     assert.match(next.stdout, /ready/);
     assert.match(next.stdout, /explicit references available/);
+
+    const missingSlug = runCli(["next", "--path", workspace]);
+    assert.notEqual(missingSlug.status, 0);
+    assert.match(missingSlug.stderr, /Project slug is required/);
   } finally {
     stopDaemon(workspace);
     rmSync(workspace, { recursive: true, force: true });

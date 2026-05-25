@@ -30,7 +30,8 @@ export function renderProjectMode(mode, payload, onOpenTask, onPickTask) {
                   class="intel-action-btn warn"
                   onClick=${() => onPickTask && onPickTask(item.id)}
                   disabled=${!onPickTask}
-                >[PICK]</button>
+                  title="Claim this task and open its execution view"
+                >[CLAIM]</button>
               </div>
               <${BulletList} items=${item.reason || []} empty="no ranking notes" />
             </li>

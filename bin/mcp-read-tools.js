@@ -92,19 +92,31 @@ export function createReadTools(workspace) {
     },
     {
       name: "tracker_next",
-      description: "Return the ranked next-task shortlist for one project.",
+      description:
+        "Return the ranked next-task shortlist for one explicitly specified project. This tool is never workspace-global.",
       inputSchema: {
         type: "object",
         properties: {
-          slug: { type: "string", description: "Project slug" },
+          slug: {
+            type: "string",
+            description: "Required project slug. Do not call tracker_next without first choosing the project."
+          },
           limit: { type: "integer", minimum: 1, maximum: 5 }
         },
         required: ["slug"]
       },
-      handler: async (args = {}) =>
-        readToolPayload(getNextPayload, workspace, nonEmptyString(args.slug), {
+      handler: async (args = {}) => {
+        const slug = nonEmptyString(args.slug);
+        if (!slug) {
+          return makeTextResult(
+            "tracker_next requires an explicit project slug; it is project-scoped and never workspace-global.",
+            { isError: true }
+          );
+        }
+        return readToolPayload(getNextPayload, workspace, slug, {
           limit: clampInt(args.limit, { fallback: 5, min: 1, max: 5 })
-        })
+        });
+      }
     },
     {
       name: "tracker_search",

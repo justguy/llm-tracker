@@ -6,6 +6,16 @@ import { TaskInlineDrawer } from "./task-drawer.js";
 import { computeDropTargetIndex, taskMatchesBoardFilters } from "./board-models.js";
 import { Card, eventComesFromNestedControl } from "./task-card.js";
 
+export function laneIsEffectivelyCollapsed(lane, perSwimlane = {}) {
+  const per = perSwimlane?.[lane.id] || { counts: {}, total: 0 };
+  const allComplete = per.total > 0 && per.counts.complete === per.total;
+  return lane.collapsed !== undefined ? lane.collapsed : allComplete;
+}
+
+export function allSwimlanesCollapsed(swimlanes = [], perSwimlane = {}) {
+  return swimlanes.length > 0 && swimlanes.every((lane) => laneIsEffectivelyCollapsed(lane, perSwimlane));
+}
+
 export function Cell({
   slug,
   laneId,
@@ -157,6 +167,15 @@ export function Matrix({
   const swimlanes = project.data.meta.swimlanes;
   const priorities = project.data.meta.priorities;
   const blocked = project.derived?.blocked || {};
+  const perSwimlane = project.derived?.perSwimlane || {};
+  const lanesAllCollapsed = allSwimlanesCollapsed(swimlanes, perSwimlane);
+  const toggleAllCollapsed = !lanesAllCollapsed;
+  const toggleAllTitle = lanesAllCollapsed ? "Expand all swimlanes" : "Collapse all swimlanes";
+  const toggleAllIcon = lanesAllCollapsed ? "⊞" : "⊟";
+
+  const onToggleAllSwimlanes = () => {
+    for (const lane of swimlanes) onToggleCollapse(lane.id, toggleAllCollapsed);
+  };
 
   const byCell = useMemo(() => {
     const map = {};
@@ -169,8 +188,16 @@ export function Matrix({
   }, [project]);
 
   const headerRow = html`
-    <div class="hdr">
+    <div class="hdr hdr-swimlane">
       <span class="brand">swimlane</span>
+      <button
+        class="matrix-collapse-all-btn"
+        type="button"
+        title=${toggleAllTitle}
+        aria-label=${toggleAllTitle}
+        disabled=${swimlanes.length === 0}
+        onClick=${onToggleAllSwimlanes}
+      >${toggleAllIcon}</button>
     </div>
     ${priorities.map(
       (priority) => html`
@@ -186,11 +213,9 @@ export function Matrix({
     const laneIndex = swimlanes.findIndex((item) => item.id === lane.id);
     const canMoveUp = laneIndex > 0;
     const canMoveDown = laneIndex >= 0 && laneIndex < swimlanes.length - 1;
-    const per = project.derived?.perSwimlane?.[lane.id] || { counts: {}, pct: 0, total: 0 };
+    const per = perSwimlane[lane.id] || { counts: {}, pct: 0, total: 0 };
     const active = per.counts.in_progress || 0;
-    const allComplete = per.total > 0 && per.counts.complete === per.total;
-    const effectiveCollapsed =
-      lane.collapsed !== undefined ? lane.collapsed : allComplete;
+    const effectiveCollapsed = laneIsEffectivelyCollapsed(lane, perSwimlane);
 
     if (effectiveCollapsed) {
       const done = per.counts.complete || 0;

@@ -40,6 +40,27 @@ test("tracker_patch is exposed across MCP tools, runtime metadata, and prompts",
   }
 });
 
+test("tracker_next tool and prompt make project scope explicit", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-next-scope-");
+  try {
+    const tool = createTools(workspace).get("tracker_next");
+    assert.match(tool.description, /explicitly specified project/);
+    assert.match(tool.inputSchema.properties.slug.description, /Required project slug/);
+
+    const missingSlug = await tool.handler({});
+    assert.equal(missingSlug.isError, true);
+    assert.match(missingSlug.content[0].text, /explicit project slug/);
+
+    const startHere = getPrompt(workspace, "tracker_start_here");
+    assert.match(startHere.messages[0].content.text, /Choose the project slug explicitly/);
+
+    const pickNext = getPrompt(workspace, "tracker_pick_next", { slug: "test-project" });
+    assert.match(pickNext.messages[0].content.text, /do not use a recommendation from any other project/);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("tracker_patch validates required MCP arguments before attempting hub I/O", async () => {
   const workspace = setupWorkspace("llm-tracker-mcp-tools-validate-");
   try {

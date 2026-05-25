@@ -112,7 +112,8 @@ export function getPrompt(workspace, name, args = {}) {
           "2. Read resource `tracker://workspace/runtime` for daemon state, patch directory, and MCP write rules.",
           `3. MCP read tools do not require the daemon. MCP write tools ${WRITE_TOOL_NAMES.map((tool) => `\`${tool}\``).join(", ")} do require the hub or daemon.`,
           `4. If the hub is unavailable, file-mode patches go in \`${join(workspace, "patches")}\` as \`${patchExample}\`. Rejections create a sibling \`.errors.json\` file.`,
-          "5. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next`, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_pick` and `tracker_patch`, and finally `tracker_verify`."
+          "5. Choose the project slug explicitly before asking for next work; `tracker_next` is project-scoped and never workspace-global.",
+          "6. Preferred agent flow: `tracker_projects_status` or `tracker_project_status`, then `tracker_next` with that slug, then `tracker_brief` or `tracker_why`, then `tracker_execute`, then `tracker_pick` and `tracker_patch`, and finally `tracker_verify`."
         ].join("\n")
       );
     case "tracker_pick_next":
@@ -120,7 +121,7 @@ export function getPrompt(workspace, name, args = {}) {
         `Find the next task for ${slug} and claim it only if a write path is available.`,
         [
           `Use \`tracker_project_status\` for \`${slug}\` if you need a quick progress snapshot.`,
-          `Call \`tracker_next\` with \`${slug}\` to get the ranked shortlist.`,
+          `Call \`tracker_next\` with slug \`${slug}\` to get the ranked shortlist; do not use a recommendation from any other project.`,
           "Inspect the top recommendation and alternatives before choosing work.",
           `If the task should be claimed and the hub is reachable, call \`tracker_pick\` for \`${slug}\`.`,
           `If the hub is not reachable, do not pretend the claim succeeded. Use a patch file in \`${patchExample}\` instead.`

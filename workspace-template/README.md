@@ -76,7 +76,7 @@ When the tracker file lives inside a repo, durable tracker writes (anything othe
 - **Hub enforces** — task array order, task existence (no accidental deletion), human UI state (`meta.swimlanes[i].collapsed`), version stamps (`updatedAt`, `rev`).
 - **You write freely** — `status`, `assignee`, `dependencies`, `kind`, `parent_id`, `blocker_reason`, `context.*`, `placement.priorityId`, `placement.swimlaneId`, `meta.scratchpad`, new tasks.
 - **Patch-mode new tasks must start open** — when you append a brand-new task through Mode A or Mode B, use `not_started` or `in_progress`, not `complete` or `deferred`.
-- **When you need the next item**, prefer one call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker.
+- **When you need the next item**, choose the project slug explicitly, then prefer one project-scoped call to `GET /api/projects/<slug>/next?limit=5` or `llm-tracker next <slug>` instead of scanning the whole tracker. `next` is never workspace-global.
 - **When you need to confirm linked topology**, `GET /api/projects/<slug>` includes `file`, the effective tracker JSON path the hub will write.
 - **When the human asks a feature-shaped or fuzzy question**, prefer `GET /api/projects/<slug>/search?q=...` for semantic search or `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic lexical matching before rereading the full tracker.
 - **When you need focused task context**, prefer one call to `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>` instead of rereading docs and source files by hand.
@@ -148,7 +148,7 @@ If any is "no" or "unsure," ask the human before proceeding.
 
 ### Workflow
 
-1. **Start of a work burst** — call `GET /api/projects/<slug>/next?limit=5` (or `llm-tracker next <slug>`) to pick what is next. Read the full tracker only when you need broader context than the shortlist gives you.
+1. **Start of a work burst** — choose the project slug, then call `GET /api/projects/<slug>/next?limit=5` (or `llm-tracker next <slug>`) to pick what is next for that project. Read the full tracker only when you need broader context than the shortlist gives you.
 2. **During the burst** — write small patches constantly. No re-reading between writes. Each patch is self-contained.
 3. **At the next decision point** — read again if needed. Use `since/<last-rev>` to pull only what changed.
 
@@ -499,13 +499,14 @@ The shortlist is deterministic and capped at 5 tasks:
 
 - item 1 is the current recommendation
 - items 2-5 are ranked alternatives
+- every task repeats `project`, `projectSlug`, and `projectName`; do not use a recommendation whose project does not match the human's requested slug
 - each task includes `ready`, `blocked_kind`, `blocking_on`, `requires_approval`, normalized `references`, optional `effort`, freshness (`lastTouchedRev`), and `reason[]`
 - bounded executable tasks rank ahead of aggregate roadmap/container rows when both are otherwise actionable
 - active bounded work ranks ahead of starting a fresh bounded task
 
 Use this instead of scanning the whole tracker just to choose work.
 
-If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`.
+If MCP is configured, the matching tools are `tracker_projects_status`, `tracker_project_status`, `tracker_next`, `tracker_search`, `tracker_fuzzy_search`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_blockers`, `tracker_changed`, `tracker_history`, `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload`. `tracker_next` requires an explicit `slug`; it is never global across projects.
 
 Daemon rule:
 
@@ -819,7 +820,7 @@ On success, the response is authoritative immediately and includes the accepted 
 
 ## 9. How to claim work
 
-1. Call `GET /api/projects/<slug>/next?limit=5` or run `llm-tracker next <slug>`.
+1. Choose the target project slug, then call `GET /api/projects/<slug>/next?limit=5` or run `llm-tracker next <slug>`. Do not claim or brief a task from a different project.
 2. If you need focused context before claiming, call `GET /api/projects/<slug>/tasks/<taskId>/brief` or `llm-tracker brief <slug> <taskId>`.
 3. If you need to justify the task before touching it, call `GET /api/projects/<slug>/tasks/<taskId>/why` or `llm-tracker why <slug> <taskId>`.
 4. If you are about to implement, call `GET /api/projects/<slug>/tasks/<taskId>/execute` or `llm-tracker execute <slug> <taskId>`.
@@ -994,7 +995,7 @@ Error shape:
 | `llm-tracker fuzzy-search <slug> <query> [--json] [--limit N]` | Deterministic fuzzy lexical search.                                      |    **yes**   |
 | `llm-tracker reload [<slug>] [--json]`                    | Reload one or all tracker files from disk into the running hub.               |    **yes**   |
 | `llm-tracker pick <slug> [<taskId>] [--assignee ID] [--force] [--json]` | Atomically claim a task; defaults to the top ready task.         |    **yes**   |
-| `llm-tracker next <slug> [--json] [--limit N]`            | Ranked shortlist of the next 1-5 tasks.                                       |    **yes**   |
+| `llm-tracker next <slug> [--json] [--limit N]`            | Project-scoped ranked shortlist of the next 1-5 tasks.                        |    **yes**   |
 | `llm-tracker since <slug> <rev> [--json]`                 | Events since the given rev.                                                   |    **yes**   |
 | `llm-tracker rollback <slug> <rev>`                       | Roll back to a prior rev (human-only).                                        |    **yes**   |
 | `llm-tracker link <slug> <abs-path>`                      | Symlink an external tracker (Option C).                                       |    **yes**   |

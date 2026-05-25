@@ -140,7 +140,7 @@ test("buildHeroReason composes readiness, priority, deps, status, and approvals"
 
 test("loadNextRecommendation reads the ranked shortlist and maps errors", async () => {
   let requestedUrl = "";
-  const payload = { next: [{ id: "t23" }] };
+  const payload = { projectSlug: "llm-tracker", next: [{ id: "t23" }] };
 
   const body = await loadNextRecommendation("llm-tracker", async (url) => {
     requestedUrl = url;
@@ -157,6 +157,16 @@ test("loadNextRecommendation reads the ranked shortlist and maps errors", async 
   await assert.rejects(
     () =>
       loadNextRecommendation("llm-tracker", async () => ({
+        ok: true,
+        statusText: "OK",
+        json: async () => ({ projectSlug: "other-project", next: [{ id: "t23" }] })
+      })),
+    /Recommendation project mismatch/
+  );
+
+  await assert.rejects(
+    () =>
+      loadNextRecommendation("llm-tracker", async () => ({
         ok: false,
         statusText: "Bad Request",
         json: async () => ({ error: "ranking offline" })
@@ -165,7 +175,7 @@ test("loadNextRecommendation reads the ranked shortlist and maps errors", async 
   );
 });
 
-test("HeroStripView renders the recommended task and wires PICK and READ actions", () => {
+test("HeroStripView renders the recommended task and wires CLAIM and READ actions", () => {
   const calls = [];
   const vnode = HeroStripView({
     summary: heroSummary(),
@@ -184,9 +194,11 @@ test("HeroStripView renders the recommended task and wires PICK and READ actions
   assert.match(text, /94/);
   assert.match(text, /49 of 56 tasks complete/);
   assert.match(text, /Build hero strip/);
+  assert.match(text, /RECOMMENDED NEXT · llm-tracker/);
+  assert.match(text, /llm-tracker\/t23/);
   assert.match(text, /highest-ranked ready task · p0 · dependencies satisfied/);
 
-  const pickBtn = findButtonByLabel(vnode, "PICK");
+  const pickBtn = findButtonByLabel(vnode, "CLAIM");
   const readBtn = findButtonByLabel(vnode, "READ");
   assert.ok(pickBtn);
   assert.ok(readBtn);
@@ -202,7 +214,7 @@ test("HeroStripView renders the recommended task and wires PICK and READ actions
   ]);
 });
 
-test("HeroStripView disables stale PICK and READ actions while loading", () => {
+test("HeroStripView disables stale CLAIM and READ actions while loading", () => {
   const calls = [];
   const vnode = HeroStripView({
     summary: heroSummary(),
@@ -222,7 +234,7 @@ test("HeroStripView disables stale PICK and READ actions while loading", () => {
   assert.doesNotMatch(text, /Stale task/);
   assert.doesNotMatch(text, /old-task/);
 
-  const pickBtn = findButtonByLabel(vnode, "PICK");
+  const pickBtn = findButtonByLabel(vnode, "CLAIM");
   const readBtn = findButtonByLabel(vnode, "READ");
   assert.ok(pickBtn);
   assert.ok(readBtn);

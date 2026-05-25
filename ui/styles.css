@@ -1550,26 +1550,80 @@ body {
 .project-pane:last-child { border-right: none; }
 .project-pane.solo { flex: 0 0 50%; min-width: 480px; }
 .workspace-split.has-solo { justify-content: flex-start; }
-.project-pane.active .project-pane-header { border-bottom-color: var(--amber); }
+.project-pane.active .project-pane-header {
+  background: #5a3518;
+  border-bottom-color: #b97832;
+  color: #fff;
+}
 
 .project-pane-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   padding: 8px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--hairline-strong);
+  cursor: pointer;
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
 }
-.project-pane-name { color: var(--ink-2); font-weight: 700; }
-.project-pane-slug { color: var(--muted); font-size: 10px; }
+.project-pane-name {
+  color: var(--ink-2);
+  font-weight: 700;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-pane-progress {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.project-pane-progress-pct {
+  color: var(--green);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.project-pane-progress-text {
+  color: var(--muted);
+  font-size: 10.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .project-pane-header .icon-btn.small {
   margin-left: auto;
   padding: 2px 6px;
   font-size: 10px;
+  flex-shrink: 0;
+}
+.project-pane.active .project-pane-name,
+.project-pane.active .project-pane-progress,
+.project-pane.active .project-pane-progress-pct,
+.project-pane.active .project-pane-progress-text {
+  color: #fff;
+}
+.project-pane.active .project-pane-header .icon-btn.small {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.08);
+}
+.project-pane.active .project-pane-header .icon-btn.small:hover,
+.project-pane.active .project-pane-header .icon-btn.small:focus-visible {
+  color: #fff;
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* Pin toggle inside drawer rows */
@@ -1625,6 +1679,12 @@ body {
   justify-content: space-between;
   gap: 10px;
 }
+.matrix .hdr-swimlane {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .matrix .hdr-priority .label { color: var(--white); letter-spacing: 0.12em; }
 .matrix .hdr-priority .brand { color: var(--ink-3); }
 .matrix .hdr-priority.p0 { border-top: 2px solid var(--priority-p0); }
@@ -1635,6 +1695,33 @@ body {
 .matrix .hdr-priority.p2 .label { color: var(--priority-p2); }
 .matrix .hdr-priority.p3 { border-top: 2px solid var(--priority-p3); }
 .matrix .hdr-priority.p3 .label { color: var(--priority-p3); }
+
+.matrix-collapse-all-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  color: var(--amber);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+.matrix-collapse-all-btn:hover,
+.matrix-collapse-all-btn:focus-visible {
+  background: var(--amber-soft);
+  border-color: var(--amber);
+  outline: none;
+}
+.matrix-collapse-all-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 
 .matrix .lane-cell {
   position: sticky;
@@ -2771,11 +2858,13 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 /* ─── Hero strip (t23) ─── */
 .hero-strip {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) 340px;
+  grid-template-columns: minmax(0, 0.75fr) minmax(320px, 0.8fr) minmax(460px, 1.05fr);
+  height: 148px;
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
   flex-shrink: 0;
   margin: 1px 0;
+  overflow: hidden;
 }
 
 .hero-col {
@@ -2951,12 +3040,26 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 1.2px;
   font-weight: 600;
   color: var(--ok);
   text-transform: uppercase;
+  min-width: 0;
+}
+
+.hero-next__head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-next__head span:last-child {
+  flex-shrink: 0;
+  max-width: 46%;
 }
 
 .hero-next__title {
@@ -2965,6 +3068,10 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   font-weight: 600;
   color: var(--ink);
   line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .hero-next__reason {
@@ -2983,11 +3090,11 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   gap: 8px;
   align-items: center;
   margin-top: auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .hero-next__actions .bracket {
-  min-height: 30px;
+  min-height: 26px;
   border-color: var(--ok-border-btn);
 }
 
@@ -3018,6 +3125,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 @media (max-width: 1080px) {
   .hero-strip {
     grid-template-columns: 1fr;
+    height: auto;
   }
 
   .hero-col + .hero-col {
@@ -3477,7 +3585,8 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
 }
 
 .lane-row__stats {
-  display: flex;
+  display: grid;
+  grid-template-columns: 92px 92px 92px minmax(160px, 1fr) 42px auto;
   align-items: center;
   gap: 14px;
   font-family: var(--font-mono);
@@ -3485,10 +3594,11 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   color: var(--ink-3);
   min-width: 0;
 }
+.lane-row__stats > span {
+  white-space: nowrap;
+}
 
 .lane-row__progress {
-  flex: 1;
-  margin-left: 10px;
   height: 4px;
   background: var(--rule-soft);
   position: relative;

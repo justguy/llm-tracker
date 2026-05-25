@@ -359,9 +359,18 @@ test("tracker_next returns deterministic ranking over stdio MCP", async () => {
 
     assert.notEqual(next.result.isError, true);
     const payload = JSON.parse(next.result.content[0].text);
+    assert.equal(payload.projectSlug, "test-project");
     assert.equal(payload.recommendedTaskId, "t1");
+    assert.equal(payload.next[0].projectSlug, "test-project");
     assert.equal(payload.next[0].id, "t1");
     assert.equal(payload.next[1].id, "t2");
+
+    const missingSlug = await client.request("tools/call", {
+      name: "tracker_next",
+      arguments: {}
+    });
+    assert.equal(missingSlug.result.isError, true);
+    assert.match(missingSlug.result.content[0].text, /explicit project slug/);
   } finally {
     await client.close();
     rmSync(workspace, { recursive: true, force: true });

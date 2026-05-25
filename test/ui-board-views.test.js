@@ -5,9 +5,11 @@ import {
   buildDependencyGraphModel,
   buildTreeModel,
   Card,
+  allSwimlanesCollapsed,
   collectTreeCollapseIds,
   computeDropTargetIndex,
   eventComesFromNestedControl,
+  laneIsEffectivelyCollapsed,
 } from "../ui/board-views.js";
 import { validProject } from "./fixtures.js";
 
@@ -103,6 +105,31 @@ test("computeDropTargetIndex maps filtered drops into full destination order", (
   );
 });
 
+test("swimlane collapse helpers include completed lane default collapse state", () => {
+  const swimlanes = [
+    { id: "done" },
+    { id: "open" },
+    { id: "manual" },
+  ];
+  const perSwimlane = {
+    done: { counts: { complete: 2 }, total: 2 },
+    open: { counts: { complete: 1 }, total: 3 },
+    manual: { counts: {}, total: 0 },
+  };
+
+  assert.equal(laneIsEffectivelyCollapsed(swimlanes[0], perSwimlane), true);
+  assert.equal(laneIsEffectivelyCollapsed(swimlanes[1], perSwimlane), false);
+  assert.equal(laneIsEffectivelyCollapsed({ ...swimlanes[2], collapsed: true }, perSwimlane), true);
+  assert.equal(allSwimlanesCollapsed(swimlanes, perSwimlane), false);
+  assert.equal(
+    allSwimlanesCollapsed(
+      swimlanes.map((lane) => ({ ...lane, collapsed: true })),
+      perSwimlane
+    ),
+    true
+  );
+});
+
 test("Card Enter and Space key handlers ignore nested controls", () => {
   const task = {
     id: "t1",
@@ -156,4 +183,6 @@ test("drawer mounts carry activeTaskMode and collapsed lane actions stop keydown
   assert.equal(initialModeCount, 4);
   assert.match(matrixSource, /class="lane-row__actions"[\s\S]*onKeyDown=\$\{\(e\) => e\.stopPropagation\(\)\}/);
   assert.match(matrixSource, /eventComesFromNestedControl\(e\)[\s\S]*onToggleCollapse\(lane\.id, false\)/);
+  assert.match(matrixSource, /class="matrix-collapse-all-btn"/);
+  assert.match(matrixSource, /const toggleAllIcon = lanesAllCollapsed \? "⊞" : "⊟"/);
 });

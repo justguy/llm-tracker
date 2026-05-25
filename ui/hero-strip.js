@@ -4,10 +4,14 @@ import { buildHeroReason, buildHeroSummary } from "./lib/hero-strip.js";
 import { Bracket } from "./primitives.js";
 
 export async function loadNextRecommendation(slug, fetchImpl = fetch) {
-  const res = await fetchImpl(`/api/projects/${slug}/next?limit=1`);
+  const res = await fetchImpl(`/api/projects/${encodeURIComponent(slug)}/next?limit=1`);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(body.error || res.statusText || "request failed");
+  }
+  const returnedProject = body.projectSlug || body.project;
+  if (returnedProject && returnedProject !== slug) {
+    throw new Error(`Recommendation project mismatch: expected ${slug}, got ${returnedProject}`);
   }
   return body;
 }
@@ -38,6 +42,7 @@ export function HeroStripView({
         : "No ready task is available from the current ranking.";
   const nextTaskId = nextLoading ? "—" : nextTask?.id || "—";
   const actionsDisabled = nextLoading || !nextTask;
+  const projectLabel = summary.projectName || slug;
 
   return html`
     <div class="hero-strip">
@@ -67,18 +72,18 @@ export function HeroStripView({
       <div class="hero-col hero-col--next">
         <div class="hero-next">
           <div class="hero-next__head">
-            <span>★ RECOMMENDED NEXT</span>
-            <span>${nextTaskId}</span>
+            <span>★ RECOMMENDED NEXT · ${projectLabel}</span>
+            <span>${`${slug}/${nextTaskId}`}</span>
           </div>
           <div class="hero-next__title">${nextTitle}</div>
           <div class="hero-next__reason">${nextReason}</div>
           <div class="hero-next__actions">
             <${Bracket}
-              label="PICK"
+              label="CLAIM"
               active
               tone="ok"
               disabled=${actionsDisabled}
-              title=${actionsDisabled ? "Recommendation is not ready to pick" : "Claim the recommended task"}
+              title=${actionsDisabled ? "Recommendation is not ready to claim" : "Claim the recommended task and open its execution view"}
               onClick=${() => !actionsDisabled && onPickTask && onPickTask(slug, nextTask.id)}
             />
             <${Bracket}

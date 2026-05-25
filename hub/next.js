@@ -66,6 +66,7 @@ function sortSummaries(a, b) {
 
 export function buildNextPayload({ slug, data, history = [], limit = 5, now = new Date().toISOString() }) {
   const context = buildProjectTaskContext({ data, history });
+  const projectName = data?.meta?.name || slug;
 
   const summaries = (data?.tasks || [])
     .filter((task) => task.status === "not_started" || task.status === "in_progress")
@@ -80,12 +81,17 @@ export function buildNextPayload({ slug, data, history = [], limit = 5, now = ne
     .slice(0, Math.max(1, Math.min(limit, 5)));
 
   const ranked = summaries.map((summary, index) => ({
+    project: slug,
+    projectSlug: slug,
+    projectName,
     ...summary,
     reason: buildReason(summary, index)
   }));
 
   return {
     project: slug,
+    projectSlug: slug,
+    projectName,
     rev: context.currentRev,
     generatedAt: now,
     recommendedTaskId: ranked[0]?.id ?? null,

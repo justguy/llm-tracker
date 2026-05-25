@@ -41,10 +41,14 @@ test("buildNextPayload ranks ready tasks before blocked tasks and normalizes leg
   });
 
   assert.equal(payload.recommendedTaskId, "t1");
+  assert.equal(payload.projectSlug, "test-project");
+  assert.equal(payload.projectName, "Test Project");
   assert.deepEqual(
     payload.next.map((task) => task.id),
     ["t1", "t4", "t2"]
   );
+  assert.equal(payload.next[0].projectSlug, "test-project");
+  assert.equal(payload.next[0].projectName, "Test Project");
   assert.deepEqual(payload.next[0].references, ["hub/store.js:1-20"]);
   assert.equal(payload.next[0].ready, true);
   assert.equal(payload.next[0].lastTouchedRev, 10);

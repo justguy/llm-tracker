@@ -10,7 +10,7 @@ Stop forcing your LLMs to re-read and rewrite massive architecture files just to
 
 It's a file-system-as-database tracker. Your LLMs update project states with tiny HTTP or file-based patches, and the local hub renders a live, **calm terminal-style** priority matrix so you can see exactly what your agents are doing at a glance.
 
-When an agent needs to answer "what should I do next?", it can now make one call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next` and get a ranked shortlist instead of re-reading the full tracker. The ranking prefers bounded actionable work over aggregate roadmap/container rows, and prefers continuing active bounded work over starting a fresh bounded task.
+When an agent needs to answer "what should I do next?", it must first choose the project slug, then make one project-scoped call to `npx llm-tracker next <slug>` or `GET /api/projects/<slug>/next`. The ranked shortlist repeats the project on every task so recommendations cannot be confused across projects. The ranking prefers bounded actionable work over aggregate roadmap/container rows, and prefers continuing active bounded work over starting a fresh bounded task.
 
 When a human or agent asks "what about the feature with the..." instead of naming a task id, the hub now exposes both `GET /api/projects/<slug>/search?q=...` for local embedding-backed semantic search and `GET /api/projects/<slug>/fuzzy-search?q=...` for deterministic fuzzy lexical matching. Both modes are reachable from the UI through the global `⌘K` command palette (prefix `~` for fuzzy, `?` for semantic).
 
@@ -25,7 +25,7 @@ When an agent needs the current contract for a running hub, it should call `GET 
 The UI exposes the same deterministic loop for humans through the refined Variant A2 layout:
 
 - **Top bar** — project name with `▾` quick-switch, rev badge, `agent` cluster (`[NEXT]`, `[BLOCKERS]`, `[CHANGED]`, `[DECISIONS]`), `history` cluster (`[UNDO]`, `[REDO]`), the `⌘K` palette input, and a `⋯` overflow menu for retired actions (collapse/expand all lanes, open overview, settings, help, theme toggle, delete project).
-- **Hero strip** — big progress headline, 2×3 status grid, and a green *Recommended Next* callout with `[PICK]` and `[READ]` buttons sourced from `/next?limit=1`.
+- **Hero strip** — big progress headline, 2×3 status grid, and a green project-labeled *Recommended Next* callout with `[CLAIM]` and `[READ]` buttons sourced from `/api/projects/<slug>/next?limit=1`.
 - **One-line scratchpad** — a `NOTE` row with `[EXPAND]` to read the full note and `[EDIT]` for an inline textarea (`cmd+enter` saves).
 - **Swimlane/tree/graph view toggle** — the filter row includes `[SWIMLANE]`, `[TREE]`, and `[GRAPH]`; tree view uses explicit `kind: "group"` / `parent_id` hierarchy when present and falls back to swimlanes as top-level groups.
 - **Dependency graph view** — a derived UI projection over existing `dependencies[]` blocker edges. It does not add schema or data fields, and its optional `[CONTAINMENT]` overlay draws `parent_id` tree/group edges as a visual aid only.
@@ -264,7 +264,7 @@ npx llm-tracker changed <slug> <rev>   # changed tasks since a rev
 npx llm-tracker search <slug> <query>  # semantic local-model search (requires hub)
 npx llm-tracker fuzzy-search <slug> <query>  # deterministic fuzzy lexical search (requires hub)
 npx llm-tracker pick <slug> [task-id] --assignee codex  # atomic claim, defaults to top ready task
-npx llm-tracker next <slug> [--limit 5]  # ranked shortlist: recommendation + alternatives
+npx llm-tracker next <slug> [--limit 5]  # project-scoped ranked shortlist: recommendation + alternatives
 npx llm-tracker since <slug> <rev>  # event log since a rev (for LLMs to catch up)
 npx llm-tracker rollback <slug> <rev>
 npx llm-tracker link <slug> <abs-path>  # symlink an external tracker into the workspace
@@ -385,7 +385,7 @@ This project ships a stdio MCP server via `llm-tracker mcp`.
 Use the workspace contract first, then the narrowest interface that fits:
 
 - read `GET /help` or `tracker_help` first for the active workspace contract
-- use `tracker_next`, `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_search`, and `tracker_fuzzy_search` for focused reads
+- use `tracker_next` only after choosing an explicit project slug; use `tracker_brief`, `tracker_why`, `tracker_decisions`, `tracker_execute`, `tracker_verify`, `tracker_search`, and `tracker_fuzzy_search` for focused project reads
 - use `tracker_patch`, `tracker_pick`, `tracker_undo`, `tracker_redo`, and `tracker_reload` through the running hub for authoritative writes
 
 Register the server in your client config instead of launching it manually:

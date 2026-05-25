@@ -627,7 +627,7 @@ Usage:
   llm-tracker pick <slug> [<taskId>] [--assignee ID]   Claim a task atomically (requires hub)
   llm-tracker session attach --project <slug> --task <taskId> --agent <id> [--cwd <path>] [--repo-root <path>] [--worktree <path>]
                                                         Attach a manual session and print token contract (requires hub)
-  llm-tracker next <slug> [--json] [--limit N]         Print ranked next tasks (requires hub)
+  llm-tracker next <slug> [--json] [--limit N]         Print project-scoped ranked next tasks (requires hub)
   llm-tracker since <slug> [<rev>] [--json]            Print events since rev (requires hub running)
   llm-tracker rollback <slug> <rev>                    Roll a project back to a prior rev (requires hub)
   llm-tracker restore <slug> [--rev <rev>]             Restore a deleted project from its snapshot (requires hub)

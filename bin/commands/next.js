@@ -1,9 +1,10 @@
 import { ensureHubResponse, parseLimit } from "./shared.js";
 
-function formatTask(task, index) {
+function formatTask(task, index, projectSlug) {
   const lines = [];
   const readiness = task.ready ? "ready" : task.blocked_kind || "not_ready";
-  const identity = `  ${index + 1}. ${task.id}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${readiness}`;
+  const scopedId = `${task.projectSlug || task.project || projectSlug}/${task.id}`;
+  const identity = `  ${index + 1}. ${scopedId}  ${task.priorityId || "p?"}  ${task.swimlaneId || "?"}  ${readiness}`;
   lines.push(identity);
   lines.push(`     ${task.title}`);
 
@@ -27,6 +28,7 @@ export async function cmdNext(args, { resolveWorkspace, httpRequest }) {
   const slug = args._[1];
   if (!slug) {
     console.error("Usage: llm-tracker next <slug> [--json] [--limit N]");
+    console.error("Project slug is required; next is project-scoped and never workspace-global.");
     process.exit(1);
   }
 
@@ -45,12 +47,14 @@ export async function cmdNext(args, { resolveWorkspace, httpRequest }) {
     return;
   }
 
-  console.log(`  ${body.project}  rev ${body.rev ?? "?"}  generated ${body.generatedAt}`);
+  const projectSlug = body.projectSlug || body.project || slug;
+  const projectName = body.projectName && body.projectName !== projectSlug ? `  ${body.projectName}` : "";
+  console.log(`  project ${projectSlug}${projectName}  rev ${body.rev ?? "?"}  generated ${body.generatedAt}`);
   if (!body.next || body.next.length === 0) {
     console.log("  no active tasks");
     return;
   }
   for (const [index, task] of body.next.entries()) {
-    console.log(formatTask(task, index));
+    console.log(formatTask(task, index, projectSlug));
   }
 }
