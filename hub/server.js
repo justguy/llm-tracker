@@ -17,6 +17,7 @@ import chokidar from "chokidar";
 import { WebSocketServer } from "ws";
 import { buildTrackerErrorBody } from "./error-payload.js";
 import { registerAttentionRoutes } from "./api/attention.js";
+import { createTimelineAppendBatcher, registerTimelineRoutes } from "./api/timeline.js";
 import { registerSessionsRoutes } from "./api/sessions.js";
 import { registerJobsRoutes } from "./api/jobs.js";
 import { registerRunSessionRoutes } from "./api/run-session.js";
@@ -256,6 +257,9 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   const runtimeStartup = await rebuildRuntimeFromDisk({ workspaceRoot: workspace, projection: runtimeProjection });
   const runtimePaths = makePaths({ workspaceRoot: workspace });
   const runtimeBroadcaster = new RuntimeBroadcaster();
+  const timelineAppendBatcher = createTimelineAppendBatcher({
+    broadcastTimeline: (payload) => runtimeBroadcaster.broadcastTimeline(payload),
+  });
   const attentionEngine = new AttentionEngine({
     onChange: ({ items, scope }) => runtimeBroadcaster.broadcastAttention({ items, scope }),
   });
@@ -322,6 +326,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       runtimeProjection.apply(event);
       lastRuntimeEventId = event.id;
       runtimeBroadcaster.handleAppend(event);
+      timelineAppendBatcher.handleAppend(event);
       if (!attentionEngine.applyRuntimeEvent(event)) {
         recomputeAttention();
       }
@@ -603,6 +608,13 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     store,
     activityThresholds: workspaceConfig.resolved.sessionHub.activity,
     attach: workspaceConfig.resolved.sessionHub.attach
+  });
+  registerTimelineRoutes(app, {
+    projection: runtimeProjection,
+    getRuntimeEvents: async () => {
+      const jsonl = await readJsonlLines(runtimePaths.runtimeEvents);
+      return jsonl.events;
+    }
   });
   registerJobsRoutes(app, {
     jobRegistry,
@@ -1322,6 +1334,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     clearInterval(linkedTargetsPollTimer);
     clearInterval(runSessionDraftSweepTimer);
     activityMonitorClosed = true;
+    timelineAppendBatcher.close();
     clearInterval(activityMonitorIntervalTimer);
     if (activityTickTimer) {
       clearTimeout(activityTickTimer);
@@ -1382,6 +1395,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       clearInterval(linkedTargetsPollTimer);
       clearInterval(runSessionDraftSweepTimer);
       activityMonitorClosed = true;
+      timelineAppendBatcher.close();
       clearInterval(activityMonitorIntervalTimer);
       if (activityTickTimer) {
         clearTimeout(activityTickTimer);
@@ -1444,6 +1458,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     runtimeBroadcaster,
     attentionEngine,
     jobRegistry,
+    timelineAppendBatcher,
     close: () => closeHub({ exit: false })
   };
 }

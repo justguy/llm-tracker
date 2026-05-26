@@ -145,6 +145,33 @@ export class RuntimeBroadcaster {
   }
 
   /**
+   * Broadcast new timeline projection items for one session (SH-4A-03).
+   *
+   * @param {{ sessionId: string, items: object[] }} payload
+   * @returns {void}
+   */
+  broadcastTimeline({ sessionId, items } = {}) {
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      throw new TypeError(
+        "RuntimeBroadcaster.broadcastTimeline: sessionId must be a non-empty string",
+      );
+    }
+    if (!Array.isArray(items)) {
+      throw new TypeError(
+        "RuntimeBroadcaster.broadcastTimeline: items must be an array",
+      );
+    }
+    if (items.length === 0) return;
+    const wire = JSON.stringify({
+      type: "timeline.appended",
+      sessionId,
+      items,
+      itemCount: items.length,
+    });
+    this.#fanout(wire);
+  }
+
+  /**
    * Plug-in for `RuntimeStore.onAppend`. The store awaits this hook before
    * resolving its append, so we keep this synchronous (broadcast() returns
    * void) to honour the O(1)-per-client guarantee.

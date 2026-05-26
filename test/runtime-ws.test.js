@@ -242,6 +242,33 @@ test("handleAppend forwards to broadcast (RuntimeStore plug-in shape)", { timeou
   assert.equal(sent[1].event.id, "evt_x");
 });
 
+test("broadcastTimeline sends timeline.appended with itemCount", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const broadcaster = new RuntimeBroadcaster();
+  const { ws, sent } = makeFakeWs();
+  await broadcaster.subscribe(ws, () => ({ initial: true }));
+  const items = [
+    {
+      id: "tl_1",
+      sessionId: "ses_01ksd83zzzzzzzzzzzzzzzzzzz",
+      kind: "status",
+      title: "Session running",
+      ts: "2026-05-24T12:00:00.000Z",
+      source: "mcp",
+      confidence: "structured",
+      evidenceRef: "evt_01ksd83zzzzzzzzzzzzzzzzzzz",
+    },
+  ];
+  broadcaster.broadcastTimeline({
+    sessionId: "ses_01ksd83zzzzzzzzzzzzzzzzzzz",
+    items,
+  });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].type, "timeline.appended");
+  assert.equal(sent[1].sessionId, "ses_01ksd83zzzzzzzzzzzzzzzzzzz");
+  assert.equal(sent[1].itemCount, 1);
+  assert.deepEqual(sent[1].items, items);
+});
+
 test("constructor rejects invalid options", { timeout: TEST_TIMEOUT_MS }, () => {
   assert.throws(() => new RuntimeBroadcaster({ slowClientPolicy: "kill" }), /slowClientPolicy/);
   assert.throws(
