@@ -8,9 +8,13 @@ import { createTools } from "../bin/mcp-tools.js";
 import {
   JOB_MUTATION_TOOL_NAMES,
   JOB_TOOL_NAMES,
+  SESSION_BOOTSTRAP_TOOL_NAMES,
+  SESSION_TOKEN_REQUIRED_TOOL_NAMES,
+  SESSION_TOKEN_MUTATION_TOOL_NAMES,
   SKILL_MUTATION_TOOL_NAMES,
   SKILL_TOOL_NAMES,
   SESSION_TOOL_NAMES,
+  WORKSPACE_WRITE_TOOL_NAMES,
   workspaceRuntimePayload
 } from "../bin/mcp-context-data.js";
 import { getPrompt } from "../bin/mcp-prompts.js";
@@ -109,7 +113,7 @@ test("tracker_patch validates required MCP arguments before attempting hub I/O",
   }
 });
 
-test("tracker_session_* tools are registered with sessionToken arguments", () => {
+test("tracker_session_* tools distinguish bootstrap from token-validated mutations", () => {
   const workspace = setupWorkspace("llm-tracker-mcp-tools-session-");
   try {
     const tools = createTools(workspace);
@@ -117,11 +121,82 @@ test("tracker_session_* tools are registered with sessionToken arguments", () =>
       const tool = tools.get(name);
       assert.ok(tool, `${name} should be registered`);
       assert.equal(tool.inputSchema.type, "object");
+    }
+    for (const name of SESSION_BOOTSTRAP_TOOL_NAMES) {
+      const tool = tools.get(name);
+      assert.ok(tool, `${name} should be registered`);
+      assert.equal(tool.inputSchema.properties.sessionToken, undefined, `${name} issues the initial token`);
+    }
+    for (const name of SESSION_TOKEN_MUTATION_TOOL_NAMES) {
+      const tool = tools.get(name);
       assert.ok(tool.inputSchema.properties.sessionToken, `${name} should carry sessionToken`);
+      assert.ok(tool.inputSchema.required.includes("sessionToken"), `${name} should require sessionToken`);
     }
 
     const runtime = workspaceRuntimePayload(workspace);
     assert.deepEqual(runtime.daemonRule.sessionTools, SESSION_TOOL_NAMES);
+    assert.deepEqual(runtime.daemonRule.sessionBootstrapTools, SESSION_BOOTSTRAP_TOOL_NAMES);
+    assert.deepEqual(runtime.daemonRule.sessionTokenMutationTools, SESSION_TOKEN_MUTATION_TOOL_NAMES);
+    assert.deepEqual(runtime.daemonRule.sessionTokenRequiredTools, [
+      ...SESSION_TOKEN_MUTATION_TOOL_NAMES,
+      ...JOB_MUTATION_TOOL_NAMES,
+      ...SKILL_MUTATION_TOOL_NAMES
+    ]);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-token-required-");
+  try {
+    const tools = createTools(workspace);
+    const sessionId = "ses_01h2x3y4z5a6b7c8d9e0f1g2h3";
+    const jobId = "job_01h2x3y4z5a6b7c8d9e0f1g2h3";
+    const skillRunId = "skr_01h2x3y4z5a6b7c8d9e0f1g2h3";
+    const argsByName = {
+      tracker_session_heartbeat: { sessionId },
+      tracker_session_status: { sessionId, status: "active" },
+      tracker_session_note: { sessionId, note: "note" },
+      tracker_session_blocked: { sessionId, reason: "blocked" },
+      tracker_session_handoff: { sessionId, summary: "handoff" },
+      tracker_session_context_usage: { sessionId, percent: 80 },
+      tracker_session_complete: { sessionId, summary: "done" },
+      tracker_session_broadcast: { sessionId, message: "broadcast" },
+      tracker_job_start: {
+        projectSlug: "test-project",
+        taskId: "t-001",
+        sessionId,
+        profileId: "code-implementer",
+        kind: "code"
+      },
+      tracker_job_checkpoint: { jobId, status: "running" },
+      tracker_job_complete: { jobId, summary: "done" },
+      tracker_job_rollover: { jobId, reason: "context" },
+      tracker_skill_run_start: { jobId, skillId: "lt.verify" },
+      tracker_skill_run_complete: { jobId, skillRunId },
+      tracker_skill_run_skip: { jobId, skillRunId },
+      tracker_skill_run_fail: { jobId, skillRunId }
+    };
+
+    assert.deepEqual(SESSION_TOKEN_REQUIRED_TOOL_NAMES, [
+      ...SESSION_TOKEN_MUTATION_TOOL_NAMES,
+      ...JOB_MUTATION_TOOL_NAMES,
+      ...SKILL_MUTATION_TOOL_NAMES
+    ]);
+    assert.deepEqual(WORKSPACE_WRITE_TOOL_NAMES, [
+      "tracker_patch",
+      "tracker_pick",
+      "tracker_undo",
+      "tracker_redo",
+      "tracker_reload"
+    ]);
+
+    for (const name of SESSION_TOKEN_REQUIRED_TOOL_NAMES) {
+      const result = await tools.get(name).handler(argsByName[name]);
+      assert.equal(result.isError, true, `${name} should reject before I/O`);
+      assert.match(result.content[0].text, /requires sessionToken/, `${name} should name sessionToken`);
+    }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

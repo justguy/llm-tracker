@@ -1,4 +1,9 @@
 import { runHubMutation, nonEmptyString, makeTextResult } from "./mcp-utils.js";
+import {
+  mcpSessionTokenHeaders,
+  mcpSessionTokenProperty,
+  requireMcpSessionToken
+} from "../hub/sessions/auth/mcp-token.js";
 
 const SESSION_ID_RE = /^ses_[0-9a-hjkmnp-tv-z]{26}$/;
 const SESSION_STATUSES = new Set([
@@ -19,22 +24,12 @@ const SESSION_STATUSES = new Set([
   "unknown"
 ]);
 
-const sessionTokenProperty = {
-  type: "string",
-  description: "Session-scoped token. MCP clients pass this as `sessionToken`; the hub receives it as X-LT-Session-Token."
-};
-
 function sessionIdProperty(description = "Runtime session id") {
   return { type: "string", description };
 }
 
 function optionalStringProperty(description) {
   return { type: "string", description };
-}
-
-function sessionTokenHeaders(sessionToken) {
-  const token = nonEmptyString(sessionToken);
-  return token ? { "X-LT-Session-Token": token } : undefined;
 }
 
 function requireSessionId(args, toolName, key = "sessionId") {
@@ -44,12 +39,6 @@ function requireSessionId(args, toolName, key = "sessionId") {
     return { error: `${toolName} requires a canonical ses_ session id.` };
   }
   return { sessionId };
-}
-
-function requireSessionToken(args, toolName) {
-  const sessionToken = nonEmptyString(args.sessionToken);
-  if (!sessionToken) return { error: `${toolName} requires sessionToken.` };
-  return { sessionToken };
 }
 
 function compactText(parts) {
@@ -105,17 +94,17 @@ function createStatusMutation(
     description,
     inputSchema: {
       type: "object",
-      properties: {
-        sessionId: sessionIdProperty(),
-        sessionToken: sessionTokenProperty,
-        ...extraProperties
-      },
+        properties: {
+          sessionId: sessionIdProperty(),
+          sessionToken: mcpSessionTokenProperty,
+          ...extraProperties
+        },
       required: ["sessionId", "sessionToken"]
     },
     prepareRequest(args = {}) {
       const id = requireSessionId(args, name);
       if (id.error) return id;
-      const token = requireSessionToken(args, name);
+      const token = requireMcpSessionToken(args, name);
       if (token.error) return token;
       const status = statusFactory(args);
       if (!SESSION_STATUSES.has(status)) {
@@ -133,7 +122,7 @@ function createStatusMutation(
           ...(comment ? { comment } : {}),
           ...(typeof bodyFactory === "function" ? bodyFactory(args) : {})
         },
-        headers: sessionTokenHeaders(token.sessionToken),
+        headers: mcpSessionTokenHeaders(token.sessionToken),
         jsonRpcErrorOnFailure: true
       };
     }
@@ -144,7 +133,7 @@ export function createSessionTools(workspace, portFlag) {
   return [
     createSessionTool({
       name: "tracker_session_start",
-      description: "Create a runtime session through the running hub. The create response returns the cleartext session token once.",
+      description: "Create a runtime session through the running hub. This is the bootstrap call that returns the cleartext session token once; later mutating MCP calls must pass that token as sessionToken.",
       inputSchema: {
         type: "object",
         properties: {
@@ -162,8 +151,7 @@ export function createSessionTools(workspace, portFlag) {
           cwd: optionalStringProperty("Optional working directory"),
           repoRoot: optionalStringProperty("Optional repository root"),
           worktreePath: optionalStringProperty("Optional worktree path"),
-          branch: optionalStringProperty("Optional branch name"),
-          sessionToken: sessionTokenProperty
+          branch: optionalStringProperty("Optional branch name")
         },
         required: ["name", "tier"]
       },
@@ -183,8 +171,7 @@ export function createSessionTools(workspace, portFlag) {
           method: "POST",
           path: "/api/sessions",
           label: "tracker_session_start",
-          body,
-          headers: sessionTokenHeaders(args.sessionToken)
+          body
         };
       }
     }),
@@ -299,7 +286,7 @@ export function createSessionTools(workspace, portFlag) {
       inputSchema: {
         type: "object",
         properties: {
-          sessionToken: sessionTokenProperty
+          sessionToken: mcpSessionTokenProperty
         }
       },
       prepareRequest(args = {}) {
@@ -309,7 +296,7 @@ export function createSessionTools(workspace, portFlag) {
           method: "GET",
           path: "/api/sessions",
           label: "tracker_session_list",
-          headers: sessionTokenHeaders(args.sessionToken)
+          headers: mcpSessionTokenHeaders(args.sessionToken)
         };
       }
     }),
@@ -320,7 +307,7 @@ export function createSessionTools(workspace, portFlag) {
         type: "object",
         properties: {
           sessionId: sessionIdProperty(),
-          sessionToken: sessionTokenProperty
+          sessionToken: mcpSessionTokenProperty
         },
         required: ["sessionId"]
       },
@@ -333,7 +320,7 @@ export function createSessionTools(workspace, portFlag) {
           method: "GET",
           path: `/api/sessions/${id.sessionId}`,
           label: "tracker_session_context",
-          headers: sessionTokenHeaders(args.sessionToken)
+          headers: mcpSessionTokenHeaders(args.sessionToken)
         };
       }
     }),

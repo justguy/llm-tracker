@@ -1,4 +1,9 @@
 import { runHubMutation, nonEmptyString, makeTextResult } from "./mcp-utils.js";
+import {
+  mcpSessionTokenHeaders,
+  mcpSessionTokenProperty,
+  requireMcpSessionToken
+} from "../hub/sessions/auth/mcp-token.js";
 
 const JOB_ID_RE = /^job_[0-9a-hjkmnp-tv-z]{26}$/;
 const SESSION_ID_RE = /^ses_[0-9a-hjkmnp-tv-z]{26}$/;
@@ -8,24 +13,8 @@ const JOB_KINDS = new Set(["code", "prd", "review", "planning", "closeout", "cus
 const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "handoff"]);
 const UI_COMPLETE_MODES = new Set(["block_required_missing", "allow_optional_missing"]);
 
-const sessionTokenProperty = {
-  type: "string",
-  description: "Session-scoped token. MCP clients pass this as `sessionToken`; the hub receives it as X-LT-Session-Token."
-};
-
 function optionalStringProperty(description) {
   return { type: "string", description };
-}
-
-function sessionTokenHeaders(sessionToken) {
-  const token = nonEmptyString(sessionToken);
-  return token ? { "X-LT-Session-Token": token } : undefined;
-}
-
-function requireSessionToken(args, toolName) {
-  const sessionToken = nonEmptyString(args.sessionToken);
-  if (!sessionToken) return { error: `${toolName} requires sessionToken.` };
-  return { sessionToken };
 }
 
 function requireJobId(args, toolName) {
@@ -67,7 +56,7 @@ function addOptionalString(body, args, key) {
 function prepareJobMutation(args, toolName, bodyFields) {
   const id = requireJobId(args, toolName);
   if (id.error) return id;
-  const token = requireSessionToken(args, toolName);
+  const token = requireMcpSessionToken(args, toolName);
   if (token.error) return token;
 
   const body = {};
@@ -75,7 +64,7 @@ function prepareJobMutation(args, toolName, bodyFields) {
   return {
     jobId: id.jobId,
     body,
-    headers: sessionTokenHeaders(token.sessionToken)
+    headers: mcpSessionTokenHeaders(token.sessionToken)
   };
 }
 
@@ -90,7 +79,7 @@ export function createJobTools(workspace, portFlag) {
           projectSlug: { type: "string", description: "Project slug" },
           taskId: { type: "string", description: "Tracker task id" },
           sessionId: { type: "string", description: "Runtime session id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           profileId: { type: "string", description: "Job profile id" },
           kind: { type: "string", enum: [...JOB_KINDS], description: "Job kind" },
           predecessorJobId: optionalStringProperty("Optional predecessor job id"),
@@ -103,7 +92,7 @@ export function createJobTools(workspace, portFlag) {
         const taskId = nonEmptyString(args.taskId);
         const session = requireSessionId(args, "tracker_job_start");
         if (session.error) return session;
-        const token = requireSessionToken(args, "tracker_job_start");
+        const token = requireMcpSessionToken(args, "tracker_job_start");
         if (token.error) return token;
         const profileId = nonEmptyString(args.profileId);
         const kind = nonEmptyString(args.kind);
@@ -129,7 +118,7 @@ export function createJobTools(workspace, portFlag) {
           path: `/api/projects/${encodePathPart(projectSlug)}/tasks/${encodePathPart(taskId)}/jobs`,
           label: "tracker_job_start",
           body,
-          headers: sessionTokenHeaders(token.sessionToken),
+          headers: mcpSessionTokenHeaders(token.sessionToken),
           jsonRpcErrorOnFailure: true
         };
       }
@@ -163,7 +152,7 @@ export function createJobTools(workspace, portFlag) {
         type: "object",
         properties: {
           jobId: { type: "string", description: "Runtime job id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           status: { type: "string", enum: [...JOB_STATUSES], description: "Optional non-terminal job status" },
           summary: optionalStringProperty("Optional checkpoint summary"),
           idempotencyKey: optionalStringProperty("Optional idempotency key")
@@ -199,7 +188,7 @@ export function createJobTools(workspace, portFlag) {
         type: "object",
         properties: {
           jobId: { type: "string", description: "Runtime job id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           summary: optionalStringProperty("Optional completion summary"),
           idempotencyKey: optionalStringProperty("Optional idempotency key"),
           uiCompleteMode: {
@@ -239,7 +228,7 @@ export function createJobTools(workspace, portFlag) {
         type: "object",
         properties: {
           jobId: { type: "string", description: "Runtime job id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           reason: optionalStringProperty("Optional rollover reason"),
           idempotencyKey: optionalStringProperty("Optional idempotency key")
         },

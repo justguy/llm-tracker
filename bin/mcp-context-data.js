@@ -32,6 +32,21 @@ export const JOB_MUTATION_TOOL_NAMES = [
   "tracker_job_rollover"
 ];
 
+export const SESSION_BOOTSTRAP_TOOL_NAMES = [
+  "tracker_session_start"
+];
+
+export const SESSION_TOKEN_MUTATION_TOOL_NAMES = [
+  "tracker_session_heartbeat",
+  "tracker_session_status",
+  "tracker_session_note",
+  "tracker_session_blocked",
+  "tracker_session_handoff",
+  "tracker_session_context_usage",
+  "tracker_session_complete",
+  "tracker_session_broadcast"
+];
+
 export const JOB_TOOL_NAMES = [
   ...JOB_MUTATION_TOOL_NAMES,
   "tracker_job_status",
@@ -58,31 +73,31 @@ export const WRITE_TOOL_NAMES = [
   "tracker_undo",
   "tracker_redo",
   "tracker_reload",
-  "tracker_session_start",
-  "tracker_session_heartbeat",
-  "tracker_session_status",
-  "tracker_session_note",
-  "tracker_session_blocked",
-  "tracker_session_handoff",
-  "tracker_session_context_usage",
-  "tracker_session_complete",
-  "tracker_session_broadcast",
+  ...SESSION_BOOTSTRAP_TOOL_NAMES,
+  ...SESSION_TOKEN_MUTATION_TOOL_NAMES,
   ...JOB_MUTATION_TOOL_NAMES,
   ...SKILL_MUTATION_TOOL_NAMES
 ];
 
+export const SESSION_TOKEN_REQUIRED_TOOL_NAMES = [
+  ...SESSION_TOKEN_MUTATION_TOOL_NAMES,
+  ...JOB_MUTATION_TOOL_NAMES,
+  ...SKILL_MUTATION_TOOL_NAMES
+];
+
+export const WORKSPACE_WRITE_TOOL_NAMES = [
+  "tracker_patch",
+  "tracker_pick",
+  "tracker_undo",
+  "tracker_redo",
+  "tracker_reload"
+];
+
 export const SESSION_TOOL_NAMES = [
-  "tracker_session_start",
-  "tracker_session_heartbeat",
-  "tracker_session_status",
-  "tracker_session_note",
-  "tracker_session_blocked",
-  "tracker_session_handoff",
-  "tracker_session_context_usage",
-  "tracker_session_complete",
+  ...SESSION_BOOTSTRAP_TOOL_NAMES,
+  ...SESSION_TOKEN_MUTATION_TOOL_NAMES,
   "tracker_session_list",
-  "tracker_session_context",
-  "tracker_session_broadcast"
+  "tracker_session_context"
 ];
 
 export function makeResourceContent(uri, mimeType, text) {
@@ -202,6 +217,10 @@ export function workspaceStatusPayload(workspace) {
       skillToolsRequireDaemon: true,
       readTools: READ_TOOL_NAMES,
       writeTools: WRITE_TOOL_NAMES,
+      workspaceWriteTools: WORKSPACE_WRITE_TOOL_NAMES,
+      sessionBootstrapTools: SESSION_BOOTSTRAP_TOOL_NAMES,
+      sessionTokenMutationTools: SESSION_TOKEN_MUTATION_TOOL_NAMES,
+      sessionTokenRequiredTools: SESSION_TOKEN_REQUIRED_TOOL_NAMES,
       sessionTools: SESSION_TOOL_NAMES,
       jobTools: JOB_TOOL_NAMES,
       skillTools: SKILL_TOOL_NAMES
@@ -244,6 +263,10 @@ export function workspaceRuntimePayload(workspace) {
       jobToolsRequireDaemon: true,
       skillToolsRequireDaemon: true,
       writeTools: WRITE_TOOL_NAMES,
+      workspaceWriteTools: WORKSPACE_WRITE_TOOL_NAMES,
+      sessionBootstrapTools: SESSION_BOOTSTRAP_TOOL_NAMES,
+      sessionTokenMutationTools: SESSION_TOKEN_MUTATION_TOOL_NAMES,
+      sessionTokenRequiredTools: SESSION_TOKEN_REQUIRED_TOOL_NAMES,
       sessionTools: SESSION_TOOL_NAMES,
       jobTools: JOB_TOOL_NAMES,
       skillTools: SKILL_TOOL_NAMES

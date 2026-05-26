@@ -117,6 +117,10 @@ async function patchJson(base, path, body, headers = {}) {
   return { status: res.status, body: json };
 }
 
+function isJobOrSkillEvent(event) {
+  return typeof event?.type === "string" && (event.type.startsWith("job.") || event.type.startsWith("skill.run"));
+}
+
 // --- constructor wiring -----------------------------------------------------
 
 test("registerJobsRoutes: rejects missing deps", () => {
@@ -274,6 +278,43 @@ test("POST /api/jobs/:id/checkpoint — tokenStore rejects missing and mismatche
     assert.equal(accepted.status, 200);
     assert.equal(accepted.body.job.status, "blocked");
     assert.equal(accepted.body.job.lastCheckpointSummary, "valid token");
+  } finally {
+    await app.close();
+  }
+});
+
+test("mutating job and skill routes reject missing session tokens before registry mutation", async () => {
+  const tokenStore = new SessionTokenStore();
+  const app = await startApp({ tokenStore });
+  try {
+    const created = await app.jobRegistry.create(validJobInput({ profileId: "code-implementer" }));
+    const skillRunId = "skr_01h2x3y4z5a6b7c8d9e0f1g2h3";
+    const cases = [
+      { method: "POST", path: "/api/projects/demo/tasks/t-new/jobs", body: { sessionId: SES, profileId: "code-implementer", kind: "code" } },
+      { method: "PATCH", path: `/api/jobs/${created.jobId}`, body: { status: "running" } },
+      { method: "POST", path: `/api/jobs/${created.jobId}/checkpoint`, body: { status: "running" } },
+      { method: "POST", path: `/api/jobs/${created.jobId}/complete`, body: {} },
+      { method: "POST", path: `/api/jobs/${created.jobId}/complete-override`, body: { reason: "operator override" } },
+      { method: "POST", path: `/api/jobs/${created.jobId}/cancel`, body: { summary: "cancel" } },
+      { method: "POST", path: `/api/jobs/${created.jobId}/rollover`, body: { reason: "context" } },
+      { method: "POST", path: `/api/jobs/${created.jobId}/unblock`, body: { reason: "ready" } },
+      { method: "POST", path: `/api/jobs/${created.jobId}/skill-runs`, body: { skillId: "lt.verify", source: "mcp" } },
+      { method: "PATCH", path: `/api/jobs/${created.jobId}/skill-runs/${skillRunId}`, body: { status: "succeeded", skillId: "lt.verify", source: "mcp" } },
+      { method: "POST", path: `/api/jobs/${created.jobId}/skill-runs/${skillRunId}/override`, body: { reason: "manual", skillId: "lt.verify", source: "mcp" } },
+    ];
+    const mutationEventsBefore = app.appendedEvents.filter(isJobOrSkillEvent).length;
+
+    for (const item of cases) {
+      const r = item.method === "PATCH"
+        ? await patchJson(app.base, item.path, item.body)
+        : await postJson(app.base, item.path, item.body);
+      assert.equal(r.status, 401, `${item.method} ${item.path}`);
+      assert.equal(r.body.error.code, "SESSION_TOKEN_REJECTED");
+      assert.equal(r.body.error.details.reason, "missing");
+    }
+
+    assert.equal(app.appendedEvents.filter(isJobOrSkillEvent).length, mutationEventsBefore);
+    assert.equal(app.appendedEvents.filter((event) => event.type === "session.token_audit").length, cases.length);
   } finally {
     await app.close();
   }

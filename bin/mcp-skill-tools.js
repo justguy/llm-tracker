@@ -1,27 +1,16 @@
 import { runHubMutation, nonEmptyString, makeTextResult } from "./mcp-utils.js";
+import {
+  mcpSessionTokenHeaders,
+  mcpSessionTokenProperty,
+  requireMcpSessionToken
+} from "../hub/sessions/auth/mcp-token.js";
 
 const JOB_ID_RE = /^job_[0-9a-hjkmnp-tv-z]{26}$/;
 const SKILL_RUN_ID_RE = /^skr_[0-9a-hjkmnp-tv-z]{26}$/;
 const FINISH_STATUSES = new Set(["succeeded", "failed", "skipped"]);
 
-const sessionTokenProperty = {
-  type: "string",
-  description: "Session-scoped token. MCP clients pass this as `sessionToken`; the hub receives it as X-LT-Session-Token."
-};
-
 function optionalStringProperty(description) {
   return { type: "string", description };
-}
-
-function sessionTokenHeaders(sessionToken) {
-  const token = nonEmptyString(sessionToken);
-  return token ? { "X-LT-Session-Token": token } : undefined;
-}
-
-function requireSessionToken(args, toolName) {
-  const sessionToken = nonEmptyString(args.sessionToken);
-  if (!sessionToken) return { error: `${toolName} requires sessionToken.` };
-  return { sessionToken };
 }
 
 function requireJobId(args, toolName) {
@@ -65,7 +54,7 @@ function prepareSkillRunFinish(args, toolName, status) {
   if (job.error) return job;
   const run = requireSkillRunId(args, toolName);
   if (run.error) return run;
-  const token = requireSessionToken(args, toolName);
+  const token = requireMcpSessionToken(args, toolName);
   if (token.error) return token;
   if (!FINISH_STATUSES.has(status)) return { error: `${toolName} has invalid fixed status ${status}.` };
 
@@ -78,7 +67,7 @@ function prepareSkillRunFinish(args, toolName, status) {
     jobId: job.jobId,
     skillRunId: run.skillRunId,
     body,
-    headers: sessionTokenHeaders(token.sessionToken)
+    headers: mcpSessionTokenHeaders(token.sessionToken)
   };
 }
 
@@ -125,7 +114,7 @@ export function createSkillTools(workspace, portFlag) {
         type: "object",
         properties: {
           jobId: { type: "string", description: "Runtime job id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           skillId: { type: "string", description: "Registered skill id" },
           sessionId: optionalStringProperty("Optional session id; must match the job session when supplied"),
           summary: optionalStringProperty("Optional start summary"),
@@ -136,7 +125,7 @@ export function createSkillTools(workspace, portFlag) {
       prepareRequest(args = {}) {
         const job = requireJobId(args, "tracker_skill_run_start");
         if (job.error) return job;
-        const token = requireSessionToken(args, "tracker_skill_run_start");
+        const token = requireMcpSessionToken(args, "tracker_skill_run_start");
         if (token.error) return token;
         const skillId = nonEmptyString(args.skillId);
         if (!skillId) return { error: "tracker_skill_run_start requires skillId." };
@@ -151,7 +140,7 @@ export function createSkillTools(workspace, portFlag) {
           path: `/api/jobs/${job.jobId}/skill-runs`,
           label: "tracker_skill_run_start",
           body,
-          headers: sessionTokenHeaders(token.sessionToken),
+          headers: mcpSessionTokenHeaders(token.sessionToken),
           jsonRpcErrorOnFailure: true
         };
       }
@@ -164,7 +153,7 @@ export function createSkillTools(workspace, portFlag) {
         properties: {
           jobId: { type: "string", description: "Runtime job id" },
           skillRunId: { type: "string", description: "Runtime skill run id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           skillId: optionalStringProperty("Optional skill id when the run was not previously started"),
           sessionId: optionalStringProperty("Optional session id; must match the job session when supplied"),
           summary: optionalStringProperty("Completion summary"),
@@ -195,7 +184,7 @@ export function createSkillTools(workspace, portFlag) {
         properties: {
           jobId: { type: "string", description: "Runtime job id" },
           skillRunId: { type: "string", description: "Runtime skill run id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           skillId: optionalStringProperty("Optional skill id when the run was not previously started"),
           sessionId: optionalStringProperty("Optional session id; must match the job session when supplied"),
           summary: optionalStringProperty("Skip summary"),
@@ -226,7 +215,7 @@ export function createSkillTools(workspace, portFlag) {
         properties: {
           jobId: { type: "string", description: "Runtime job id" },
           skillRunId: { type: "string", description: "Runtime skill run id" },
-          sessionToken: sessionTokenProperty,
+          sessionToken: mcpSessionTokenProperty,
           skillId: optionalStringProperty("Optional skill id when the run was not previously started"),
           sessionId: optionalStringProperty("Optional session id; must match the job session when supplied"),
           summary: optionalStringProperty("Failure summary"),
