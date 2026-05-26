@@ -11,6 +11,12 @@ coverage/
 # Project-local scratch
 initial prompt.txt
 .hoplon/
+.guardrail/.DS_Store
+.guardrail/state.json
+.guardrail/audit.jsonl
+.guardrail/logs/
+.guardrail/recipes/*.approved.json
+.guardrail/templates/*.approved.json
 
 # Repo-local tracker: track the durable file + layout README, ignore runtime churn
 .llm-tracker/.runtime/

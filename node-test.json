@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "kind": "template",
+  "name": "node-test",
+  "description": "Run the reviewed llm-tracker Session Hub Tracks 1-4 node --test verification suite from the repository root.",
+  "trust_class": "reviewed_internal",
+  "risk": "yellow",
+  "risk_reasons": [
+    "Executes local repository test code.",
+    "Tests may bind loopback ports and write temporary files."
+  ],
+  "requires_env": [
+    "PATH",
+    "HOME",
+    "USER",
+    "TMPDIR",
+    "SHELL"
+  ],
+  "inputs": {
+    "suite": {
+      "type": "string",
+      "required": true,
+      "description": "Reviewed fixed test suite identifier.",
+      "enum": [
+        "session-hub-tracks-1-4-landing"
+      ]
+    }
+  },
+  "run": {
+    "command": "/usr/local/bin/node",
+    "args": [
+      "--test",
+      "ui/run-session/RunSessionWizard.test.js",
+      "test/run-session-endpoints.test.js",
+      "test/run-session-drafts.test.js",
+      "test/runtime-sessions-api.test.js",
+      "test/run-session-preflight.test.js",
+      "test/run-session-service.test.js",
+      "test/jobs-api.test.js",
+      "test/jobs-gates.test.js",
+      "test/jobs-registry.test.js",
+      "test/runtime-events.test.js"
+    ],
+    "mode": "structured",
+    "env": {
+      "allow": [
+        "PATH",
+        "HOME",
+        "USER",
+        "TMPDIR",
+        "SHELL"
+      ]
+    }
+  },
+  "guardrails": {
+    "constraints": [
+      "The template must be invoked from the llm-project-tracker repository root with templates_dir set to . or by repo-relative path node-test.json.",
+      "The executed command shape is always /usr/local/bin/node --test followed by the reviewed fixed test files.",
+      "The suite input is an exact enum and cannot inject additional test paths or Node flags."
+    ],
+    "invariants": [
+      "No shell, pipe, redirection, command substitution, or caller-supplied argv is used.",
+      "The test file list is fixed in the reviewed template definition."
+    ]
+  },
+  "idempotent": true,
+  "validator": "exit_code"
+}
