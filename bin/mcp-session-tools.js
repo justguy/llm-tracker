@@ -346,6 +346,46 @@ export function createSessionTools(workspace, portFlag) {
       {
         message: optionalStringProperty("Broadcast message")
       }
-    )
+    ),
+    createSessionTool({
+      name: "tracker_session_ask",
+      description: "Ask another runtime session a targeted question through the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: sessionIdProperty("Sender runtime session id"),
+          sessionToken: mcpSessionTokenProperty,
+          targetSessionId: sessionIdProperty("Target runtime session id"),
+          prompt: { type: "string", description: "Question or prompt for the target session" },
+          idempotencyKey: optionalStringProperty("Optional retry idempotency key")
+        },
+        required: ["sessionId", "sessionToken", "targetSessionId", "prompt"]
+      },
+      prepareRequest(args = {}) {
+        const sender = requireSessionId(args, "tracker_session_ask", "sessionId");
+        if (sender.error) return sender;
+        const target = requireSessionId(args, "tracker_session_ask", "targetSessionId");
+        if (target.error) return target;
+        const token = requireMcpSessionToken(args, "tracker_session_ask");
+        if (token.error) return token;
+        const prompt = nonEmptyString(args.prompt);
+        if (!prompt) return { error: "tracker_session_ask requires prompt." };
+        const idempotencyKey = nonEmptyString(args.idempotencyKey);
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: `/api/sessions/${sender.sessionId}/ask`,
+          label: "tracker_session_ask",
+          body: {
+            targetSessionId: target.sessionId,
+            prompt,
+            ...(idempotencyKey ? { idempotencyKey } : {})
+          },
+          headers: mcpSessionTokenHeaders(token.sessionToken),
+          jsonRpcErrorOnFailure: true
+        };
+      }
+    })
   ];
 }

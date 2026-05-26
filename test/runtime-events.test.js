@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createSessionAskEvent,
   validateRuntimeEvent,
   RUNTIME_EVENT_TYPES,
   runtimeEventsSchema,
@@ -294,6 +295,26 @@ test("job.unblocked rejects missing sessionId", () => {
       return true;
     },
   );
+});
+
+test("createSessionAskEvent builds a generic session.ask event with from/to/prompt", () => {
+  const from = makeRuntimeId("ses");
+  const to = makeRuntimeId("ses");
+  const evt = createSessionAskEvent({
+    fromSessionId: from,
+    targetSessionId: to,
+    prompt: "Can you verify the handoff?",
+    workspace: "/Users/adil/.llm-tracker",
+    source: "http",
+    ts: "2026-05-23T16:44:00Z",
+  });
+  assert.equal(evt.type, "session.ask");
+  assert.equal(evt.sessionId, from);
+  assert.equal(evt.targetSessionId, to);
+  assert.equal(evt.from, from);
+  assert.equal(evt.to, to);
+  assert.equal(evt.prompt, "Can you verify the handoff?");
+  assert.equal(validateRuntimeEvent({ ...evt, id: makeRuntimeId("evt") }), true);
 });
 
 test("generic event with known type but unspecified payload still validates against base", () => {

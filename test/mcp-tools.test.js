@@ -164,6 +164,7 @@ test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O"
       tracker_session_context_usage: { sessionId, percent: 80 },
       tracker_session_complete: { sessionId, summary: "done" },
       tracker_session_broadcast: { sessionId, message: "broadcast" },
+      tracker_session_ask: { sessionId, targetSessionId: sessionId, prompt: "question" },
       tracker_job_start: {
         projectSlug: "test-project",
         taskId: "t-001",

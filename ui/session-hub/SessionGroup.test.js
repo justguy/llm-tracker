@@ -85,6 +85,27 @@ test("SessionCard renders repo unknown when repoRoot is absent", () => {
   assert.match(collectVNodeText(vnode), /repo unknown/);
 });
 
+test("SessionCard renders ask notifications on the target card", () => {
+  const vnode = SessionCard({
+    session: {
+      id: "ses_target",
+      name: "Target",
+      tier: "mcp_tracked",
+      asks: [
+        {
+          eventId: "evt_ask",
+          from: "ses_sender",
+          prompt: "Please verify the handoff.",
+        },
+      ],
+    },
+  });
+  const text = collectVNodeText(vnode);
+  assert.match(text, /ask/i);
+  assert.match(text, /ses_sender/);
+  assert.match(text, /Please verify the handoff/);
+});
+
 test("SessionGroupView exposes exactly the three card-size choices", () => {
   const vnode = SessionGroupView({
     size: "compact",
@@ -167,6 +188,37 @@ test("applyRuntimeSessionsMessage applies runtime.event session updates without 
     },
   });
   assert.equal(sessions[0].warnings.length, 0);
+});
+
+test("applyRuntimeSessionsMessage applies session.ask to the target session", () => {
+  let sessions = [
+    { id: "ses_sender", tier: "manual", warnings: [] },
+    { id: "ses_target", tier: "manual", warnings: [] },
+  ];
+  sessions = applyRuntimeSessionsMessage(sessions, {
+    type: "runtime.event",
+    event: {
+      id: "evt_ask",
+      type: "session.ask",
+      source: "http",
+      ts: "2026-05-25T15:04:00.000Z",
+      sessionId: "ses_sender",
+      targetSessionId: "ses_target",
+      from: "ses_sender",
+      to: "ses_target",
+      prompt: "Can you check the patch?",
+    },
+  });
+  assert.equal(sessions[0].asks, undefined);
+  assert.deepEqual(sessions[1].asks, [
+    {
+      eventId: "evt_ask",
+      from: "ses_sender",
+      to: "ses_target",
+      prompt: "Can you check the patch?",
+      ts: "2026-05-25T15:04:00.000Z",
+    },
+  ]);
 });
 
 test("runtimeWebSocketUrl resolves the runtime stream on current origin", () => {

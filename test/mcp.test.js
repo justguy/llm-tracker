@@ -196,6 +196,7 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_redo",
       "tracker_reload",
       "tracker_search",
+      "tracker_session_ask",
       "tracker_session_blocked",
       "tracker_session_broadcast",
       "tracker_session_complete",
@@ -549,6 +550,18 @@ test("tracker_session_status forwards sessionToken to the running hub", async ()
       assert.match(sessionId, /^ses_/);
       assert.equal(typeof sessionToken, "string");
 
+      const targetStarted = await client.request("tools/call", {
+        name: "tracker_session_start",
+        arguments: {
+          name: "mcp ask target",
+          tier: "mcp_tracked",
+          projectSlug: "test-project"
+        }
+      });
+      assert.notEqual(targetStarted.result.isError, true);
+      const targetPayload = JSON.parse(targetStarted.result.content[0].text);
+      const targetSessionId = targetPayload.session.id;
+
       const rejected = await client.request("tools/call", {
         name: "tracker_session_status",
         arguments: {
@@ -580,6 +593,36 @@ test("tracker_session_status forwards sessionToken to the running hub", async ()
       assert.notEqual(accepted.result.isError, true);
       const acceptedPayload = JSON.parse(accepted.result.content[0].text);
       assert.equal(acceptedPayload.session.status, "quiet");
+
+      const rejectedAsk = await client.request("tools/call", {
+        name: "tracker_session_ask",
+        arguments: {
+          sessionId,
+          sessionToken: "not-a-real-session-token",
+          targetSessionId,
+          prompt: "Can you verify this?"
+        }
+      });
+      assert.ok(rejectedAsk.error);
+      assert.match(rejectedAsk.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
+
+      const acceptedAsk = await client.request("tools/call", {
+        name: "tracker_session_ask",
+        arguments: {
+          sessionId,
+          sessionToken,
+          targetSessionId,
+          prompt: "Can you verify this?"
+        }
+      });
+      assert.notEqual(acceptedAsk.result.isError, true);
+      const askPayload = JSON.parse(acceptedAsk.result.content[0].text);
+      assert.equal(askPayload.ask.from, sessionId);
+      assert.equal(askPayload.ask.to, targetSessionId);
+      assert.equal(askPayload.ask.prompt, "Can you verify this?");
+      assert.equal(askPayload.delivery.targetSessionNotification, true);
+      assert.equal(askPayload.targetSession.asks.length, 1);
+      assert.equal(askPayload.targetSession.asks[0].prompt, "Can you verify this?");
 
       const blocked = await client.request("tools/call", {
         name: "tracker_session_blocked",

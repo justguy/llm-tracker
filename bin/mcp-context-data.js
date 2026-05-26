@@ -45,7 +45,8 @@ export const SESSION_TOKEN_MUTATION_TOOL_NAMES = [
   "tracker_session_handoff",
   "tracker_session_context_usage",
   "tracker_session_complete",
-  "tracker_session_broadcast"
+  "tracker_session_broadcast",
+  "tracker_session_ask"
 ];
 
 export const JOB_TOOL_NAMES = [

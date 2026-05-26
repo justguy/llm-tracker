@@ -55,6 +55,20 @@ export function applyRuntimeSessionEvent(sessions, event) {
   }
 
   const sessionId = event.sessionId;
+  if (event.type === "session.ask") {
+    const targetSessionId = typeof event.targetSessionId === "string" ? event.targetSessionId : event.to;
+    if (typeof targetSessionId !== "string" || targetSessionId.length === 0) return normalizeSessionList(sessions);
+    return upsertSession(sessions, targetSessionId, (session) => ({
+      ...session,
+      asks: (Array.isArray(session.asks) ? session.asks : []).concat({
+        eventId: event.id,
+        from: typeof event.from === "string" ? event.from : event.sessionId,
+        to: targetSessionId,
+        prompt: typeof event.prompt === "string" ? event.prompt : "",
+        ts: event.ts,
+      }),
+    }));
+  }
   if (typeof sessionId !== "string" || sessionId.length === 0) return normalizeSessionList(sessions);
 
   switch (event.type) {

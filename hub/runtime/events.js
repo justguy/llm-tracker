@@ -35,6 +35,7 @@ import {
   DEPRECATED_WARNING_KINDS,
   assertValidWarning,
 } from "../sessions/warnings.js";
+import { isSessionId } from "./ids.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const schemaPath = path.resolve(here, "..", "..", "schema", "runtime-events.schema.json");
@@ -425,6 +426,78 @@ export function createSessionStdioCaptureChangedEvent(input) {
     capture: { enabled: captureToDisk },
   };
   if (reason !== undefined) event.reason = reason;
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
+// --- SH-6-10: Cross-session ask event -------------------------------------
+//
+// `session.ask` is currently a GenericRuntimeEvent in the JSON schema, so this
+// factory provides the stricter local contract used by the HTTP and MCP
+// surfaces: sender session, target session, prompt, and timestamp.
+
+/**
+ * Build a `session.ask` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.fromSessionId
+ * @param {string} input.targetSessionId
+ * @param {string} input.prompt
+ * @param {string} input.workspace
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object} the validated runtime event
+ */
+export function createSessionAskEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionAskEvent: input must be an object");
+  }
+  const {
+    fromSessionId,
+    targetSessionId,
+    prompt,
+    workspace,
+    source = "http",
+    ts,
+    id,
+    idempotencyKey,
+  } = input;
+  if (!isSessionId(fromSessionId)) {
+    throw new Error("createSessionAskEvent: fromSessionId required (ses_<26 Crockford>)");
+  }
+  if (!isSessionId(targetSessionId)) {
+    throw new Error("createSessionAskEvent: targetSessionId required (ses_<26 Crockford>)");
+  }
+  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+    throw new Error("createSessionAskEvent: prompt required (non-empty string)");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionAskEvent: workspace required (non-empty string)");
+  }
+
+  const normalizedPrompt = prompt.trim();
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.ask",
+    source,
+    workspace,
+    sessionId: fromSessionId,
+    targetSessionId,
+    from: fromSessionId,
+    to: targetSessionId,
+    prompt: normalizedPrompt,
+  };
   if (typeof id === "string") event.id = id;
   if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
 

@@ -17,16 +17,21 @@ import { RuntimeStore } from "../hub/runtime/store.js";
 import { RuntimeProjection } from "../hub/runtime/projection.js";
 import { makeRuntimeId, SESSION_ID_RE } from "../hub/runtime/ids.js";
 import { validateRuntimeEvent } from "../hub/runtime/events.js";
+import { SessionTokenStore } from "../hub/sessions/auth/tokens.js";
 import { setAuditSink, resetSinks } from "../hub/logging/index.js";
 
 const TEST_TIMEOUT = 8000;
 
-async function startMiniApp() {
+async function startMiniApp({ tokenStore = null } = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "lt-sessions-api-"));
   const projection = new RuntimeProjection();
+  const appendedEvents = [];
   const runtimeStore = new RuntimeStore({
     workspaceRoot,
-    onAppend: (event) => projection.apply(event),
+    onAppend: (event) => {
+      appendedEvents.push(event);
+      projection.apply(event);
+    },
   });
   const app = express();
   app.use(express.json());
@@ -36,6 +41,7 @@ async function startMiniApp() {
     makeRuntimeId,
     validateRuntimeEvent,
     workspace: workspaceRoot,
+    ...(tokenStore ? { tokenStore } : {}),
   });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve, reject) => {
@@ -48,6 +54,7 @@ async function startMiniApp() {
     workspaceRoot,
     projection,
     runtimeStore,
+    appendedEvents,
     close: async () => {
       await new Promise((resolve) => server.close(() => resolve()));
       rmSync(workspaceRoot, { recursive: true, force: true });
@@ -59,6 +66,17 @@ async function postJson(base, path, body) {
   return fetch(`${base}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function postJsonWithToken(base, path, body, token) {
+  return fetch(`${base}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-lt-session-token": token,
+    },
     body: JSON.stringify(body),
   });
 }
@@ -349,6 +367,73 @@ test("Round-trip POST -> PATCH -> GET: projection reflects both events", { timeo
     assert.equal(session.status, "waiting_for_human");
     assert.equal(session.projectSlug, "demo", "POST-supplied projectSlug preserved through PATCH");
     assert.equal(rev, 2);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/ask emits one session.ask and notifies target session", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({ tokenStore: new SessionTokenStore() });
+  try {
+    const fromRes = await postJson(env.base, "/api/sessions", { name: "sender", tier: "mcp_tracked" });
+    const fromBody = await fromRes.json();
+    const targetRes = await postJson(env.base, "/api/sessions", { name: "target", tier: "mcp_tracked" });
+    const targetBody = await targetRes.json();
+
+    const askRes = await postJsonWithToken(
+      env.base,
+      `/api/sessions/${fromBody.session.id}/ask`,
+      { targetSessionId: targetBody.session.id, prompt: "Please verify the handoff." },
+      fromBody.token.token,
+    );
+    assert.equal(askRes.status, 200);
+    const askBody = await askRes.json();
+    assert.equal(askBody.ok, true);
+    assert.equal(askBody.ask.from, fromBody.session.id);
+    assert.equal(askBody.ask.to, targetBody.session.id);
+    assert.equal(askBody.ask.prompt, "Please verify the handoff.");
+    assert.equal(askBody.delivery.targetSessionNotification, true);
+
+    const askEvents = env.appendedEvents.filter((event) => event.type === "session.ask");
+    assert.equal(askEvents.length, 1);
+    assert.equal(askEvents[0].from, fromBody.session.id);
+    assert.equal(askEvents[0].to, targetBody.session.id);
+    assert.equal(askEvents[0].prompt, "Please verify the handoff.");
+    assert.deepEqual(askBody.targetSession.asks, [
+      {
+        eventId: askBody.eventId,
+        from: fromBody.session.id,
+        to: targetBody.session.id,
+        prompt: "Please verify the handoff.",
+        ts: askEvents[0].ts,
+      },
+    ]);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/ask rejects missing or mismatched session tokens", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({ tokenStore: new SessionTokenStore() });
+  try {
+    const fromBody = await (await postJson(env.base, "/api/sessions", { name: "sender", tier: "mcp_tracked" })).json();
+    const targetBody = await (await postJson(env.base, "/api/sessions", { name: "target", tier: "mcp_tracked" })).json();
+    const otherBody = await (await postJson(env.base, "/api/sessions", { name: "other", tier: "mcp_tracked" })).json();
+
+    const missing = await postJson(env.base, `/api/sessions/${fromBody.session.id}/ask`, {
+      targetSessionId: targetBody.session.id,
+      prompt: "hello",
+    });
+    assert.equal(missing.status, 401);
+
+    const mismatch = await postJsonWithToken(
+      env.base,
+      `/api/sessions/${fromBody.session.id}/ask`,
+      { targetSessionId: targetBody.session.id, prompt: "hello" },
+      otherBody.token.token,
+    );
+    assert.equal(mismatch.status, 401);
+    assert.equal(env.appendedEvents.filter((event) => event.type === "session.ask").length, 0);
   } finally {
     await env.close();
   }

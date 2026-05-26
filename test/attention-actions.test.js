@@ -115,6 +115,17 @@ test("implemented HTTP actions plan exact runtime endpoints and bodies", () => {
   const unblock = getHubPlan(ITEM, action("unblock"), { unblockReason: "resolved" });
   assert.equal(unblock.url, `/api/jobs/${ITEM.jobId}/unblock`);
   assert.deepEqual(unblock.body, { reason: "resolved" });
+
+  const ask = getHubPlan(ITEM, action("ask"), {
+    senderSessionId: "ses_sender0000000000000000000",
+    sessionToken: "lt_session_token",
+    askPrompt: "Need a status check",
+  });
+  assert.equal(ask.url, "/api/sessions/ses_sender0000000000000000000/ask");
+  assert.deepEqual(ask.body, {
+    targetSessionId: ITEM.sessionId,
+    prompt: "Need a status check",
+  });
 });
 
 test("actions requiring runtime ids become disabled when fields are absent", () => {
@@ -125,6 +136,19 @@ test("actions requiring runtime ids become disabled when fields are absent", () 
   assert.match(decorated[0].disabledReason, /item\.jobId/);
   assert.equal(decorated[1].enabled, false);
   assert.match(decorated[1].disabledReason, /item\.jobId/);
+});
+
+test("ask action requires sender session and token options before planning HTTP call", () => {
+  const plan = getHubPlan(ITEM, action("ask"));
+  assert.equal(plan.enabled, false);
+  assert.match(plan.disabledReason, /options\.senderSessionId/);
+  assert.match(plan.disabledReason, /options\.sessionToken/);
+
+  const missingToken = getHubPlan(ITEM, action("ask"), {
+    senderSessionId: "ses_sender0000000000000000000",
+  });
+  assert.equal(missingToken.enabled, false);
+  assert.match(missingToken.disabledReason, /options\.sessionToken/);
 });
 
 test("UI dispatcher POSTs acknowledge and returns parsed response", async () => {
@@ -144,6 +168,32 @@ test("UI dispatcher POSTs acknowledge and returns parsed response", async () => 
   assert.equal(calls[0].url, `/api/attention/${ITEM.id}/ack`);
   assert.equal(calls[0].init.method, "POST");
   assert.deepEqual(JSON.parse(calls[0].init.body), { dedupeKey: ITEM.dedupeKey });
+});
+
+test("UI dispatcher POSTs ask action to session ask endpoint", async () => {
+  const calls = [];
+  const result = await dispatchAttentionAction(ITEM, action("ask"), {
+    senderSessionId: "ses_sender0000000000000000000",
+    sessionToken: "lt_session_token",
+    askPrompt: "Status?",
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, eventId: "evt_1" }),
+      };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/sessions/ses_sender0000000000000000000/ask");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["X-LT-Session-Token"], "lt_session_token");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    targetSessionId: ITEM.sessionId,
+    prompt: "Status?",
+  });
 });
 
 test("UI dispatcher emits browser events for client-owned actions", async () => {

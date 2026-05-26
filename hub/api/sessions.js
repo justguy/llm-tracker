@@ -20,7 +20,7 @@
 
 import { log } from "../logging/index.js";
 import { requireSessionToken } from "./middleware/session-token.js";
-import { createSessionStdioCaptureChangedEvent, createSessionWarningEvent } from "../runtime/events.js";
+import { createSessionAskEvent, createSessionStdioCaptureChangedEvent, createSessionWarningEvent } from "../runtime/events.js";
 import { SessionTaskLedgerService } from "../sessions/task-ledger.js";
 import { DEFAULT_THRESHOLDS } from "../sessions/activity.js";
 import { contextHighWarning } from "../sessions/warnings.js";
@@ -42,6 +42,9 @@ const POST_ALLOWED_FIELDS = new Set([
 
 // Allowed body fields on PATCH. Anything else triggers UNKNOWN_FIELDS (400).
 const PATCH_ALLOWED_FIELDS = new Set(["status", "comment", "contextUsage"]);
+
+// Allowed body fields on POST /:sessionId/ask.
+const ASK_ALLOWED_FIELDS = new Set(["targetSessionId", "prompt", "idempotencyKey"]);
 
 // Allowed body fields on POST /:sessionId/token/rotate. Both are optional —
 // an empty body `{}` means "use the caller's current capabilities and the
@@ -204,6 +207,88 @@ export function registerSessionsRoutes(app, deps) {
     }
     res.status(200).json({ session, rev: projection.rev });
   });
+
+  // --- POST /api/sessions/:sessionId/ask ----------------------------------
+  const postSessionAsk = async (req, res) => {
+    const { sessionId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
+    }
+
+    const unknown = [];
+    for (const key of Object.keys(body)) {
+      if (!ASK_ALLOWED_FIELDS.has(key)) unknown.push(key);
+    }
+    if (unknown.length > 0) {
+      return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+    }
+
+    const { targetSessionId, prompt, idempotencyKey } = body;
+    if (!projection.sessions.get(sessionId)) {
+      return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+    }
+    if (!isSessionIdShape(targetSessionId)) {
+      return sendError(res, 400, "INVALID_BODY", "`targetSessionId` must be a canonical ses_ session id");
+    }
+    if (!projection.sessions.get(targetSessionId)) {
+      return sendError(res, 404, "UNKNOWN_TARGET_SESSION", `target session not found: ${targetSessionId}`);
+    }
+    if (typeof prompt !== "string" || prompt.trim().length === 0) {
+      return sendError(res, 400, "INVALID_BODY", "`prompt` is required (non-empty string)");
+    }
+    if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || idempotencyKey.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`idempotencyKey` must be a non-empty string when present");
+    }
+
+    let eventForAppend;
+    try {
+      eventForAppend = createSessionAskEvent({
+        fromSessionId: sessionId,
+        targetSessionId,
+        prompt,
+        workspace,
+        source: "http",
+        ...(typeof idempotencyKey === "string" ? { idempotencyKey } : {}),
+      });
+    } catch (err) {
+      return sendError(res, 400, "INVALID_BODY", err.message || "failed to create session.ask event");
+    }
+
+    let appendResult;
+    try {
+      appendResult = await runtimeStore.append(eventForAppend);
+    } catch (err) {
+      return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+    }
+
+    const targetSession = projection.sessions.get(targetSessionId) || { id: targetSessionId };
+    res.status(200).json({
+      ok: true,
+      ask: {
+        from: sessionId,
+        to: targetSessionId,
+        prompt: eventForAppend.prompt,
+        ts: eventForAppend.ts,
+      },
+      delivery: {
+        runtimeEvent: true,
+        targetSessionNotification: true,
+      },
+      targetSession,
+      rev: appendResult.rev,
+      eventId: appendResult.eventId,
+    });
+  };
+  if (tokenMiddleware) {
+    app.post("/api/sessions/:sessionId/ask", tokenMiddleware, postSessionAsk);
+  } else {
+    app.post("/api/sessions/:sessionId/ask", postSessionAsk);
+  }
 
   // --- POST /api/sessions -------------------------------------------------
   app.post("/api/sessions", async (req, res) => {

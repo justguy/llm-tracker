@@ -108,6 +108,7 @@ const HANDLERS = Object.freeze({
   "session.output": handleSessionOutput,
   "session.stopped": handleSessionStopped,
   "session.stdio_capture_changed": handleSessionStdioCaptureChanged,
+  "session.ask": handleSessionAsk,
   "job.started": handleJobStarted,
   "job.checkpoint": handleJobCheckpoint,
   "job.completed": handleJobCompleted,
@@ -232,6 +233,24 @@ function handleSessionStdioCaptureChanged(p, e) {
     ...existing,
     stdioCapture: e.capture && typeof e.capture === "object" ? { ...e.capture } : existing.stdioCapture,
   });
+}
+
+function handleSessionAsk(p, e) {
+  const targetId = typeof e.targetSessionId === "string" ? e.targetSessionId : e.to;
+  if (!isSessionId(targetId)) return;
+  const existing = p.sessions.get(targetId);
+  if (!existing) return;
+  const prompt = typeof e.prompt === "string" ? e.prompt : "";
+  if (!prompt) return;
+  const asks = Array.isArray(existing.asks) ? existing.asks.slice() : [];
+  asks.push({
+    eventId: e.id,
+    from: typeof e.from === "string" ? e.from : e.sessionId,
+    to: targetId,
+    prompt,
+    ts: e.ts,
+  });
+  p.sessions.set(targetId, { ...existing, asks });
 }
 
 // --- job handlers ----------------------------------------------------------

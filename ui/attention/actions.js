@@ -105,7 +105,17 @@ const ACTION_SPECS = Object.freeze({
       reason: options.unblockReason || "operator unblock from attention action",
     }),
   },
-  ask: eventSpec("llm-tracker:attention-ask"),
+  ask: {
+    dispatch: "http",
+    method: "POST",
+    required: ["sessionId"],
+    requiredOptions: ["senderSessionId", "sessionToken"],
+    url: (_item, _action, options) => `/api/sessions/${encodeURIComponent(options.senderSessionId)}/ask`,
+    body: (item, action, options) => ({
+      targetSessionId: item.sessionId,
+      prompt: options.askPrompt || action.prompt || "Please provide a status update.",
+    }),
+  },
   interrupt: eventSpec(
     "llm-tracker:attention-interrupt",
     "interrupt",
@@ -207,6 +217,14 @@ function missingFields(spec, item) {
   });
 }
 
+function missingOptions(spec, options) {
+  if (!Array.isArray(spec.requiredOptions)) return [];
+  return spec.requiredOptions.filter((field) => {
+    const value = options?.[field];
+    return typeof value !== "string" || value.length === 0;
+  });
+}
+
 export function getAttentionActionPlan(item, action, options = {}) {
   const kind = typeof action?.kind === "string" ? action.kind : "";
   const spec = ACTION_SPECS[kind];
@@ -241,6 +259,17 @@ export function getAttentionActionPlan(item, action, options = {}) {
       reason: `Requires item.${missing.join(" and item.")}`,
       spec,
       missing,
+    });
+  }
+  const missingOpts = missingOptions(spec, options);
+  if (missingOpts.length > 0) {
+    return disabledPlan({
+      item,
+      action,
+      kind,
+      reason: `Requires options.${missingOpts.join(" and options.")}`,
+      spec,
+      missing: missingOpts.map((field) => `options.${field}`),
     });
   }
   const base = {
@@ -307,9 +336,13 @@ async function postJson(plan, options) {
   if (typeof fetchFn !== "function") {
     return { ...plan, ok: false, enabled: false, disabledReason: "Fetch API unavailable" };
   }
+  const headers = { "Content-Type": "application/json" };
+  if (typeof options.sessionToken === "string" && options.sessionToken.length > 0) {
+    headers["X-LT-Session-Token"] = options.sessionToken;
+  }
   const response = await fetchFn(plan.url, {
     method: plan.method || "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(plan.body || {}),
   });
   let body = {};

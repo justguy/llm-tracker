@@ -35,6 +35,7 @@ function repoLabel(session) {
 export function SessionCard({ session, size = "normal" } = {}) {
   if (!session || typeof session !== "object") return null;
   const warnings = Array.isArray(session.warnings) ? session.warnings : [];
+  const asks = Array.isArray(session.asks) ? session.asks : [];
   const cardSize = normalizeSessionCardSize(size);
 
   return html`
@@ -81,6 +82,20 @@ export function SessionCard({ session, size = "normal" } = {}) {
                   </li>
                 `;
               })}
+            </ul>
+          `
+        : null}
+
+      ${asks.length
+        ? html`
+            <ul class="session-card__asks">
+              ${asks.map((ask, index) => html`
+                <li key=${`${ask?.eventId || "ask"}:${index}`} class="session-card__ask">
+                  <span class="session-card__ask-label">ask</span>
+                  <span class="session-card__ask-from">${ask?.from || "session"}</span>
+                  <span class="session-card__ask-prompt">${ask?.prompt || "Question requested"}</span>
+                </li>
+              `)}
             </ul>
           `
         : null}
