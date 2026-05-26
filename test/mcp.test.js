@@ -182,6 +182,7 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_job_checkpoint",
       "tracker_job_complete",
       "tracker_job_context_pack",
+      "tracker_job_profiles",
       "tracker_job_rollover",
       "tracker_job_skill_plan",
       "tracker_job_start",
@@ -206,6 +207,11 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_session_note",
       "tracker_session_start",
       "tracker_session_status",
+      "tracker_skill_run_complete",
+      "tracker_skill_run_fail",
+      "tracker_skill_run_skip",
+      "tracker_skill_run_start",
+      "tracker_skills_list",
       "tracker_undo",
       "tracker_verify",
       "tracker_why"
@@ -702,6 +708,64 @@ test("tracker_job_* tools start, checkpoint, status, and complete through the ru
       assert.equal(skillPlanPayload.jobId, jobId);
       assert.equal(skillPlanPayload.profileId, "code-implementer");
       assert.equal(skillPlanPayload.skillPlan[0].skillId, "lt.execute_scope");
+
+      const skillsList = await client.request("tools/call", {
+        name: "tracker_skills_list",
+        arguments: {}
+      });
+      assert.notEqual(skillsList.result.isError, true);
+      const skillsPayload = JSON.parse(skillsList.result.content[0].text);
+      assert.ok(skillsPayload.skills.some((skill) => skill.id === "lt.verify"));
+
+      const profilesList = await client.request("tools/call", {
+        name: "tracker_job_profiles",
+        arguments: {}
+      });
+      assert.notEqual(profilesList.result.isError, true);
+      const profilesPayload = JSON.parse(profilesList.result.content[0].text);
+      assert.ok(profilesPayload.profiles.some((profile) => profile.id === "code-implementer"));
+
+      const skillRunStart = await client.request("tools/call", {
+        name: "tracker_skill_run_start",
+        arguments: {
+          jobId,
+          sessionToken,
+          skillId: "lt.verify",
+          summary: "starting structured verify skill"
+        }
+      });
+      assert.notEqual(skillRunStart.result.isError, true);
+      const skillRunStartPayload = JSON.parse(skillRunStart.result.content[0].text);
+      const skillRunId = skillRunStartPayload.skillRunId;
+      assert.match(skillRunId, /^skr_/);
+      assert.equal(skillRunStartPayload.skillRun.status, "running");
+
+      const rejectedSkillComplete = await client.request("tools/call", {
+        name: "tracker_skill_run_complete",
+        arguments: {
+          jobId,
+          skillRunId,
+          sessionToken: "not-a-real-session-token",
+          summary: "should be rejected"
+        }
+      });
+      assert.ok(rejectedSkillComplete.error);
+      assert.match(rejectedSkillComplete.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
+
+      const skillRunComplete = await client.request("tools/call", {
+        name: "tracker_skill_run_complete",
+        arguments: {
+          jobId,
+          skillRunId,
+          sessionToken,
+          summary: "structured verify skill complete"
+        }
+      });
+      assert.notEqual(skillRunComplete.result.isError, true);
+      const skillRunCompletePayload = JSON.parse(skillRunComplete.result.content[0].text);
+      assert.equal(skillRunCompletePayload.status, "succeeded");
+      assert.equal(skillRunCompletePayload.skillRun.status, "succeeded");
+      assert.equal(skillRunCompletePayload.skillRun.summary, "structured verify skill complete");
 
       const contextPack = await client.request("tools/call", {
         name: "tracker_job_context_pack",

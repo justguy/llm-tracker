@@ -401,6 +401,45 @@ function handleSkillRunFinished(p, e) {
     finishedAt: e.ts,
     ...(typeof e.summary === "string" ? { summary: e.summary } : {}),
   });
+
+  const jobId = e.jobId;
+  if (!isJobId(jobId)) return;
+  const job = p.jobs.get(jobId);
+  if (!job || !Array.isArray(job.completionGates)) return;
+  if (typeof e.skillId !== "string" || e.skillId.length === 0) return;
+  if (typeof e.id !== "string" || e.id.length === 0) return;
+
+  let changed = false;
+  const completionGates = job.completionGates.map((gate) => {
+    if (!gate || typeof gate !== "object") return gate;
+    if (gate.kind !== "required_skill" || gate.skillId !== e.skillId) return { ...gate };
+    if (gate.status === "overridden") return { ...gate };
+
+    if (e.status === "succeeded") {
+      changed = true;
+      return { ...gate, status: "satisfied", evidenceRef: e.id };
+    }
+    if (e.status === "failed" || (e.status === "skipped" && gate.required === true)) {
+      changed = true;
+      return { ...gate, status: "failed", evidenceRef: e.id };
+    }
+    if (e.status === "overridden") {
+      changed = true;
+      return {
+        ...gate,
+        status: "overridden",
+        evidenceRef: e.id,
+        overrideReason: typeof e.summary === "string" && e.summary.length > 0 ? e.summary : "Skill run overridden",
+      };
+    }
+    return { ...gate };
+  });
+  if (!changed) return;
+  p.jobs.set(jobId, {
+    ...job,
+    completionGates,
+    lastActivityAt: e.ts,
+  });
 }
 
 export { HANDLERS };

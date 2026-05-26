@@ -49,13 +49,13 @@ async function startApp(opts = {}) {
   app.use(express.json());
   registerJobsRoutes(app, {
     jobRegistry,
+    runtimeStore,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace: workspaceRoot,
     ...(opts.tokenStore
       ? {
           tokenStore: opts.tokenStore,
-          runtimeStore,
-          makeRuntimeId,
-          validateRuntimeEvent,
-          workspace: workspaceRoot,
         }
       : {}),
   });
@@ -69,6 +69,7 @@ async function startApp(opts = {}) {
     base: `http://127.0.0.1:${port}`,
     jobRegistry,
     projection,
+    runtimeStore,
     appendedEvents,
     close: async () => {
       await new Promise((r) => server.close(() => r()));
@@ -105,10 +106,10 @@ async function postJson(base, path, body, headers = {}) {
   return { status: res.status, body: json };
 }
 
-async function patchJson(base, path, body) {
+async function patchJson(base, path, body, headers = {}) {
   const init = {
     method: "PATCH",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
   };
   if (body !== undefined) init.body = JSON.stringify(body);
   const res = await fetch(`${base}${path}`, init);
@@ -747,6 +748,120 @@ test("GET /api/jobs/:id/skill-plan builds the job profile skill plan", async () 
       required: true,
       status: "pending",
     });
+  } finally {
+    await app.close();
+  }
+});
+
+// --- Skill catalog + profile endpoints -------------------------------------
+
+test("GET /api/skills and /api/job-profiles expose registries", async () => {
+  const app = await startApp();
+  try {
+    const skills = await getJson(app.base, "/api/skills");
+    assert.equal(skills.status, 200);
+    assert.ok(skills.body.skills.some((skill) => skill.id === "lt.verify"));
+
+    const skill = await getJson(app.base, "/api/skills/lt.verify");
+    assert.equal(skill.status, 200);
+    assert.equal(skill.body.skill.id, "lt.verify");
+
+    const profiles = await getJson(app.base, "/api/job-profiles");
+    assert.equal(profiles.status, 200);
+    assert.ok(profiles.body.profiles.some((profile) => profile.id === "code-implementer"));
+  } finally {
+    await app.close();
+  }
+});
+
+test("skill-run HTTP endpoints append structured events and satisfy required_skill gates", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput({ profileId: "code-implementer" }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "gate-verify", kind: "required_skill", skillId: "lt.verify", required: true, status: "pending" },
+    ];
+
+    await app.runtimeStore.append({
+      schemaVersion: 1,
+      ts: new Date().toISOString(),
+      type: "session.output",
+      source: "adapter",
+      workspace: app.runtimeStore.workspaceRoot,
+      sessionId: SES,
+      stream: "stdout",
+      bytes: 32,
+      preview: "$lt:verify says succeeded",
+    });
+    assert.equal(app.jobRegistry.get(created.jobId).completionGates[0].status, "pending");
+
+    const start = await postJson(app.base, `/api/jobs/${created.jobId}/skill-runs`, {
+      skillId: "lt.verify",
+      source: "mcp",
+      summary: "verify skill started",
+    });
+    assert.equal(start.status, 201);
+    assert.match(start.body.skillRunId, /^skr_/);
+    assert.equal(start.body.skillId, "lt.verify");
+
+    const startedEvent = app.appendedEvents.find((event) => event.type === "skill.run.started");
+    assert.ok(startedEvent);
+    assert.equal(startedEvent.source, "mcp");
+    assert.equal(startedEvent.skillRunId, start.body.skillRunId);
+
+    const complete = await patchJson(app.base, `/api/jobs/${created.jobId}/skill-runs/${start.body.skillRunId}`, {
+      status: "succeeded",
+      source: "mcp",
+      summary: "Verify pack satisfied; tests passed.",
+    });
+    assert.equal(complete.status, 200);
+    assert.equal(complete.body.status, "succeeded");
+
+    const finishedEvent = app.appendedEvents.find((event) => event.type === "skill.run.finished");
+    assert.ok(finishedEvent);
+    assert.equal(finishedEvent.source, "mcp");
+    assert.equal(finishedEvent.status, "succeeded");
+
+    const job = app.jobRegistry.get(created.jobId);
+    assert.deepEqual(job.completionGates[0], {
+      id: "gate-verify",
+      kind: "required_skill",
+      skillId: "lt.verify",
+      required: true,
+      status: "satisfied",
+      evidenceRef: complete.body.eventId,
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("skill-run endpoints reject missing or mismatched session tokens", async () => {
+  const tokenStore = new SessionTokenStore();
+  const app = await startApp({ tokenStore });
+  try {
+    const created = await app.jobRegistry.create(validJobInput({ profileId: "code-implementer" }));
+    const wrong = tokenStore.issue({ sessionId: "ses_01h2x3y4z5a6b7c8d9e0f1zzzz" });
+    const valid = tokenStore.issue({ sessionId: SES });
+
+    const rejected = await postJson(app.base, `/api/jobs/${created.jobId}/skill-runs`, {
+      skillId: "lt.verify",
+      source: "mcp",
+    }, {
+      "X-LT-Session-Token": wrong.token,
+    });
+    assert.equal(rejected.status, 401);
+    assert.equal(rejected.body.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(app.appendedEvents.filter((event) => event.type.startsWith("skill.run.")).length, 0);
+
+    const accepted = await postJson(app.base, `/api/jobs/${created.jobId}/skill-runs`, {
+      skillId: "lt.verify",
+      source: "mcp",
+    }, {
+      "X-LT-Session-Token": valid.token,
+    });
+    assert.equal(accepted.status, 201);
   } finally {
     await app.close();
   }

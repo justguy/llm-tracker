@@ -8,6 +8,8 @@ import { createTools } from "../bin/mcp-tools.js";
 import {
   JOB_MUTATION_TOOL_NAMES,
   JOB_TOOL_NAMES,
+  SKILL_MUTATION_TOOL_NAMES,
+  SKILL_TOOL_NAMES,
   SESSION_TOOL_NAMES,
   workspaceRuntimePayload
 } from "../bin/mcp-context-data.js";
@@ -144,6 +146,32 @@ test("tracker_job_* tools are registered and mutating tools carry sessionToken",
     assert.equal(runtime.daemonRule.jobToolsRequireDaemon, true);
     assert.deepEqual(runtime.daemonRule.jobTools, JOB_TOOL_NAMES);
     for (const name of JOB_MUTATION_TOOL_NAMES) {
+      assert.ok(runtime.daemonRule.writeTools.includes(name), `${name} should require the daemon`);
+    }
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_skill_* tools are registered and mutating tools carry sessionToken", () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-skill-");
+  try {
+    const tools = createTools(workspace);
+    for (const name of SKILL_TOOL_NAMES) {
+      const tool = tools.get(name);
+      assert.ok(tool, `${name} should be registered`);
+      assert.equal(tool.inputSchema.type, "object");
+    }
+    for (const name of SKILL_MUTATION_TOOL_NAMES) {
+      const tool = tools.get(name);
+      assert.ok(tool.inputSchema.properties.sessionToken, `${name} should carry sessionToken`);
+      assert.ok(tool.inputSchema.required.includes("sessionToken"), `${name} should require sessionToken`);
+    }
+
+    const runtime = workspaceRuntimePayload(workspace);
+    assert.equal(runtime.daemonRule.skillToolsRequireDaemon, true);
+    assert.deepEqual(runtime.daemonRule.skillTools, SKILL_TOOL_NAMES);
+    for (const name of SKILL_MUTATION_TOOL_NAMES) {
       assert.ok(runtime.daemonRule.writeTools.includes(name), `${name} should require the daemon`);
     }
   } finally {

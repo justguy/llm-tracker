@@ -25,9 +25,10 @@
 //
 // Error envelope mirrors hub/api/sessions.js: `{ error: { code, message, details? } }`.
 
-import { isJobId } from "../runtime/ids.js";
+import { isJobId, isSkillRunId } from "../runtime/ids.js";
 import { TERMINAL_JOB_STATUS } from "../jobs/registry.js";
 import { buildSkillPlan } from "../jobs/skill-plan.js";
+import { BUILT_IN_PROFILES } from "../jobs/profiles.js";
 import { SkillsRegistry } from "../skills/registry.js";
 import { requireSessionToken } from "./middleware/session-token.js";
 import {
@@ -59,8 +60,14 @@ const ROLLOVER_ALLOWED_FIELDS = new Set(["reason", "idempotencyKey"]);
 // callers to spoof identity. The registry has a `user` parameter so future
 // auth wiring can pass it through server-side once an identity layer lands.
 const UNBLOCK_ALLOWED_FIELDS = new Set(["reason", "previousReason", "idempotencyKey"]);
+const SKILL_RUN_START_ALLOWED_FIELDS = new Set(["skillId", "sessionId", "summary", "source", "evidence"]);
+const SKILL_RUN_PATCH_ALLOWED_FIELDS = new Set(["status", "skillId", "sessionId", "summary", "source", "evidence"]);
+const SKILL_RUN_OVERRIDE_ALLOWED_FIELDS = new Set(["reason", "skillId", "sessionId", "summary", "source", "evidence", "user"]);
 
 const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "handoff"]);
+const SKILL_RUN_FINISH_STATUSES = new Set(["succeeded", "failed", "skipped", "overridden"]);
+const SKILL_EVENT_SOURCES = new Set(["http", "mcp"]);
+const SKILL_ID_RE = /^[a-z0-9][a-z0-9_.:-]{0,127}$/;
 
 /**
  * @typedef {object} RegisterDeps
@@ -71,6 +78,7 @@ const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "ha
  * @property {(prefix: string) => string} [makeRuntimeId]
  * @property {(event: object) => true} [validateRuntimeEvent]
  * @property {string} [workspace]
+ * @property {object[]} [jobProfiles]
  */
 
 /**
@@ -92,6 +100,7 @@ export function registerJobsRoutes(app, deps) {
     workspace,
   } = deps || {};
   const skillsRegistry = deps?.skillsRegistry || new SkillsRegistry();
+  const jobProfiles = Array.isArray(deps?.jobProfiles) ? deps.jobProfiles : BUILT_IN_PROFILES;
   if (
     !jobRegistry ||
     typeof jobRegistry.list !== "function" ||
@@ -116,6 +125,29 @@ export function registerJobsRoutes(app, deps) {
         })
       : null;
   const requireToken = tokenMiddleware ? [tokenMiddleware] : [];
+
+  // --- GET /api/skills ----------------------------------------------------
+  app.get("/api/skills", (_req, res) => {
+    res.status(200).json({ skills: skillsRegistry.list() });
+  });
+
+  // --- GET /api/skills/:skillId ------------------------------------------
+  app.get("/api/skills/:skillId", (req, res) => {
+    const { skillId } = req.params;
+    if (!isValidSkillId(skillId)) {
+      return sendError(res, 400, "INVALID_SKILL_ID", `not a valid skill id: ${skillId}`);
+    }
+    const skill = skillsRegistry.get(skillId);
+    if (!skill) {
+      return sendError(res, 404, "UNKNOWN_SKILL", `skill not found: ${skillId}`);
+    }
+    return res.status(200).json({ skill });
+  });
+
+  // --- GET /api/job-profiles ---------------------------------------------
+  app.get("/api/job-profiles", (_req, res) => {
+    res.status(200).json({ profiles: jobProfiles });
+  });
 
   // --- GET /api/jobs ------------------------------------------------------
   app.get("/api/jobs", (_req, res) => {
@@ -171,6 +203,209 @@ export function registerJobsRoutes(app, deps) {
       return sendError(res, 404, "JOB_NOT_FOUND", `job not found: ${jobId}`);
     }
     res.status(200).json(job);
+  });
+
+  // --- POST /api/jobs/:jobId/skill-runs ----------------------------------
+  app.post("/api/jobs/:jobId/skill-runs", ...requireToken, async (req, res) => {
+    const prepared = prepareSkillRunRequest({
+      req,
+      res,
+      jobRegistry,
+      skillsRegistry,
+      allowedFields: SKILL_RUN_START_ALLOWED_FIELDS,
+      requireBody: true,
+      requireActiveJob: true,
+      requireSkillId: true,
+    });
+    if (!prepared) return;
+    if (!assertSkillRuntimeDeps(res, { runtimeStore, makeRuntimeId, validateRuntimeEvent, workspace })) return;
+
+    const skillRunId = makeRuntimeId("skr");
+    const source = resolveSkillEventSource(prepared.body.source);
+    if (source.error) return sendError(res, 400, "INVALID_BODY", source.error);
+
+    const event = {
+      schemaVersion: 1,
+      id: makeRuntimeId("evt"),
+      ts: new Date().toISOString(),
+      type: "skill.run.started",
+      source: source.value,
+      workspace,
+      skillRunId,
+      skillId: prepared.skillId,
+      jobId: prepared.job.id,
+      sessionId: prepared.sessionId,
+      ...(prepared.body.summary !== undefined ? { summary: prepared.body.summary } : {}),
+      ...(prepared.body.evidence !== undefined ? { evidence: prepared.body.evidence } : {}),
+    };
+
+    const result = await appendRuntimeEvent(res, {
+      event,
+      runtimeStore,
+      validateRuntimeEvent,
+    });
+    if (!result) return;
+    const skillRun = jobRegistry.projection?.skillRuns?.get(skillRunId) || null;
+    return res.status(201).json({
+      jobId: prepared.job.id,
+      sessionId: prepared.sessionId,
+      skillRunId,
+      skillId: prepared.skillId,
+      eventId: result.eventId,
+      rev: result.rev,
+      skillRun,
+    });
+  });
+
+  // --- PATCH /api/jobs/:jobId/skill-runs/:runId ---------------------------
+  app.patch("/api/jobs/:jobId/skill-runs/:runId", ...requireToken, async (req, res) => {
+    const { runId } = req.params;
+    if (!isSkillRunId(runId)) {
+      return sendError(res, 400, "INVALID_SKILL_RUN_ID", `not a valid skr_ id: ${runId}`);
+    }
+    const prepared = prepareSkillRunRequest({
+      req,
+      res,
+      jobRegistry,
+      skillsRegistry,
+      allowedFields: SKILL_RUN_PATCH_ALLOWED_FIELDS,
+      requireBody: true,
+      requireActiveJob: true,
+      requireSkillId: false,
+    });
+    if (!prepared) return;
+    if (!assertSkillRuntimeDeps(res, { runtimeStore, makeRuntimeId, validateRuntimeEvent, workspace })) return;
+
+    const existingRun = jobRegistry.projection?.skillRuns?.get(runId) || null;
+    if (existingRun?.jobId && existingRun.jobId !== prepared.job.id) {
+      return sendError(res, 409, "SKILL_RUN_JOB_MISMATCH", `skill run ${runId} does not belong to ${prepared.job.id}`);
+    }
+
+    const status = prepared.body.status;
+    if (typeof status !== "string" || !SKILL_RUN_FINISH_STATUSES.has(status)) {
+      return sendError(
+        res,
+        400,
+        "INVALID_BODY",
+        `status must be one of: ${[...SKILL_RUN_FINISH_STATUSES].join(", ")}`,
+        { allowed: [...SKILL_RUN_FINISH_STATUSES] },
+      );
+    }
+
+    const skillId = prepared.skillId || existingRun?.skillId;
+    if (!isValidSkillId(skillId)) {
+      return sendError(res, 400, "INVALID_SKILL_ID", "skillId required unless the skill run was previously started");
+    }
+    if (!skillsRegistry.has(skillId)) {
+      return sendError(res, 404, "UNKNOWN_SKILL", `skill not found: ${skillId}`);
+    }
+
+    const source = resolveSkillEventSource(prepared.body.source);
+    if (source.error) return sendError(res, 400, "INVALID_BODY", source.error);
+    const event = {
+      schemaVersion: 1,
+      id: makeRuntimeId("evt"),
+      ts: new Date().toISOString(),
+      type: "skill.run.finished",
+      source: source.value,
+      workspace,
+      skillRunId: runId,
+      skillId,
+      jobId: prepared.job.id,
+      sessionId: prepared.sessionId,
+      status,
+      ...(prepared.body.summary !== undefined ? { summary: prepared.body.summary } : {}),
+      ...(prepared.body.evidence !== undefined ? { evidence: prepared.body.evidence } : {}),
+    };
+
+    const result = await appendRuntimeEvent(res, {
+      event,
+      runtimeStore,
+      validateRuntimeEvent,
+    });
+    if (!result) return;
+    return res.status(200).json({
+      jobId: prepared.job.id,
+      sessionId: prepared.sessionId,
+      skillRunId: runId,
+      skillId,
+      status,
+      eventId: result.eventId,
+      rev: result.rev,
+      skillRun: jobRegistry.projection?.skillRuns?.get(runId) || null,
+      job: jobRegistry.get(prepared.job.id),
+    });
+  });
+
+  // --- POST /api/jobs/:jobId/skill-runs/:runId/override -------------------
+  app.post("/api/jobs/:jobId/skill-runs/:runId/override", ...requireToken, async (req, res) => {
+    const { runId } = req.params;
+    if (!isSkillRunId(runId)) {
+      return sendError(res, 400, "INVALID_SKILL_RUN_ID", `not a valid skr_ id: ${runId}`);
+    }
+    const prepared = prepareSkillRunRequest({
+      req,
+      res,
+      jobRegistry,
+      skillsRegistry,
+      allowedFields: SKILL_RUN_OVERRIDE_ALLOWED_FIELDS,
+      requireBody: true,
+      requireActiveJob: true,
+      requireSkillId: false,
+    });
+    if (!prepared) return;
+    if (!assertSkillRuntimeDeps(res, { runtimeStore, makeRuntimeId, validateRuntimeEvent, workspace })) return;
+    const reason = prepared.body.reason;
+    if (typeof reason !== "string" || reason.length === 0) {
+      return sendError(res, 400, "INVALID_BODY", "`reason` is required for skill run override");
+    }
+
+    const existingRun = jobRegistry.projection?.skillRuns?.get(runId) || null;
+    const skillId = prepared.skillId || existingRun?.skillId;
+    if (!isValidSkillId(skillId)) {
+      return sendError(res, 400, "INVALID_SKILL_ID", "skillId required unless the skill run was previously started");
+    }
+    if (!skillsRegistry.has(skillId)) {
+      return sendError(res, 404, "UNKNOWN_SKILL", `skill not found: ${skillId}`);
+    }
+    const source = resolveSkillEventSource(prepared.body.source);
+    if (source.error) return sendError(res, 400, "INVALID_BODY", source.error);
+
+    const event = {
+      schemaVersion: 1,
+      id: makeRuntimeId("evt"),
+      ts: new Date().toISOString(),
+      type: "skill.run.finished",
+      source: source.value,
+      workspace,
+      skillRunId: runId,
+      skillId,
+      jobId: prepared.job.id,
+      sessionId: prepared.sessionId,
+      status: "overridden",
+      summary: prepared.body.summary || reason,
+      reason,
+      ...(prepared.body.user !== undefined ? { user: prepared.body.user } : {}),
+      ...(prepared.body.evidence !== undefined ? { evidence: prepared.body.evidence } : {}),
+    };
+
+    const result = await appendRuntimeEvent(res, {
+      event,
+      runtimeStore,
+      validateRuntimeEvent,
+    });
+    if (!result) return;
+    return res.status(200).json({
+      jobId: prepared.job.id,
+      sessionId: prepared.sessionId,
+      skillRunId: runId,
+      skillId,
+      status: "overridden",
+      eventId: result.eventId,
+      rev: result.rev,
+      skillRun: jobRegistry.projection?.skillRuns?.get(runId) || null,
+      job: jobRegistry.get(prepared.job.id),
+    });
   });
 
   // --- PATCH /api/jobs/:jobId ---------------------------------------------
@@ -501,6 +736,139 @@ function sessionIdForJobMutation(req, jobRegistry) {
   }
   const sessionId = req?.body?.sessionId;
   return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
+}
+
+function isValidSkillId(value) {
+  return typeof value === "string" && SKILL_ID_RE.test(value);
+}
+
+function resolveSkillEventSource(value) {
+  if (value === undefined || value === null || value === "") return { value: "http" };
+  if (typeof value !== "string" || !SKILL_EVENT_SOURCES.has(value)) {
+    return { error: `source must be one of: ${[...SKILL_EVENT_SOURCES].join(", ")}` };
+  }
+  return { value };
+}
+
+function assertSkillRuntimeDeps(res, deps) {
+  const { runtimeStore, makeRuntimeId, validateRuntimeEvent, workspace } = deps || {};
+  if (
+    !runtimeStore ||
+    typeof runtimeStore.append !== "function" ||
+    typeof makeRuntimeId !== "function" ||
+    typeof validateRuntimeEvent !== "function" ||
+    typeof workspace !== "string" ||
+    workspace.length === 0
+  ) {
+    sendError(
+      res,
+      501,
+      "NOT_IMPLEMENTED",
+      "skill-run endpoints require runtimeStore, makeRuntimeId, validateRuntimeEvent, and workspace wiring.",
+    );
+    return false;
+  }
+  return true;
+}
+
+function prepareSkillRunRequest({
+  req,
+  res,
+  jobRegistry,
+  skillsRegistry,
+  allowedFields,
+  requireBody,
+  requireActiveJob,
+  requireSkillId,
+}) {
+  const { jobId } = req.params;
+  if (!isJobId(jobId)) {
+    sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
+    return null;
+  }
+  const job = jobRegistry.get(jobId);
+  if (!job) {
+    sendError(res, 404, "JOB_NOT_FOUND", `job not found: ${jobId}`);
+    return null;
+  }
+  if (requireActiveJob && TERMINAL_JOB_STATUS.includes(job.status)) {
+    sendError(res, 409, "JOB_TERMINAL", `job '${jobId}' is terminal (${job.status})`, {
+      jobId,
+      status: job.status,
+    });
+    return null;
+  }
+
+  let body = req.body;
+  if (requireBody) {
+    body = requireObjectBody(req, res);
+    if (body === undefined) return null;
+  } else if (body === undefined || body === null) {
+    body = {};
+  }
+  const unknown = rejectUnknownFields(body, allowedFields);
+  if (unknown) {
+    sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+    return null;
+  }
+
+  const sessionId = body.sessionId === undefined ? job.sessionId : body.sessionId;
+  if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId !== job.sessionId) {
+    sendError(res, 400, "SESSION_MISMATCH", "skill run sessionId must match the job sessionId", {
+      expected: job.sessionId,
+      actual: sessionId,
+    });
+    return null;
+  }
+
+  const skillId = body.skillId;
+  if (skillId !== undefined || requireSkillId) {
+    if (!isValidSkillId(skillId)) {
+      sendError(res, 400, "INVALID_SKILL_ID", "skillId must match ^[a-z0-9][a-z0-9_.:-]{0,127}$");
+      return null;
+    }
+    if (!skillsRegistry.has(skillId)) {
+      sendError(res, 404, "UNKNOWN_SKILL", `skill not found: ${skillId}`);
+      return null;
+    }
+  }
+  if (body.summary !== undefined && (typeof body.summary !== "string" || body.summary.length === 0)) {
+    sendError(res, 400, "INVALID_BODY", "`summary` must be a non-empty string when present");
+    return null;
+  }
+  if (body.evidence !== undefined && !Array.isArray(body.evidence)) {
+    sendError(res, 400, "INVALID_BODY", "`evidence` must be an array when present");
+    return null;
+  }
+  if (body.user !== undefined && (typeof body.user !== "string" || body.user.length === 0)) {
+    sendError(res, 400, "INVALID_BODY", "`user` must be a non-empty string when present");
+    return null;
+  }
+
+  return {
+    job,
+    body,
+    sessionId,
+    skillId: typeof skillId === "string" ? skillId : null,
+  };
+}
+
+async function appendRuntimeEvent(res, { event, runtimeStore, validateRuntimeEvent }) {
+  try {
+    validateRuntimeEvent(event);
+  } catch (err) {
+    sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
+      errors: err.errors,
+    });
+    return null;
+  }
+  const { id: _placeholderEventId, ...eventForAppend } = event;
+  try {
+    return await runtimeStore.append(eventForAppend);
+  } catch (err) {
+    sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+    return null;
+  }
 }
 
 /**
