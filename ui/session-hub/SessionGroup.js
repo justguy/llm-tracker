@@ -31,6 +31,19 @@ function sourceFromEvent(event) {
   return { kind: event.source, eventId: event.id, eventType: event.type };
 }
 
+function appendUniqueJobId(values, jobId) {
+  const out = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    if (typeof value === "string" && value.length > 0 && !out.includes(value)) out.push(value);
+  }
+  if (typeof jobId === "string" && jobId.length > 0 && !out.includes(jobId)) out.push(jobId);
+  return out;
+}
+
+function removeJobId(values, jobId) {
+  return appendUniqueJobId(values, null).filter((value) => value !== jobId);
+}
+
 export const TASK_DROP_MIME = "application/x-llm-tracker-task";
 
 function nonEmptyString(value) {
@@ -211,6 +224,31 @@ export function applyRuntimeSessionEvent(sessions, event) {
           ? session.warnings.filter((warning) => warning?.kind !== event.warningKind)
           : [],
       }));
+    case "session.task_attached":
+      return upsertSession(sessions, sessionId, (session) => {
+        if (Array.isArray(event.queuedJobIds)) {
+          return {
+            ...session,
+            queuedJobIds: event.queuedJobIds.filter((jobId) => typeof jobId === "string" && jobId.length > 0),
+            lastActivityAt: event.ts,
+          };
+        }
+        if (event.mode === "queued" || typeof event.predecessorJobId === "string") {
+          return {
+            ...session,
+            queuedJobIds: appendUniqueJobId(session.queuedJobIds, event.jobId),
+            lastActivityAt: event.ts,
+          };
+        }
+        return {
+          ...session,
+          ...(typeof event.projectSlug === "string" && event.projectSlug.length > 0 ? { projectSlug: event.projectSlug } : {}),
+          ...(typeof event.taskId === "string" && event.taskId.length > 0 ? { taskId: event.taskId } : {}),
+          ...(typeof event.jobId === "string" && event.jobId.length > 0 ? { activeJobId: event.jobId } : {}),
+          queuedJobIds: removeJobId(session.queuedJobIds, event.jobId),
+          lastActivityAt: event.ts,
+        };
+      });
     case "session.stdio_capture_changed":
       return upsertSession(sessions, sessionId, (session) => ({
         ...session,

@@ -79,6 +79,10 @@ const ATTACH_CONFIRM_ALLOWED_FIELDS = new Set([
   "force",
   "idempotencyKey",
 ]);
+const BIND_TASK_ALLOWED_FIELDS = new Set([
+  ...ATTACH_PREVIEW_ALLOWED_FIELDS,
+  "idempotencyKey",
+]);
 const ATTACH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
 const ATTACH_CANCEL_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
 const ATTACH_REORDER_ALLOWED_FIELDS = new Set(["jobIds"]);
@@ -422,6 +426,132 @@ export function registerSessionsRoutes(app, deps) {
         sessionId,
         jobId: created.jobId,
         ...(predecessorJobId ? { predecessorJobId } : {}),
+        job: jobRegistry.get(created.jobId) || created.job,
+        session: projection.sessions.get(sessionId) || session,
+        preflight,
+        rev: attachAppend.rev,
+        eventId: attachAppend.eventId,
+        jobEventId: created.eventId,
+      });
+    });
+  });
+
+  // --- POST /api/sessions/:sessionId/bind-task ----------------------------
+  app.post("/api/sessions/:sessionId/bind-task", async (req, res) => {
+    const { sessionId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+    if (!hasAttachJobRegistry(jobRegistry)) {
+      return sendError(res, 501, "BIND_JOB_REGISTRY_UNAVAILABLE", "bind-task requires JobRegistry wiring");
+    }
+
+    const bodyOrError = validateBindTaskBody(req.body);
+    if (bodyOrError.error) {
+      return sendError(res, 400, bodyOrError.code, bodyOrError.error, bodyOrError.details);
+    }
+    const body = bodyOrError.value;
+
+    return runSerializedAttach(sessionId, async () => {
+      const session = projection.sessions.get(sessionId) || null;
+      if (!session) {
+        return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+      }
+      const existingJobs = jobRegistry.listBySession(sessionId);
+      if (session.taskId || session.activeJobId || existingJobs.length > 0) {
+        return sendError(
+          res,
+          409,
+          "SESSION_ALREADY_BOUND",
+          "session already has task or job state; bind-task only creates the first JobRecord",
+          {
+            sessionId,
+            taskId: session.taskId || null,
+            activeJobId: session.activeJobId || null,
+            jobIds: existingJobs.map((job) => job.id),
+          },
+        );
+      }
+
+      const projectSlug = body.projectSlug || session.projectSlug || "";
+      const project =
+        projectSlug && store && typeof store.get === "function"
+          ? store.get(projectSlug)
+          : null;
+      const tasks = Array.isArray(project?.data?.tasks) ? project.data.tasks : [];
+      const task = tasks.find((item) => item && item.id === body.taskId) || null;
+      const snapshots = projection.toSnapshots();
+      const sessions = snapshots.sessions || [];
+      const jobs = jobRegistry.list();
+
+      let preflight;
+      try {
+        preflight = buildAttachTaskPreflight({
+          sessionId,
+          projectSlug,
+          taskId: body.taskId,
+          session,
+          task,
+          sessions,
+          jobs,
+          profileId: body.profileId,
+          estBriefTokens: body.estBriefTokens,
+          contextBriefTokens: body.contextBriefTokens,
+          contextBudget: body.contextBudget,
+          config: { attach },
+        });
+      } catch (err) {
+        return sendError(res, 500, "BIND_PREFLIGHT_FAILED", err.message || "bind-task preflight failed");
+      }
+      if (preflight.hasFail) {
+        return sendError(res, 409, "BIND_PREFLIGHT_FAILED", "bind-task preflight failed", { preflight });
+      }
+
+      const profileId = body.profileId || DEFAULT_ATTACH_PROFILE_ID;
+      const profile = BUILT_IN_PROFILES_BY_ID.get(profileId);
+      let created;
+      try {
+        created = await jobRegistry.create({
+          sessionId,
+          projectSlug,
+          taskId: body.taskId,
+          profileId,
+          kind: profile?.kind || "code",
+          ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+          source: "http",
+        });
+      } catch (err) {
+        return mapAttachRegistryError(res, err);
+      }
+
+      let attachEvent;
+      try {
+        attachEvent = createSessionTaskAttachedEvent({
+          sessionId,
+          jobId: created.jobId,
+          projectSlug,
+          taskId: body.taskId,
+          profileId,
+          mode: "started",
+          workspace,
+          source: "http",
+        });
+      } catch (err) {
+        return sendError(res, 400, "INVALID_BODY", err.message || "failed to create session.task_attached event");
+      }
+
+      let attachAppend;
+      try {
+        attachAppend = await runtimeStore.append(attachEvent);
+      } catch (err) {
+        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+      }
+
+      return res.status(201).json({
+        ok: true,
+        mode: "started",
+        sessionId,
+        jobId: created.jobId,
         job: jobRegistry.get(created.jobId) || created.job,
         session: projection.sessions.get(sessionId) || session,
         preflight,
@@ -1301,6 +1431,42 @@ function validateAttachConfirmBody(body) {
   }
   if (force !== undefined && typeof force !== "boolean") {
     return { code: "INVALID_BODY", error: "`force` must be a boolean when present" };
+  }
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || idempotencyKey.length === 0)) {
+    return { code: "INVALID_BODY", error: "`idempotencyKey` must be a non-empty string when present" };
+  }
+  return { value: body };
+}
+
+function validateBindTaskBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { code: "INVALID_BODY", error: "request body must be a JSON object" };
+  }
+  const unknown = unknownFields(body, BIND_TASK_ALLOWED_FIELDS);
+  if (unknown.length > 0) {
+    return {
+      code: "UNKNOWN_FIELDS",
+      error: `unknown body field(s): ${unknown.join(", ")}`,
+      details: { unknown },
+    };
+  }
+  const { taskId, profileId, estBriefTokens, contextBriefTokens, contextBudget, idempotencyKey } = body;
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    return { code: "INVALID_BODY", error: "`taskId` is required (non-empty string)" };
+  }
+  if ("projectSlug" in body && (typeof body.projectSlug !== "string" || body.projectSlug.length === 0)) {
+    return { code: "INVALID_BODY", error: "`projectSlug` must be a non-empty string when present" };
+  }
+  if (profileId !== undefined && (typeof profileId !== "string" || profileId.length === 0)) {
+    return { code: "INVALID_BODY", error: "`profileId` must be a non-empty string when present" };
+  }
+  for (const [field, value] of Object.entries({ estBriefTokens, contextBriefTokens })) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+      return { code: "INVALID_BODY", error: `\`${field}\` must be a non-negative number when present` };
+    }
+  }
+  if (contextBudget !== undefined && (!contextBudget || typeof contextBudget !== "object" || Array.isArray(contextBudget))) {
+    return { code: "INVALID_BODY", error: "`contextBudget` must be a JSON object when present" };
   }
   if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || idempotencyKey.length === 0)) {
     return { code: "INVALID_BODY", error: "`idempotencyKey` must be a non-empty string when present" };

@@ -770,6 +770,57 @@ test("POST /api/sessions/:sessionId/attach-task starts first job and mirrors act
   }
 });
 
+test("POST /api/sessions/:sessionId/bind-task starts the first job for an untasked session", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-bind", title: "Bind task", status: "not_started" },
+            { id: "t-other", title: "Other task", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "untasked",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+    assert.equal(target.session.taskId, undefined);
+    assert.equal(target.session.activeJobId, undefined);
+
+    const bindRes = await postJson(env.base, `/api/sessions/${target.session.id}/bind-task`, {
+      taskId: "t-bind",
+    });
+    assert.equal(bindRes.status, 201);
+    const bind = await bindRes.json();
+    assert.equal(bind.ok, true);
+    assert.equal(bind.mode, "started");
+    assert.equal(bind.job.status, "running");
+    assert.equal(bind.job.taskId, "t-bind");
+    assert.equal(bind.session.taskId, "t-bind");
+    assert.equal(bind.session.activeJobId, bind.jobId);
+    assert.equal(bind.session.queuedJobIds?.length ?? 0, 0);
+    assert.equal(env.jobRegistry.get(bind.jobId).status, "running");
+    assert.equal(env.appendedEvents.filter((event) => event.type === "job.started").length, 1);
+    assert.equal(env.appendedEvents.filter((event) => event.type === "session.task_attached").length, 1);
+
+    const secondBindRes = await postJson(env.base, `/api/sessions/${target.session.id}/bind-task`, {
+      taskId: "t-other",
+    });
+    assert.equal(secondBindRes.status, 409);
+    const secondBind = await secondBindRes.json();
+    assert.equal(secondBind.error.code, "SESSION_ALREADY_BOUND");
+  } finally {
+    await env.close();
+  }
+});
+
 test("POST /api/sessions/:sessionId/attach-task queues behind an active job", { timeout: TEST_TIMEOUT }, async () => {
   const env = await startMiniApp({
     projects: {

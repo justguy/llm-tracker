@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeSessionCardSize, SessionCard } from "./SessionCard.js";
+import { JOB_ACTION_UNBOUND_REASON, normalizeSessionCardSize, SessionCard } from "./SessionCard.js";
 import {
   SessionGroupView,
   TASK_DROP_MIME,
@@ -129,6 +129,29 @@ test("SessionCard renders ask notifications on the target card", () => {
   assert.match(text, /ask/i);
   assert.match(text, /ses_sender/);
   assert.match(text, /Please verify the handoff/);
+});
+
+test("SessionCard disables job-only actions when no active job is bound", () => {
+  const vnode = SessionCard({
+    session: { id: "ses_unbound", name: "Untasked", tier: "manual" },
+  });
+  const buttons = nodesByClassName(vnode, "session-card__job-action");
+  assert.equal(buttons.length, 3);
+  assert.deepEqual(buttons.map((button) => collectVNodeText(button).trim()), ["VERIFY", "COMPLETE", "SKILLS"]);
+  assert.ok(buttons.every((button) => button.props.disabled === true));
+  assert.ok(buttons.every((button) => button.props.title === JOB_ACTION_UNBOUND_REASON));
+  assert.match(collectVNodeText(vnode), /session has no active job; bind a task first/);
+});
+
+test("SessionCard enables job-only actions when activeJobId is present", () => {
+  const vnode = SessionCard({
+    session: { id: "ses_bound", name: "Bound", tier: "manual", activeJobId: "job_active" },
+  });
+  const buttons = nodesByClassName(vnode, "session-card__job-action");
+  assert.equal(buttons.length, 3);
+  assert.ok(buttons.every((button) => button.props.disabled === false));
+  assert.ok(buttons.every((button) => button.props.title === "job_active"));
+  assert.doesNotMatch(collectVNodeText(vnode), /bind a task first/);
 });
 
 test("SessionGroupView exposes exactly the three card-size choices", () => {
@@ -306,6 +329,50 @@ test("applyRuntimeSessionsMessage applies runtime.event session updates without 
     },
   });
   assert.equal(sessions[0].warnings.length, 0);
+});
+
+test("applyRuntimeSessionsMessage projects session.task_attached onto the card model", () => {
+  let sessions = [{
+    id: "ses_a",
+    tier: "manual",
+    status: "active",
+    queuedJobIds: ["job_queued"],
+  }];
+  sessions = applyRuntimeSessionsMessage(sessions, {
+    type: "runtime.event",
+    event: {
+      id: "evt_attach",
+      type: "session.task_attached",
+      source: "http",
+      ts: "2026-05-25T15:03:00.000Z",
+      sessionId: "ses_a",
+      projectSlug: "demo",
+      taskId: "t-1",
+      jobId: "job_active",
+      mode: "started",
+    },
+  });
+  assert.equal(sessions[0].projectSlug, "demo");
+  assert.equal(sessions[0].taskId, "t-1");
+  assert.equal(sessions[0].activeJobId, "job_active");
+  assert.deepEqual(sessions[0].queuedJobIds, ["job_queued"]);
+
+  sessions = applyRuntimeSessionsMessage(sessions, {
+    type: "runtime.event",
+    event: {
+      id: "evt_queue",
+      type: "session.task_attached",
+      source: "http",
+      ts: "2026-05-25T15:04:00.000Z",
+      sessionId: "ses_a",
+      taskId: "t-2",
+      jobId: "job_next",
+      predecessorJobId: "job_active",
+      mode: "queued",
+    },
+  });
+  assert.equal(sessions[0].activeJobId, "job_active");
+  assert.deepEqual(sessions[0].queuedJobIds, ["job_queued", "job_next"]);
 });
 
 test("applyRuntimeSessionsMessage applies session.ask to the target session", () => {

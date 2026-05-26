@@ -502,6 +502,9 @@ test("untasked: creates a session, no job, mode=untasked with unbound_session wa
     const session = h.projection.sessions.get(r.sessionId);
     assert.ok(session);
     assert.equal(session.taskId, undefined);
+    assert.equal(session.activeJobId, undefined);
+    assert.equal(h.appendedEvents.filter((e) => e.type === "job.queued").length, 0);
+    assert.equal(h.projection.toSnapshots().jobs.length, 0);
   } finally {
     h.close();
   }

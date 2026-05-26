@@ -598,6 +598,44 @@ test("POST /api/run-session/launch — task_backed happy path returns 201 with m
   }
 });
 
+test("POST /api/run-session/launch — untasked mode creates a session with no job", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: { tasks: [task({ id: "t1" })] },
+        rev: 0,
+      },
+    },
+  });
+  try {
+    const created = await postJson(app.base, "/api/run-session/draft", {
+      source: "global_new_session",
+      mode: "untasked",
+      projectSlug: "proj",
+    });
+    assert.equal(created.status, 201);
+    const r = await postJson(app.base, "/api/run-session/launch", {
+      draftId: created.body.draft.id,
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.mode, "untasked");
+    assert.match(r.body.sessionId, /^ses_[0-9a-hjkmnp-tv-z]{26}$/);
+    assert.equal(r.body.jobId, null);
+    assert.equal(r.body.taskClaimed, false);
+    assert.deepEqual(r.body.warnings, ["unbound_session"]);
+
+    const session = app.projection.sessions.get(r.body.sessionId);
+    assert.ok(session);
+    assert.equal(session.taskId, undefined);
+    assert.equal(session.activeJobId, undefined);
+    assert.equal(app.projection.toSnapshots().jobs.length, 0);
+    assert.equal(app.appendedEvents.filter((event) => event.type === "session.started").length, 1);
+    assert.equal(app.appendedEvents.filter((event) => event.type === "job.started").length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
 test("POST /api/run-session/launch — stale expectedTrackerRev returns 409 STALE_TRACKER_REV with currentRev", async () => {
   const app = await startMiniApp({
     projects: {

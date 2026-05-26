@@ -2,6 +2,8 @@ import { html } from "htm/preact";
 import { StdioBadge } from "./StdioBadge.js";
 
 export const SESSION_CARD_SIZES = Object.freeze(["compact", "normal", "large"]);
+export const JOB_ACTION_UNBOUND_REASON = "session has no active job; bind a task first";
+const JOB_ACTIONS = Object.freeze(["VERIFY", "COMPLETE", "SKILLS"]);
 
 export function normalizeSessionCardSize(size) {
   return SESSION_CARD_SIZES.includes(size) ? size : "normal";
@@ -37,6 +39,10 @@ export function SessionCard({ session, size = "normal" } = {}) {
   const warnings = Array.isArray(session.warnings) ? session.warnings : [];
   const asks = Array.isArray(session.asks) ? session.asks : [];
   const cardSize = normalizeSessionCardSize(size);
+  const activeJobId = typeof session.activeJobId === "string" && session.activeJobId.length > 0
+    ? session.activeJobId
+    : null;
+  const jobActionDisabledReason = activeJobId ? null : JOB_ACTION_UNBOUND_REASON;
 
   return html`
     <article
@@ -60,6 +66,24 @@ export function SessionCard({ session, size = "normal" } = {}) {
         <span class=${`session-card__repo ${session.repoRoot ? "session-card__repo--known" : "session-card__repo--unknown"}`}>
           ${repoLabel(session)}
         </span>
+      </div>
+
+      <div class="session-card__job-actions" data-active-job-id=${activeJobId || ""}>
+        ${JOB_ACTIONS.map((label) => html`
+          <button
+            key=${label}
+            class="session-card__job-action"
+            type="button"
+            disabled=${!activeJobId}
+            title=${jobActionDisabledReason || activeJobId}
+            aria-label=${jobActionDisabledReason ? `${label}: ${jobActionDisabledReason}` : `${label}: ${activeJobId}`}
+          >
+            ${label}
+          </button>
+        `)}
+        ${jobActionDisabledReason
+          ? html`<span class="session-card__job-action-reason">${jobActionDisabledReason}</span>`
+          : null}
       </div>
 
       ${warnings.length
