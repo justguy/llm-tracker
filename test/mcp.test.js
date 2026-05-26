@@ -188,6 +188,9 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_job_start",
       "tracker_job_status",
       "tracker_job_unblock",
+      "tracker_job_verify_pack",
+      "tracker_job_verify_resolve",
+      "tracker_job_verify_run",
       "tracker_next",
       "tracker_patch",
       "tracker_pick",
@@ -807,6 +810,50 @@ test("tracker_job_* tools start, checkpoint, status, and complete through the ru
       const jobStatusPayload = JSON.parse(jobStatus.result.content[0].text);
       assert.equal(jobStatusPayload.id, jobId);
       assert.equal(jobStatusPayload.status, "running");
+
+      const verifyPack = await client.request("tools/call", {
+        name: "tracker_job_verify_pack",
+        arguments: { jobId }
+      });
+      assert.equal(verifyPack.result.isError, true);
+      assert.match(verifyPack.result.content[0].text, /VERIFY_PACK_NOT_FOUND/);
+
+      const rejectedVerifyRunToken = await client.request("tools/call", {
+        name: "tracker_job_verify_run",
+        arguments: {
+          jobId,
+          itemId: "cmd.ok",
+          sessionToken: "not-a-real-session-token"
+        }
+      });
+      assert.ok(rejectedVerifyRunToken.error);
+      assert.match(rejectedVerifyRunToken.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
+
+      const missingVerifyRunPack = await client.request("tools/call", {
+        name: "tracker_job_verify_run",
+        arguments: {
+          jobId,
+          itemId: "cmd.ok",
+          sessionToken,
+          idempotencyKey: "mcp-verify-run-1"
+        }
+      });
+      assert.ok(missingVerifyRunPack.error);
+      assert.match(missingVerifyRunPack.error.message, /VERIFY_PACK_NOT_FOUND|404/);
+
+      const missingVerifyResolvePack = await client.request("tools/call", {
+        name: "tracker_job_verify_resolve",
+        arguments: {
+          jobId,
+          itemId: "approve.ship",
+          sessionToken,
+          approved: true,
+          reason: "approved by MCP",
+          user: "mcp-agent"
+        }
+      });
+      assert.ok(missingVerifyResolvePack.error);
+      assert.match(missingVerifyResolvePack.error.message, /VERIFY_PACK_NOT_FOUND|404/);
 
       const skillPlan = await client.request("tools/call", {
         name: "tracker_job_skill_plan",

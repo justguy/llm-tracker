@@ -12,6 +12,7 @@ const JOB_STATUSES = new Set(["queued", "starting", "running", "blocked", "verif
 const JOB_KINDS = new Set(["code", "prd", "review", "planning", "closeout", "custom"]);
 const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "handoff"]);
 const UI_COMPLETE_MODES = new Set(["block_required_missing", "allow_optional_missing"]);
+const VERIFY_RESOLVE_STATUSES = new Set(["satisfied", "failed"]);
 
 function optionalStringProperty(description) {
   return { type: "string", description };
@@ -51,6 +52,12 @@ function createJobTool(definition) {
 function addOptionalString(body, args, key) {
   const value = nonEmptyString(args[key]);
   if (value) body[key] = value;
+}
+
+function requireVerifyItemId(args, toolName) {
+  const itemId = nonEmptyString(args.itemId);
+  if (!itemId) return { error: `${toolName} requires itemId.` };
+  return { itemId };
 }
 
 function prepareJobMutation(args, toolName, bodyFields) {
@@ -324,6 +331,121 @@ export function createJobTools(workspace, portFlag) {
           method: "GET",
           path: `/api/jobs/${id.jobId}/skill-plan`,
           label: "tracker_job_skill_plan"
+        };
+      }
+    }),
+    createJobTool({
+      name: "tracker_job_verify_pack",
+      description: "Fetch a job verify pack and gate-enriched verify items from the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          jobId: { type: "string", description: "Runtime job id" }
+        },
+        required: ["jobId"]
+      },
+      prepareRequest(args = {}) {
+        const id = requireJobId(args, "tracker_job_verify_pack");
+        if (id.error) return id;
+        return {
+          workspace,
+          portFlag,
+          method: "GET",
+          path: `/api/jobs/${id.jobId}/verify-pack`,
+          label: "tracker_job_verify_pack"
+        };
+      }
+    }),
+    createJobTool({
+      name: "tracker_job_verify_run",
+      description: "Run a command verify item through the running hub and emit verify.command.* evidence.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          jobId: { type: "string", description: "Runtime job id" },
+          itemId: { type: "string", description: "Verify item id" },
+          sessionToken: mcpSessionTokenProperty,
+          idempotencyKey: optionalStringProperty("Optional idempotency key")
+        },
+        required: ["jobId", "itemId", "sessionToken"]
+      },
+      prepareRequest(args = {}) {
+        const id = requireJobId(args, "tracker_job_verify_run");
+        if (id.error) return id;
+        const item = requireVerifyItemId(args, "tracker_job_verify_run");
+        if (item.error) return item;
+        const token = requireMcpSessionToken(args, "tracker_job_verify_run");
+        if (token.error) return token;
+        const body = { source: "mcp" };
+        addOptionalString(body, args, "idempotencyKey");
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: `/api/jobs/${id.jobId}/verify-pack/items/${encodePathPart(item.itemId)}/run`,
+          label: "tracker_job_verify_run",
+          body,
+          headers: mcpSessionTokenHeaders(token.sessionToken),
+          jsonRpcErrorOnFailure: true
+        };
+      }
+    }),
+    createJobTool({
+      name: "tracker_job_verify_resolve",
+      description: "Resolve a human_approval or dod_check verify item through the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          jobId: { type: "string", description: "Runtime job id" },
+          itemId: { type: "string", description: "Verify item id" },
+          sessionToken: mcpSessionTokenProperty,
+          status: {
+            type: "string",
+            enum: [...VERIFY_RESOLVE_STATUSES],
+            description: "Optional explicit verify status"
+          },
+          approved: { type: "boolean", description: "Human approval boolean" },
+          satisfied: { type: "boolean", description: "DoD check boolean" },
+          reason: optionalStringProperty("Optional resolve reason"),
+          summary: optionalStringProperty("Optional resolve summary"),
+          user: optionalStringProperty("Optional resolving user"),
+          idempotencyKey: optionalStringProperty("Optional idempotency key")
+        },
+        required: ["jobId", "itemId", "sessionToken"]
+      },
+      prepareRequest(args = {}) {
+        const id = requireJobId(args, "tracker_job_verify_resolve");
+        if (id.error) return id;
+        const item = requireVerifyItemId(args, "tracker_job_verify_resolve");
+        if (item.error) return item;
+        const token = requireMcpSessionToken(args, "tracker_job_verify_resolve");
+        if (token.error) return token;
+        const body = { source: "mcp" };
+        const status = nonEmptyString(args.status);
+        if (status) {
+          if (!VERIFY_RESOLVE_STATUSES.has(status)) {
+            return { error: `tracker_job_verify_resolve requires status to be one of: ${[...VERIFY_RESOLVE_STATUSES].join(", ")}.` };
+          }
+          body.status = status;
+        }
+        if (args.approved !== undefined) {
+          if (typeof args.approved !== "boolean") return { error: "tracker_job_verify_resolve requires approved to be boolean when present." };
+          body.approved = args.approved;
+        }
+        if (args.satisfied !== undefined) {
+          if (typeof args.satisfied !== "boolean") return { error: "tracker_job_verify_resolve requires satisfied to be boolean when present." };
+          body.satisfied = args.satisfied;
+        }
+        for (const field of ["reason", "summary", "user", "idempotencyKey"]) addOptionalString(body, args, field);
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: `/api/jobs/${id.jobId}/verify-pack/items/${encodePathPart(item.itemId)}/resolve`,
+          label: "tracker_job_verify_resolve",
+          body,
+          headers: mcpSessionTokenHeaders(token.sessionToken),
+          jsonRpcErrorOnFailure: true
         };
       }
     })

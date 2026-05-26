@@ -176,6 +176,8 @@ test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O"
       tracker_job_complete: { jobId, summary: "done" },
       tracker_job_rollover: { jobId, reason: "context" },
       tracker_job_unblock: { jobId, reason: "ready" },
+      tracker_job_verify_run: { jobId, itemId: "cmd.ok" },
+      tracker_job_verify_resolve: { jobId, itemId: "approve.ship", approved: true },
       tracker_skill_run_start: { jobId, skillId: "lt.verify" },
       tracker_skill_run_complete: { jobId, skillRunId },
       tracker_skill_run_skip: { jobId, skillRunId },
@@ -341,6 +343,114 @@ test("tracker_job_unblock forwards reason and sessionToken to the HTTP unblock h
     assert.equal(payload.eventId, "evt_job_unblocked");
     assert.equal(payload.job.id, jobId);
     assert.equal(payload.job.status, "running");
+  } finally {
+    await closeServer(server);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_job_verify_* tools forward verify pack, run, and resolve requests", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-job-verify-");
+  const jobId = "job_01h2x3y4z5a6b7c8d9e0f1g2h3";
+  const requests = [];
+  const server = createServer(async (req, res) => {
+    const body = req.method === "POST" ? await readBody(req) : null;
+    requests.push({
+      method: req.method,
+      url: req.url,
+      sessionToken: req.headers["x-lt-session-token"] || null,
+      body
+    });
+    res.writeHead(200, { "content-type": "application/json" });
+    if (req.method === "GET" && req.url === `/api/jobs/${jobId}/verify-pack`) {
+      res.end(JSON.stringify({
+        jobId,
+        verifyPack: {
+          jobId,
+          items: [{ id: "cmd.ok", kind: "command", required: true, cmd: "node ok.js", expectExit: 0 }]
+        },
+        items: [{ id: "cmd.ok", kind: "command", required: true, gate: { status: "pending" } }]
+      }));
+      return;
+    }
+    if (req.method === "POST" && req.url === `/api/jobs/${jobId}/verify-pack/items/cmd.ok/run`) {
+      res.end(JSON.stringify({
+        ok: true,
+        mode: "command_completed",
+        jobId,
+        itemId: "cmd.ok",
+        status: "succeeded"
+      }));
+      return;
+    }
+    if (req.method === "POST" && req.url === `/api/jobs/${jobId}/verify-pack/items/approve.ship/resolve`) {
+      res.end(JSON.stringify({
+        ok: true,
+        mode: "verify_item_resolved",
+        jobId,
+        itemId: "approve.ship",
+        status: "satisfied"
+      }));
+      return;
+    }
+    res.end(JSON.stringify({ error: { code: "UNEXPECTED" } }));
+  });
+
+  try {
+    const port = await listen(server);
+    const tools = createTools(workspace, port);
+
+    const pack = await tools.get("tracker_job_verify_pack").handler({ jobId });
+    assert.notEqual(pack.isError, true);
+    assert.equal(JSON.parse(pack.content[0].text).jobId, jobId);
+
+    const run = await tools.get("tracker_job_verify_run").handler({
+      jobId,
+      itemId: "cmd.ok",
+      sessionToken: "session-token",
+      idempotencyKey: "verify-run-1"
+    });
+    assert.notEqual(run.isError, true);
+
+    const resolve = await tools.get("tracker_job_verify_resolve").handler({
+      jobId,
+      itemId: "approve.ship",
+      sessionToken: "session-token",
+      approved: true,
+      reason: "looks good",
+      summary: "approved by MCP",
+      user: "agent",
+      idempotencyKey: "verify-resolve-1"
+    });
+    assert.notEqual(resolve.isError, true);
+
+    assert.deepEqual(requests, [
+      {
+        method: "GET",
+        url: `/api/jobs/${jobId}/verify-pack`,
+        sessionToken: null,
+        body: null
+      },
+      {
+        method: "POST",
+        url: `/api/jobs/${jobId}/verify-pack/items/cmd.ok/run`,
+        sessionToken: "session-token",
+        body: { source: "mcp", idempotencyKey: "verify-run-1" }
+      },
+      {
+        method: "POST",
+        url: `/api/jobs/${jobId}/verify-pack/items/approve.ship/resolve`,
+        sessionToken: "session-token",
+        body: {
+          source: "mcp",
+          approved: true,
+          reason: "looks good",
+          summary: "approved by MCP",
+          user: "agent",
+          idempotencyKey: "verify-resolve-1"
+        }
+      }
+    ]);
   } finally {
     await closeServer(server);
     rmSync(workspace, { recursive: true, force: true });

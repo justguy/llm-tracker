@@ -30,7 +30,9 @@ export const JOB_MUTATION_TOOL_NAMES = [
   "tracker_job_checkpoint",
   "tracker_job_complete",
   "tracker_job_rollover",
-  "tracker_job_unblock"
+  "tracker_job_unblock",
+  "tracker_job_verify_run",
+  "tracker_job_verify_resolve"
 ];
 
 export const SESSION_BOOTSTRAP_TOOL_NAMES = [
@@ -54,7 +56,8 @@ export const JOB_TOOL_NAMES = [
   ...JOB_MUTATION_TOOL_NAMES,
   "tracker_job_status",
   "tracker_job_context_pack",
-  "tracker_job_skill_plan"
+  "tracker_job_skill_plan",
+  "tracker_job_verify_pack"
 ];
 
 export const SKILL_MUTATION_TOOL_NAMES = [
