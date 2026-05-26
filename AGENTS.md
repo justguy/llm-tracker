@@ -48,6 +48,40 @@ For this repo specifically:
 - do not use `dependencies` to express grouping, and do not use `parent_id` to express blocking; if no explicit groups exist, the UI tree view treats swimlanes as the root groups
 - treat the dependency graph view as derived UI only: it reads existing `dependencies[]` blocker edges, adds no schema or data fields, and keeps its optional `parent_id` containment overlay visual-only
 
+## Subagent and Token Usage
+
+- Default to using subagents for non-trivial work, especially broad codebase exploration, test-failure triage, reviews, multi-file changes, or tasks requiring parallel investigation.
+- Keep the main thread focused on decisions, concise summaries, and final implementation steps.
+- Subagents should receive narrow task briefs and return compact findings: relevant files, key facts, risks, and recommended next actions.
+- Avoid pasting large raw outputs into the main thread.
+- For trivial, local, or single-command tasks, skip subagents when the overhead would exceed the benefit.
+- Always be mindful of token usage.
+
+## Guardrail MCP for Git and Local Operations
+
+- When Guardrail MCP is available, call `guardrail_grant_status` before git or local-service work and treat `toolInventory.callableTools` plus `capabilities` as the authority. Entries under `grantOnlyTools` are stale declarations, not callable tools.
+- Prefer Guardrail tools over raw shell for delegated local work: use `guardrail_http_request` for bounded loopback API probes and Guardrail recipes for git mutation when the grant exposes them.
+- For git commits in this repo, prefer the pinned `guardrail_run_recipe` `git-commit` recipe instead of raw `git add` / `git commit`. Call `guardrail_recipe_prepare` first with the exact paths and message file to verify the recipe input contract.
+- The Guardrail git recipe topology for this workspace is the shared dev root as the tool `repo_path` and repo-relative recipe inputs: `guardrail_repo: "Guardrail"`, `repo_path: "llm-project-tracker"`, `paths: [...]`, and `message_file: "<repo-relative message file>"`.
+- For push, use the pinned `guardrail_run_recipe` `git-push` recipe when delegated. It only allows `origin` and feature-style branches matching `feature/`, `bugfix/`, `chore/`, `docs/`, `refactor/`, `test/`, or `ci/`; do not force-push unless a separate explicit safe-force recipe and human instruction exist.
+- If a required Guardrail recipe is missing, denied, or the live grant is stale after an on-disk grant update, ask the operator to update/restart Guardrail MCP instead of bypassing the delegated policy with raw mutating git.
+
+## Temporary Resume Note: Session Hub Tracks 1-4
+
+This section is a handoff note for the active autonomous Session Hub run as of 2026-05-26. If it conflicts with live tracker or `git status`, trust the live tools and refresh this note.
+
+- Current goal: complete Session Hub Tracks 1-4 end to end against `llm_tracker_session_hub_PRD_v0.5.md` and `llm_tracker_session_hub_TDD_v0.5.md`, preserving Codex App Server as the preferred durable runtime for tracked Codex sessions and Codex CLI as fallback/legacy.
+- Start clean sessions with `tracker_help`, `tracker_project_status({slug:"llm-tracker"})`, `tracker_next({slug:"llm-tracker"})`, and `guardrail_grant_status`; use subagents for non-trivial implementation/review.
+- Completed in tracker but not yet committed in this worktree: `sh-3-09` RunSessionWizard, `sh-3-20` AttachTaskModal preflight endpoint, and `sh-5-06` verify pack endpoints.
+- Pending commit slices:
+  - `sh-3-09`: `ui/run-session/RunSessionWizard.js`, `ui/run-session/RunSessionWizard.css`, `ui/run-session/RunSessionWizard.test.js`
+  - `sh-3-20`: `hub/run-session/attach-preflight.js`, `hub/api/sessions.js`, `hub/server.js`, `test/runtime-sessions-api.test.js`
+  - `sh-5-06`: `hub/api/verify-pack.js`, `hub/api/jobs.js`, `hub/runtime/projection.js`, `test/jobs-api.test.js`
+- Verification already run green for those slices: `node --test ui/run-session/RunSessionWizard.test.js`; `node --test test/run-session-endpoints.test.js test/run-session-drafts.test.js`; `node --test test/runtime-sessions-api.test.js test/run-session-preflight.test.js test/run-session-service.test.js`; `node --test test/jobs-api.test.js test/jobs-gates.test.js test/jobs-registry.test.js test/runtime-events.test.js test/run-session-service.test.js`; `git diff --check`.
+- Before committing, verify Guardrail MCP has reloaded the latest grant. `guardrail_run_recipe` should show pinned `git-commit`, `git-commit-from-plan`, and `git-push`, and `guardrail_recipe_prepare` should work from `/Users/adilevinshtein/Documents/dev` with `guardrail_repo: "Guardrail"` and `repo_path: "llm-project-tracker"`.
+- Leave unrelated work alone: `src/` is untracked/unowned. `AGENTS.md` is intentionally modified by the user-requested workflow update and should be committed separately only if the human asks.
+- After the three code commits land, continue with `tracker_next` across Tracks 1-4 and prioritize durable Codex App Server runtime, run-session funnel, attention/triage/timeline/diff, and jobs/MCP/watcher connectivity.
+
 ## Autonomous tracker-track execution
 
 Use this section only when the human explicitly asks an agent to complete one
