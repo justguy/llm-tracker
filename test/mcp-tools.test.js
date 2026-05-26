@@ -164,6 +164,7 @@ test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O"
       tracker_session_context_usage: { sessionId, percent: 80 },
       tracker_session_complete: { sessionId, summary: "done" },
       tracker_session_broadcast: { sessionId, message: "broadcast" },
+      tracker_session_attach_task: { sessionId, taskId: "t-001" },
       tracker_session_ask: { sessionId, targetSessionId: sessionId, prompt: "question" },
       tracker_job_start: {
         projectSlug: "test-project",
@@ -255,6 +256,70 @@ test("tracker_skill_* tools are registered and mutating tools carry sessionToken
       assert.ok(runtime.daemonRule.writeTools.includes(name), `${name} should require the daemon`);
     }
   } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_session_attach_task forwards attach body and sessionToken to the HTTP handler", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-session-attach-");
+  const sessionId = "ses_01h2x3y4z5a6b7c8d9e0f1g2h3";
+  const jobId = "job_01h2x3y4z5a6b7c8d9e0f1g2h3";
+  let requestBody = null;
+  let sessionToken = null;
+  const server = createServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== `/api/sessions/${sessionId}/attach-task`) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "NOT_FOUND" } }));
+      return;
+    }
+    sessionToken = req.headers["x-lt-session-token"];
+    requestBody = await readBody(req);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      mode: "queued",
+      sessionId,
+      jobId,
+      predecessorJobId: "job_01h2x3y4z5a6b7c8d9e0f1g2h4",
+      job: { id: jobId, status: "queued" }
+    }));
+  });
+
+  try {
+    const port = await listen(server);
+    const tool = createTools(workspace, port).get("tracker_session_attach_task");
+    const result = await tool.handler({
+      sessionId,
+      sessionToken: "session-token",
+      taskId: "t-001",
+      projectSlug: "test-project",
+      profileId: "code-implementer",
+      estBriefTokens: 55,
+      contextBriefTokens: 13,
+      contextBudget: { currentUsed: 100, capacity: 1000, estBriefTokens: 55 },
+      claimMode: "join",
+      force: false,
+      idempotencyKey: "attach-1"
+    });
+    assert.notEqual(result.isError, true);
+    assert.equal(sessionToken, "session-token");
+    assert.deepEqual(requestBody, {
+      taskId: "t-001",
+      projectSlug: "test-project",
+      profileId: "code-implementer",
+      idempotencyKey: "attach-1",
+      estBriefTokens: 55,
+      contextBriefTokens: 13,
+      contextBudget: { currentUsed: 100, capacity: 1000, estBriefTokens: 55 },
+      claimMode: "join",
+      force: false
+    });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.mode, "queued");
+    assert.equal(payload.jobId, jobId);
+    assert.equal(payload.job.status, "queued");
+  } finally {
+    await closeServer(server);
     rmSync(workspace, { recursive: true, force: true });
   }
 });

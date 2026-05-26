@@ -201,6 +201,7 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_reload",
       "tracker_search",
       "tracker_session_ask",
+      "tracker_session_attach_task",
       "tracker_session_blocked",
       "tracker_session_broadcast",
       "tracker_session_complete",

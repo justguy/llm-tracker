@@ -23,6 +23,7 @@ const SESSION_STATUSES = new Set([
   "archived",
   "unknown"
 ]);
+const ATTACH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
 
 function sessionIdProperty(description = "Runtime session id") {
   return { type: "string", description };
@@ -64,6 +65,18 @@ function contextUsageText(args) {
   if (Number.isFinite(args.limit)) bits.push(`limit=${args.limit}`);
   bits.push("source=mcp");
   return bits.length ? `context_usage: ${bits.join(", ")}` : "context_usage reported";
+}
+
+function addOptionalString(body, args, field) {
+  const value = nonEmptyString(args[field]);
+  if (value) body[field] = value;
+}
+
+function addOptionalNumber(body, args, field, toolName) {
+  if (args[field] === undefined) return null;
+  if (!Number.isFinite(args[field])) return { error: `${toolName} requires ${field} to be a number when present.` };
+  body[field] = args[field];
+  return null;
 }
 
 function createSessionTool(definition) {
@@ -347,6 +360,82 @@ export function createSessionTools(workspace, portFlag) {
         message: optionalStringProperty("Broadcast message")
       }
     ),
+    createSessionTool({
+      name: "tracker_session_attach_task",
+      description: "Attach or queue a tracker task on a runtime session through the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: sessionIdProperty(),
+          sessionToken: mcpSessionTokenProperty,
+          taskId: { type: "string", description: "Tracker task id to attach" },
+          projectSlug: optionalStringProperty("Optional project slug"),
+          profileId: optionalStringProperty("Optional job profile id"),
+          estBriefTokens: { type: "number", description: "Optional estimated brief token count" },
+          contextBriefTokens: { type: "number", description: "Optional context brief token count" },
+          contextBudget: {
+            type: "object",
+            description: "Optional context budget used by attach preflight",
+            additionalProperties: true
+          },
+          claimMode: {
+            type: "string",
+            enum: [...ATTACH_CLAIM_MODES],
+            description: "Optional claim behavior"
+          },
+          force: { type: "boolean", description: "Optional force flag" },
+          idempotencyKey: optionalStringProperty("Optional retry idempotency key")
+        },
+        required: ["sessionId", "sessionToken", "taskId"]
+      },
+      prepareRequest(args = {}) {
+        const id = requireSessionId(args, "tracker_session_attach_task");
+        if (id.error) return id;
+        const token = requireMcpSessionToken(args, "tracker_session_attach_task");
+        if (token.error) return token;
+        const taskId = nonEmptyString(args.taskId);
+        if (!taskId) return { error: "tracker_session_attach_task requires taskId." };
+
+        const body = { taskId };
+        for (const field of ["projectSlug", "profileId", "idempotencyKey"]) {
+          addOptionalString(body, args, field);
+        }
+        for (const field of ["estBriefTokens", "contextBriefTokens"]) {
+          const numberError = addOptionalNumber(body, args, field, "tracker_session_attach_task");
+          if (numberError) return numberError;
+        }
+        if (args.contextBudget !== undefined) {
+          if (!args.contextBudget || typeof args.contextBudget !== "object" || Array.isArray(args.contextBudget)) {
+            return { error: "tracker_session_attach_task requires contextBudget to be a JSON object when present." };
+          }
+          body.contextBudget = args.contextBudget;
+        }
+        const claimMode = nonEmptyString(args.claimMode);
+        if (claimMode) {
+          if (!ATTACH_CLAIM_MODES.has(claimMode)) {
+            return { error: `tracker_session_attach_task requires claimMode to be one of: ${[...ATTACH_CLAIM_MODES].join(", ")}.` };
+          }
+          body.claimMode = claimMode;
+        }
+        if (args.force !== undefined) {
+          if (typeof args.force !== "boolean") {
+            return { error: "tracker_session_attach_task requires force to be a boolean when present." };
+          }
+          body.force = args.force;
+        }
+
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: `/api/sessions/${id.sessionId}/attach-task`,
+          label: "tracker_session_attach_task",
+          body,
+          headers: mcpSessionTokenHeaders(token.sessionToken),
+          jsonRpcErrorOnFailure: true
+        };
+      }
+    }),
     createSessionTool({
       name: "tracker_session_ask",
       description: "Ask another runtime session a targeted question through the running hub.",
