@@ -601,7 +601,8 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     tokenStore: sessionTokenStore,
     jobRegistry,
     store,
-    activityThresholds: workspaceConfig.resolved.sessionHub.activity
+    activityThresholds: workspaceConfig.resolved.sessionHub.activity,
+    attach: workspaceConfig.resolved.sessionHub.attach
   });
   registerJobsRoutes(app, {
     jobRegistry,

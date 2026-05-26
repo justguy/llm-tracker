@@ -22,7 +22,16 @@ import { setAuditSink, resetSinks } from "../hub/logging/index.js";
 
 const TEST_TIMEOUT = 8000;
 
-async function startMiniApp({ tokenStore = null } = {}) {
+function makeStoreStub(projects) {
+  const entries = new Map(Object.entries(projects ?? {}));
+  return {
+    get(slug) {
+      return entries.get(slug) || null;
+    },
+  };
+}
+
+async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = null, attach = null } = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "lt-sessions-api-"));
   const projection = new RuntimeProjection();
   const appendedEvents = [];
@@ -41,6 +50,9 @@ async function startMiniApp({ tokenStore = null } = {}) {
     makeRuntimeId,
     validateRuntimeEvent,
     workspace: workspaceRoot,
+    store: makeStoreStub(projects),
+    ...(jobRegistry ? { jobRegistry } : {}),
+    ...(attach ? { attach } : {}),
     ...(tokenStore ? { tokenStore } : {}),
   });
   const server = app.listen(0, "127.0.0.1");
@@ -457,6 +469,249 @@ test("POST accepts worktreePath for manual attach sessions", { timeout: TEST_TIM
     assert.equal(body.session.cwd, "/repo");
     assert.equal(body.session.repoRoot, "/repo");
     assert.equal(body.session.worktreePath, "/repo-wt");
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task/preview returns six pure preflight checks", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    attach: { contextOverflowWarnPercent: 0.75 },
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            {
+              id: "t-attach",
+              title: "Attach me",
+              status: "not_started",
+              allowed_paths: ["src/**"],
+              references: ["src/app.js:10"],
+            },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+      worktreePath: "/repo-wt",
+    });
+    const targetBody = await targetRes.json();
+    const otherRes = await postJson(env.base, "/api/sessions", {
+      name: "other",
+      tier: "manual",
+      projectSlug: "demo",
+      worktreePath: "/repo-wt",
+    });
+    assert.equal(otherRes.status, 201);
+
+    const patchRes = await patchJson(env.base, `/api/sessions/${targetBody.session.id}`, {
+      status: "active",
+      contextUsage: { percent: 80, used: 800, limit: 1000, source: "mcp" },
+    });
+    assert.equal(patchRes.status, 200);
+    const beforePreviewEvents = env.appendedEvents.length;
+
+    const previewRes = await postJson(env.base, `/api/sessions/${targetBody.session.id}/attach-task/preview`, {
+      projectSlug: "demo",
+      taskId: "t-attach",
+      profileId: "code-implementer",
+      estBriefTokens: 1,
+    });
+    assert.equal(previewRes.status, 200);
+    const preview = await previewRes.json();
+
+    assert.equal(preview.checks.length, 6);
+    assert.deepEqual(preview.checks.map((item) => item.id), [
+      "task_not_already_bound",
+      "session_accepts_new_task",
+      "task_scope_allowed_paths",
+      "profile_compatible",
+      "no_worktree_conflict",
+      "context_room_available",
+    ]);
+    assert.equal(preview.hasFail, false);
+    assert.equal(preview.hasWarn, true);
+    assert.equal(preview.checks.find((item) => item.id === "no_worktree_conflict").status, "warn");
+    const contextCheck = preview.checks.find((item) => item.id === "context_room_available");
+    assert.equal(contextCheck.status, "warn");
+    assert.equal(contextCheck.kind, "attach_context_overflow");
+    assert.equal(contextCheck.warnPercent, 0.75);
+    assert.equal(env.appendedEvents.length, beforePreviewEvents, "preview must not append runtime events");
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task/preview accepts embedded allowed_paths globs", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            {
+              id: "t-globs",
+              title: "Glob task",
+              status: "not_started",
+              allowed_paths: ["src/**/*.js", "*.md"],
+              references: ["src/features/app.js:10", "README.md:1"],
+            },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const targetBody = await targetRes.json();
+
+    const previewRes = await postJson(env.base, `/api/sessions/${targetBody.session.id}/attach-task/preview`, {
+      projectSlug: "demo",
+      taskId: "t-globs",
+    });
+    assert.equal(previewRes.status, 200);
+    const preview = await previewRes.json();
+    const scopeCheck = preview.checks.find((item) => item.id === "task_scope_allowed_paths");
+    assert.equal(scopeCheck.status, "ok");
+    assert.equal(preview.hasFail, false);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task/preview reports active binding when tracker task is missing", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    jobRegistry: {
+      list() {
+        return [
+          {
+            id: "job_bound",
+            sessionId: "ses_bound",
+            projectSlug: "demo",
+            taskId: "missing-task",
+            status: "running",
+          },
+        ];
+      },
+    },
+    projects: {
+      demo: {
+        rev: 7,
+        data: { tasks: [] },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const targetBody = await targetRes.json();
+
+    const previewRes = await postJson(env.base, `/api/sessions/${targetBody.session.id}/attach-task/preview`, {
+      projectSlug: "demo",
+      taskId: "missing-task",
+    });
+    assert.equal(previewRes.status, 200);
+    const preview = await previewRes.json();
+    const bindingCheck = preview.checks.find((item) => item.id === "task_not_already_bound");
+    assert.equal(bindingCheck.status, "fail");
+    assert.equal(bindingCheck.kind, "task_already_bound_other_session");
+    assert.equal(bindingCheck.binding.jobId, "job_bound");
+    assert.equal(bindingCheck.binding.sessionId, "ses_bound");
+    assert.equal(preview.checks.find((item) => item.id === "task_scope_allowed_paths").status, "fail");
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task/preview fails when projected context exceeds capacity", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            {
+              id: "t-context",
+              title: "Context task",
+              status: "not_started",
+            },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const targetBody = await targetRes.json();
+
+    const previewRes = await postJson(env.base, `/api/sessions/${targetBody.session.id}/attach-task/preview`, {
+      projectSlug: "demo",
+      taskId: "t-context",
+      contextBudget: { currentUsed: 950, capacity: 1000, estBriefTokens: 75 },
+    });
+    assert.equal(previewRes.status, 200);
+    const preview = await previewRes.json();
+    const contextCheck = preview.checks.find((item) => item.id === "context_room_available");
+    assert.equal(contextCheck.status, "fail");
+    assert.equal(contextCheck.kind, "attach_context_overflow");
+    assert.equal(contextCheck.currentUsed, 950);
+    assert.equal(contextCheck.estBriefTokens, 75);
+    assert.equal(contextCheck.capacity, 1000);
+    assert.equal(preview.hasFail, true);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task/preview returns modal shape for missing resources", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: { tasks: [] },
+      },
+    },
+  });
+  try {
+    const previewRes = await postJson(env.base, "/api/sessions/ses_01h2x3y4z5a6b7c8d9e0f1g2h3/attach-task/preview", {
+      projectSlug: "demo",
+      taskId: "missing-task",
+    });
+    assert.equal(previewRes.status, 200);
+    const preview = await previewRes.json();
+    assert.equal(preview.checks.length, 6);
+    assert.equal(preview.hasFail, true);
+    assert.equal(preview.hasWarn, false);
+    assert.equal(preview.checks.find((item) => item.id === "session_accepts_new_task").status, "fail");
+    assert.equal(preview.checks.find((item) => item.id === "task_scope_allowed_paths").status, "fail");
+
+    const missingProjectRes = await postJson(env.base, "/api/sessions/ses_01h2x3y4z5a6b7c8d9e0f1g2h3/attach-task/preview", {
+      projectSlug: "missing-project",
+      taskId: "missing-task",
+    });
+    assert.equal(missingProjectRes.status, 200);
+    const missingProject = await missingProjectRes.json();
+    assert.equal(missingProject.checks.length, 6);
+    assert.equal(missingProject.hasFail, true);
+    assert.equal(missingProject.checks.find((item) => item.id === "session_accepts_new_task").status, "fail");
+    assert.equal(missingProject.checks.find((item) => item.id === "task_scope_allowed_paths").status, "fail");
   } finally {
     await env.close();
   }

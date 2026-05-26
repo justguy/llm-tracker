@@ -24,6 +24,7 @@ import { createSessionAskEvent, createSessionStdioCaptureChangedEvent, createSes
 import { SessionTaskLedgerService } from "../sessions/task-ledger.js";
 import { DEFAULT_THRESHOLDS } from "../sessions/activity.js";
 import { contextHighWarning } from "../sessions/warnings.js";
+import { buildAttachTaskPreflight } from "../run-session/attach-preflight.js";
 
 // Allowed body fields on POST. Anything else triggers UNKNOWN_FIELDS (400).
 const POST_ALLOWED_FIELDS = new Set([
@@ -54,6 +55,15 @@ const ROTATE_ALLOWED_FIELDS = new Set(["capabilities", "lifetimeMinutes"]);
 // Allowed body fields on POST /:sessionId/stdio/capture. `captureToDisk` is
 // required (boolean); `reason` optional (non-empty string when present).
 const STDIO_CAPTURE_ALLOWED_FIELDS = new Set(["captureToDisk", "reason"]);
+
+const ATTACH_PREVIEW_ALLOWED_FIELDS = new Set([
+  "taskId",
+  "projectSlug",
+  "profileId",
+  "estBriefTokens",
+  "contextBriefTokens",
+  "contextBudget",
+]);
 
 // TDD §6.1 ActivityState enum (mirrors schema SessionStatusEvent.status).
 const ACTIVITY_STATES = new Set([
@@ -112,6 +122,7 @@ const POST_OPTIONAL_STRING_FIELDS = [
  * @property {{ list(): object[] }} [jobRegistry]
  * @property {{ get(slug: string): object | null }} [store]
  * @property {{ contextHighPercent?: number }} [activityThresholds]
+ * @property {{ contextOverflowWarnPercent?: number }} [attach]
  */
 
 /**
@@ -135,6 +146,7 @@ export function registerSessionsRoutes(app, deps) {
     jobRegistry,
     store,
     activityThresholds,
+    attach,
   } = deps || {};
   if (!runtimeStore || typeof runtimeStore.append !== "function") {
     throw new Error("registerSessionsRoutes: runtimeStore (with append) required");
@@ -193,6 +205,83 @@ export function registerSessionsRoutes(app, deps) {
       taskLedger: Array.isArray(taskLedger) ? taskLedger : [],
       rev: projection.rev,
     });
+  });
+
+  // --- POST /api/sessions/:sessionId/attach-task/preview ---------------------
+  app.post("/api/sessions/:sessionId/attach-task/preview", (req, res) => {
+    const { sessionId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
+    }
+
+    const unknown = [];
+    for (const key of Object.keys(body)) {
+      if (!ATTACH_PREVIEW_ALLOWED_FIELDS.has(key)) unknown.push(key);
+    }
+    if (unknown.length > 0) {
+      return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+    }
+
+    const { taskId, profileId, estBriefTokens, contextBriefTokens, contextBudget } = body;
+    if (typeof taskId !== "string" || taskId.length === 0) {
+      return sendError(res, 400, "INVALID_BODY", "`taskId` is required (non-empty string)");
+    }
+    if ("projectSlug" in body && (typeof body.projectSlug !== "string" || body.projectSlug.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`projectSlug` must be a non-empty string when present");
+    }
+    if (profileId !== undefined && (typeof profileId !== "string" || profileId.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`profileId` must be a non-empty string when present");
+    }
+    for (const [field, value] of Object.entries({ estBriefTokens, contextBriefTokens })) {
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        return sendError(res, 400, "INVALID_BODY", `\`${field}\` must be a non-negative number when present`);
+      }
+    }
+    if (contextBudget !== undefined && (!contextBudget || typeof contextBudget !== "object" || Array.isArray(contextBudget))) {
+      return sendError(res, 400, "INVALID_BODY", "`contextBudget` must be a JSON object when present");
+    }
+
+    const session = projection.sessions.get(sessionId) || null;
+    const projectSlug = body.projectSlug || session?.projectSlug || "";
+    const project =
+      projectSlug && store && typeof store.get === "function"
+        ? store.get(projectSlug)
+        : null;
+    const tasks = Array.isArray(project?.data?.tasks) ? project.data.tasks : [];
+    const task = tasks.find((item) => item && item.id === taskId) || null;
+
+    const snapshots = projection.toSnapshots();
+    const sessions = snapshots.sessions || [];
+    const jobs =
+      jobRegistry && typeof jobRegistry.list === "function"
+        ? jobRegistry.list()
+        : snapshots.jobs || [];
+
+    let preview;
+    try {
+      preview = buildAttachTaskPreflight({
+        sessionId,
+        projectSlug,
+        taskId,
+        session,
+        task,
+        sessions,
+        jobs,
+        profileId,
+        estBriefTokens,
+        contextBriefTokens,
+        contextBudget,
+        config: { attach },
+      });
+    } catch (err) {
+      return sendError(res, 500, "ATTACH_PREFLIGHT_FAILED", err.message || "attach preflight failed");
+    }
+    res.status(200).json(preview);
   });
 
   // --- GET /api/sessions/:id ----------------------------------------------
