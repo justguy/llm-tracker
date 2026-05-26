@@ -79,6 +79,39 @@ function providerForRuntime(runtime) {
   return option.providerId;
 }
 
+function cliValue(value) {
+  const s = nonEmpty(value);
+  if (!s) return null;
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(s)) return s;
+  return `'${s.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function cliFlag(name, value) {
+  const rendered = cliValue(value);
+  return rendered ? [`--${name}`, rendered] : [];
+}
+
+function dashed(value) {
+  return nonEmpty(value)?.replaceAll("_", "-") ?? null;
+}
+
+export function buildRunSessionCliCommand(draft = {}) {
+  const parts = ["llm-tracker", "run", "session"];
+  parts.push(...cliFlag("project", draft.projectSlug));
+  if (draft.mode === "untasked") parts.push("--untasked");
+  if (draft.mode === "attach_existing") parts.push("--attach-existing");
+  parts.push(...cliFlag("task", draft.taskId));
+  parts.push(...cliFlag("profile", draft.profileId || DEFAULT_PROFILE));
+  parts.push(...cliFlag("adapter", dashed(draft.providerId) || dashed(draft.runtime || DEFAULT_RUNTIME)));
+  parts.push(...cliFlag("model", draft.model));
+  parts.push(...cliFlag("sandbox", draft.sandbox || DEFAULT_SANDBOX));
+  parts.push(...cliFlag("worktree", draft.worktreePath));
+  parts.push(...cliFlag("branch", draft.branch));
+  parts.push(...cliFlag("claim-mode", dashed(draft.claimMode || DEFAULT_CLAIM_MODE)));
+  if (draft.refreshContext !== false) parts.push("--refresh-context");
+  return parts.join(" ");
+}
+
 export function buildInitialRunSessionDraft(input = {}) {
   const selectedCandidate = isRecord(input.candidate) ? input.candidate : null;
   const taskId = nonEmpty(selectedCandidate?.taskId) || nonEmpty(input.taskId);
@@ -199,6 +232,18 @@ export async function launchRunSessionDraft({ draft, fetcher = globalThis.fetch 
   return payload;
 }
 
+export async function copyRunSessionPrompt({ draftId, fetcher = globalThis.fetch } = {}) {
+  if (!nonEmpty(draftId)) throw new Error("draftId is required");
+  const response = await fetcher(`/api/run-session/draft/${encodeURIComponent(draftId)}/copy-prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
 function warningSummary(warning) {
   if (!warning || typeof warning !== "object") return "unknown warning";
   switch (warning.kind) {
@@ -257,6 +302,7 @@ export function RunSessionWizardView({
   onDraftChange,
   onSaveDraft,
   onLaunch,
+  onCopyPrompt,
 } = {}) {
   const warnings = Array.isArray(draft.warnings) ? draft.warnings : [];
   const highWarnings = hasUnresolvedHighWarnings(warnings);
@@ -264,6 +310,7 @@ export function RunSessionWizardView({
   const taskId = selectedTaskId(draft);
   const options = sortedCandidates(candidates);
   const orderedWarnings = sortedWarnings(warnings);
+  const cliCommand = buildRunSessionCliCommand(draft);
 
   return html`
     <section class="run-session-wizard" aria-label="Run session">
@@ -402,8 +449,25 @@ export function RunSessionWizardView({
         </section>
       </div>
 
+      <section class="run-session-wizard__panel run-session-wizard__panel--launch-brief">
+        <div class="run-session-wizard__panel-head">
+          <h3>Launch brief</h3>
+          <span class="run-session-wizard__badge">CLI</span>
+        </div>
+        <code class="run-session-wizard__cli">${cliCommand}</code>
+        <button
+          class="icon-btn"
+          type="button"
+          disabled=${!draft.id || saving}
+          title=${draft.id ? "Copy prompt" : "Create a draft before copying prompt"}
+          onClick=${onCopyPrompt}
+        >
+          [COPY PROMPT]
+        </button>
+      </section>
+
       ${error ? html`<div class="run-session-wizard__error" role="alert">${error}</div>` : null}
-      ${launchResult ? html`<div class="run-session-wizard__result" role="status">${launchResult.mode || "launched"}</div>` : null}
+      ${launchResult ? html`<div class="run-session-wizard__result" role="status">${launchResult.prompt ? "prompt ready" : launchResult.mode || "launched"}</div>` : null}
 
       <footer class="run-session-wizard__actions">
         <button class="icon-btn" type="button" disabled=${saving} onClick=${onSaveDraft}>
@@ -520,6 +584,23 @@ export function RunSessionWizard({
     setSaving(false);
   };
 
+  const copyPrompt = async () => {
+    if (!draft.id) {
+      setError("Create a draft before copying prompt");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await copyRunSessionPrompt({ draftId: draft.id, fetcher });
+      setLaunchResult(result);
+      onDraft?.({ ...draft, copiedPrompt: result.prompt, cli: result.cli });
+    } catch (err) {
+      setError(err?.message || "copy prompt failed");
+    }
+    setSaving(false);
+  };
+
   return html`
     <${RunSessionWizardView}
       draft=${draft}
@@ -536,6 +617,7 @@ export function RunSessionWizard({
       }}
       onSaveDraft=${saveDraft}
       onLaunch=${launch}
+      onCopyPrompt=${copyPrompt}
     />
   `;
 }

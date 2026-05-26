@@ -202,6 +202,25 @@
   font-style: normal;
 }
 
+.run-session-wizard__panel--launch-brief {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.run-session-wizard__panel--launch-brief .run-session-wizard__panel-head {
+  grid-column: 1 / -1;
+}
+
+.run-session-wizard__cli {
+  min-width: 0;
+  border: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  padding: 8px 10px;
+  color: var(--cyan, #06b6d4);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 960px) {
   .run-session-wizard__body {
     grid-template-columns: minmax(0, 1fr);
@@ -223,5 +242,9 @@
   .run-session-wizard__step + .run-session-wizard__step {
     border-left: 0;
     border-top: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  }
+
+  .run-session-wizard__panel--launch-brief {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

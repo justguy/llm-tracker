@@ -7,6 +7,7 @@
 //   POST  /api/run-session/draft
 //   GET   /api/run-session/drafts/:draftId
 //   PATCH /api/run-session/drafts/:draftId
+//   POST  /api/run-session/draft/:draftId/copy-prompt
 //   POST  /api/run-session/launch
 //
 // Launch is now live (sh-3-05) — RunSessionService composes the launch
@@ -32,6 +33,91 @@ const LAUNCH_ALLOWED_FIELDS = new Set([
   "forceUser",
 ]);
 const LAUNCH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
+
+function nonEmpty(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function cliValue(value) {
+  const s = nonEmpty(value);
+  if (!s) return null;
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(s)) return s;
+  return `'${s.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function cliFlag(name, value) {
+  const rendered = cliValue(value);
+  return rendered ? [`--${name}`, rendered] : [];
+}
+
+function dashed(value) {
+  return nonEmpty(value)?.replaceAll("_", "-") ?? null;
+}
+
+function taskFromDraft(store, draft) {
+  const projectSlug = nonEmpty(draft?.projectSlug);
+  const taskId = nonEmpty(draft?.taskId);
+  if (!projectSlug || !taskId) return { entry: null, task: null };
+  const entry = store.get(projectSlug);
+  const tasks = Array.isArray(entry?.data?.tasks) ? entry.data.tasks : [];
+  return {
+    entry,
+    task: tasks.find((task) => task?.id === taskId) || null,
+  };
+}
+
+export function buildRunSessionCliCommand(draft = {}) {
+  const parts = ["llm-tracker", "run", "session"];
+  parts.push(...cliFlag("project", draft.projectSlug));
+  if (draft.mode === "untasked") parts.push("--untasked");
+  if (draft.mode === "attach_existing") parts.push("--attach-existing");
+  parts.push(...cliFlag("task", draft.taskId));
+  parts.push(...cliFlag("profile", draft.profileId));
+  parts.push(...cliFlag("adapter", dashed(draft.providerId) || dashed(draft.runtime)));
+  parts.push(...cliFlag("model", draft.model));
+  parts.push(...cliFlag("sandbox", draft.sandbox));
+  parts.push(...cliFlag("worktree", draft.worktreePath));
+  parts.push(...cliFlag("branch", draft.branch));
+  parts.push(...cliFlag("claim-mode", dashed(draft.claimMode)));
+  if (draft.refreshContext === true) parts.push("--refresh-context");
+  return parts.join(" ");
+}
+
+export function buildRunSessionCopyPrompt(draft = {}, context = {}) {
+  const cli = buildRunSessionCliCommand(draft);
+  const task = context.task || null;
+  const startRev = Number.isInteger(context.rev)
+    ? context.rev
+    : Number.isInteger(draft.expectedTrackerRev)
+      ? draft.expectedTrackerRev
+      : null;
+  const lines = [
+    "You are starting an llm-tracker Run Session from a materialized launch brief.",
+    "",
+    "CLI equivalent:",
+    cli,
+    "",
+    "Launch brief:",
+    `- Draft: ${draft.id || "unsaved"}`,
+    `- Source: ${draft.source || "unknown"}`,
+    `- Mode: ${draft.mode || "unknown"}`,
+    `- Project: ${draft.projectSlug || "none"}`,
+    `- Task: ${draft.taskId || "none"}`,
+    `- Task title: ${task?.title || "unknown"}`,
+    `- Task status: ${task?.status || "unknown"}`,
+    `- Profile: ${draft.profileId || "default"}`,
+    `- Runtime: ${draft.runtime || "default"}`,
+    `- Provider: ${draft.providerId || "none"}`,
+    `- Model: ${draft.model || "provider default"}`,
+    `- Sandbox: ${draft.sandbox || "default"}`,
+    `- Worktree: ${draft.worktreePath || "default"}`,
+    `- Branch: ${draft.branch || "current"}`,
+    `- Claim mode: ${draft.claimMode || "fail_if_active"}`,
+    `- Start rev: ${startRev ?? "unknown"}`,
+    `- Refresh context: ${draft.refreshContext === true ? "yes" : "no"}`,
+  ];
+  return { cli, prompt: lines.join("\n") };
+}
 
 /**
  * @typedef {object} RegisterDeps
@@ -193,6 +279,34 @@ export function registerRunSessionRoutes(app, deps) {
       return sendError(res, 400, "INVALID_BODY", err.message || "draft update rejected");
     }
     res.status(200).json({ draft });
+  });
+
+  // --- POST /api/run-session/draft/:draftId/copy-prompt -------------------
+  app.post("/api/run-session/draft/:draftId/copy-prompt", (req, res) => {
+    const { draftId } = req.params;
+    if (!isRunSessionDraftId(draftId)) {
+      return sendError(res, 400, "INVALID_DRAFT_ID", `not a valid draft_ id: ${draftId}`);
+    }
+    const body = req.body;
+    if (body !== undefined && body !== null && (typeof body !== "object" || Array.isArray(body))) {
+      return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object when present");
+    }
+    const draft = draftStore.get(draftId);
+    if (!draft) {
+      return sendError(res, 404, "UNKNOWN_DRAFT", `draft not found or expired: ${draftId}`);
+    }
+    const { entry, task } = taskFromDraft(store, draft);
+    const { cli, prompt } = buildRunSessionCopyPrompt(draft, {
+      rev: entry?.rev,
+      task,
+    });
+    res.status(200).json({
+      draftId,
+      projectSlug: draft.projectSlug ?? null,
+      taskId: draft.taskId ?? null,
+      cli,
+      prompt,
+    });
   });
 
   // --- POST /api/run-session/launch ---------------------------------------

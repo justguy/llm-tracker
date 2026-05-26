@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
   RunSessionWizardView,
   buildInitialRunSessionDraft,
+  buildRunSessionCliCommand,
   buildRunSessionDraftPatch,
+  copyRunSessionPrompt,
   createRunSessionDraft,
   fetchRunCandidates,
   hasUnresolvedHighWarnings,
@@ -13,6 +15,7 @@ import {
   normalizeRunCandidates,
   patchRunSessionDraft,
 } from "./RunSessionWizard.js";
+import { buildRunSessionCopyPrompt } from "../../hub/api/run-session.js";
 
 function flattenRenderedNodes(node, acc = []) {
   if (Array.isArray(node)) {
@@ -153,6 +156,53 @@ test("high severity preflight warnings block launch with a concrete reason", () 
   );
 });
 
+test("buildRunSessionCliCommand renders the launch brief command", () => {
+  assert.equal(
+    buildRunSessionCliCommand({
+      projectSlug: "demo",
+      mode: "task_backed",
+      taskId: "t1",
+      profileId: "code-implementer",
+      providerId: "codex_app_server",
+      model: "gpt 5",
+      sandbox: "workspace-write",
+      worktreePath: "/tmp/demo worktree",
+      branch: "feature/run-session",
+      claimMode: "fail_if_active",
+      refreshContext: true,
+    }),
+    "llm-tracker run session --project demo --task t1 --profile code-implementer --adapter codex-app-server --model 'gpt 5' --sandbox workspace-write --worktree '/tmp/demo worktree' --branch feature/run-session --claim-mode fail-if-active --refresh-context",
+  );
+});
+
+test("buildRunSessionCopyPrompt materializes draft fields and CLI for clipboard", () => {
+  const { cli, prompt } = buildRunSessionCopyPrompt({
+    id: "draft_aaaaaaaaaaaaaaaaaaaaaaaa",
+    source: "task_card",
+    mode: "task_backed",
+    projectSlug: "demo",
+    taskId: "t1",
+    profileId: "code-implementer",
+    providerId: "codex_app_server",
+    runtime: "codex_app_server",
+    sandbox: "workspace-write",
+    claimMode: "fail_if_active",
+    refreshContext: true,
+  }, {
+    rev: 12,
+    task: { title: "Implement launch brief", status: "not_started" },
+  });
+
+  assert.match(cli, /llm-tracker run session --project demo --task t1/);
+  assert.match(prompt, /CLI equivalent:\nllm-tracker run session/);
+  assert.match(prompt, /- Draft: draft_aaaaaaaaaaaaaaaaaaaaaaaa/);
+  assert.match(prompt, /- Project: demo/);
+  assert.match(prompt, /- Task: t1/);
+  assert.match(prompt, /- Task title: Implement launch brief/);
+  assert.match(prompt, /- Start rev: 12/);
+  assert.match(prompt, /- Refresh context: yes/);
+});
+
 test("RunSessionWizardView renders task, runtime, preflight severity, and disabled launch", () => {
   const vnode = RunSessionWizardView({
     draft: {
@@ -173,11 +223,14 @@ test("RunSessionWizardView renders task, runtime, preflight severity, and disabl
   const renderedText = collectVNodeText(vnode);
   assert.match(renderedText, /sh-3-09/);
   assert.match(renderedText, /codex_app_server/);
+  assert.match(renderedText, /llm-tracker run session --task sh-3-09/);
   assert.match(renderedText, /provider_unavailable/);
   assert.match(renderedText, /Resolve high severity preflight warnings/);
   const buttons = flattenRenderedNodes(vnode).filter((node) => node.type === "button");
   const launch = buttons.find((button) => collectVNodeText(button).includes("[LAUNCH]"));
   assert.equal(launch.props.disabled, true);
+  const copyPrompt = buttons.find((button) => collectVNodeText(button).includes("[COPY PROMPT]"));
+  assert.equal(copyPrompt.props.disabled, false);
 });
 
 test("RunSessionWizardView orders preflight warnings by severity", () => {
@@ -227,6 +280,9 @@ test("RunSessionWizard API helpers call the real run-session endpoint contract",
     if (url === "/api/run-session/launch") {
       return jsonResponse({ mode: "created", sessionId: "ses_a", jobId: "job_a" });
     }
+    if (url === "/api/run-session/draft/draft_aaaaaaaaaaaaaaaaaaaaaaaa/copy-prompt") {
+      return jsonResponse({ draftId: "draft_aaaaaaaaaaaaaaaaaaaaaaaa", cli: "llm-tracker run session", prompt: "ready" });
+    }
     throw new Error(`unexpected url ${url}`);
   };
 
@@ -250,6 +306,9 @@ test("RunSessionWizard API helpers call the real run-session endpoint contract",
   const launch = await launchRunSessionDraft({ fetcher, draft });
   assert.equal(launch.mode, "created");
 
+  const copied = await copyRunSessionPrompt({ fetcher, draftId: draft.id });
+  assert.equal(copied.prompt, "ready");
+
   assert.deepEqual(
     calls.map((call) => [call.url, call.options.method || "GET"]),
     [
@@ -257,6 +316,7 @@ test("RunSessionWizard API helpers call the real run-session endpoint contract",
       ["/api/run-session/draft", "POST"],
       ["/api/run-session/drafts/draft_aaaaaaaaaaaaaaaaaaaaaaaa", "PATCH"],
       ["/api/run-session/launch", "POST"],
+      ["/api/run-session/draft/draft_aaaaaaaaaaaaaaaaaaaaaaaa/copy-prompt", "POST"],
     ],
   );
 });
