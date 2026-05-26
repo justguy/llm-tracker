@@ -91,6 +91,55 @@ test("approval_needed: pending human verify gate on job produces structured item
   assert.equal(items[0].evidenceRef, "g1");
 });
 
+test("approval_needed: requested human approval projects required and optional labels", () => {
+  const job = {
+    id: "job_4",
+    sessionId: "ses_4",
+    projectSlug: "proj",
+    taskId: "T-4",
+    humanApprovalRequests: [
+      {
+        itemId: "approve.ship",
+        status: "pending",
+        eventId: "evt_01h00000000000000000000001",
+        required: true,
+        blocksCompletion: true,
+        title: "HUMAN APPROVAL REQUIRED",
+        prompt: "Ship?",
+      },
+      {
+        itemId: "review.notes",
+        status: "pending",
+        eventId: "evt_01h00000000000000000000002",
+        required: false,
+        blocksCompletion: false,
+        title: "HUMAN REVIEW READY",
+        prompt: "Review notes",
+      },
+    ],
+    completionGates: [
+      {
+        id: "approve.ship",
+        kind: "verify_pack",
+        required: true,
+        status: "pending",
+        humanApproval: true,
+        requestedEventId: "evt_01h00000000000000000000001",
+      },
+    ],
+  };
+  const items = approvalNeededRule(baseInput({ jobs: [job] }));
+  assert.equal(items.length, 2);
+  assertValidAttentionItem(items[0]);
+  assertValidAttentionItem(items[1]);
+  assert.equal(items[0].title, "HUMAN APPROVAL REQUIRED");
+  assert.equal(items[0].severity, "critical");
+  assert.equal(items[0].evidenceRef, "evt_01h00000000000000000000001");
+  assert.equal(items[1].title, "HUMAN REVIEW READY");
+  assert.equal(items[1].severity, "medium");
+  assert.equal(items[1].evidenceRef, "evt_01h00000000000000000000002");
+});
+
 test("approval_needed: non-human verify gate does NOT trigger", () => {
   const job = {
     id: "job_3",

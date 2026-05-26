@@ -43,6 +43,7 @@
 
 import { isJobId, isSessionId } from "../runtime/ids.js";
 import { findMissingRequiredGates } from "./gates.js";
+import { collectReadyHumanApprovalRequests } from "./verify-pack.js";
 
 /**
  * @typedef {"queued" | "starting" | "running" | "blocked" | "verifying" | "completed" | "cancelled" | "rolled_over"} JobStatus
@@ -335,6 +336,9 @@ export class JobRegistry {
 
     const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
     const result = await this.runtimeStore.append(eventForAppend);
+    if (!queued) {
+      await this.#emitReadyHumanApprovalRequests({ jobId, source });
+    }
     return {
       jobId,
       rev: result.rev,
@@ -382,7 +386,7 @@ export class JobRegistry {
       throw makeError("checkpoint: summary must be a non-empty string when present", "INVALID_INPUT", { field: "summary" });
     }
 
-    return this.#appendEvent({
+    const result = await this.#appendEvent({
       type: "job.checkpoint",
       source,
       jobId,
@@ -391,6 +395,10 @@ export class JobRegistry {
       ...(summary ? { summary } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
+    if (status === "running") {
+      await this.#emitReadyHumanApprovalRequests({ jobId, source });
+    }
+    return { ...result, job: this.get(jobId) };
   }
 
   /**
@@ -663,6 +671,10 @@ export class JobRegistry {
 
     // Return projection record re-derived through this.get so callers see the
     // final (possibly queued) status.
+    const finalJob = this.get(jobId);
+    if (finalJob?.status === "running") {
+      await this.#emitReadyHumanApprovalRequests({ jobId, source });
+    }
     return { rev: unblockResult.rev, eventId: unblockResult.eventId, job: this.get(jobId) };
   }
 
@@ -721,6 +733,32 @@ export class JobRegistry {
       );
     }
     return existing;
+  }
+
+  async #emitReadyHumanApprovalRequests({ jobId, source }) {
+    const job = this.get(jobId);
+    if (!job || job.status !== "running") return [];
+    const requests = collectReadyHumanApprovalRequests(job);
+    const results = [];
+    for (const request of requests) {
+      results.push(
+        await this.#appendEvent({
+          type: "verify.human_approval.requested",
+          source,
+          jobId,
+          sessionId: job.sessionId,
+          projectSlug: job.projectSlug,
+          taskId: job.taskId,
+          itemId: request.itemId,
+          itemKind: "human_approval",
+          required: request.required,
+          blocksCompletion: request.blocksCompletion,
+          title: request.title,
+          ...(request.prompt !== undefined ? { prompt: request.prompt } : {}),
+        }),
+      );
+    }
+    return results;
   }
 
   /**

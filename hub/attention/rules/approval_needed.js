@@ -98,9 +98,73 @@ export function approvalNeededRule(input) {
   // Pending human-approval verify gate (§11.5 / §11.6 CompletionGate).
   for (const job of jobs) {
     if (!job || typeof job.id !== "string" || job.id.length === 0) continue;
+    const requestedItemIds = new Set();
+    const requests = Array.isArray(job.humanApprovalRequests) ? job.humanApprovalRequests : [];
+    for (const request of requests) {
+      if (!request || request.status !== "pending") continue;
+      if (typeof request.itemId !== "string" || request.itemId.length === 0) continue;
+      requestedItemIds.add(request.itemId);
+      const evidenceRef =
+        typeof request.eventId === "string" && request.eventId.length > 0 ? request.eventId : undefined;
+      const blocksCompletion = request.blocksCompletion === true || request.required === true;
+      const title =
+        typeof request.title === "string" && request.title.length > 0
+          ? request.title
+          : blocksCompletion
+            ? "HUMAN APPROVAL REQUIRED"
+            : "HUMAN REVIEW READY";
+      const dedupeKey = computeAttentionDedupeKey({
+        kind: "approval_needed",
+        projectSlug:
+          typeof job.projectSlug === "string" && job.projectSlug.length > 0
+            ? job.projectSlug
+            : undefined,
+        taskId:
+          typeof job.taskId === "string" && job.taskId.length > 0 ? job.taskId : undefined,
+        jobId: job.id,
+        evidenceRef,
+      });
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      /** @type {AttentionItem} */
+      const item = {
+        id: input.makeId("att"),
+        kind: "approval_needed",
+        severity: blocksCompletion ? "critical" : "medium",
+        title,
+        detail:
+          typeof request.prompt === "string" && request.prompt.length > 0
+            ? request.prompt
+            : `Job ${job.id} has a human-approval verify item ready.`,
+        source: "structured",
+        jobId: job.id,
+        clearCondition: "structured approval resolution or human clear",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        dedupeKey,
+        recommendedActions: [
+          { id: "approve", label: "Approve", kind: "approve", enabled: true },
+          { id: "deny", label: "Deny", kind: "deny", enabled: true },
+          { id: "open_session", label: "Open session", kind: "open_session", enabled: true },
+        ],
+      };
+      if (typeof job.projectSlug === "string" && job.projectSlug.length > 0) {
+        item.projectSlug = job.projectSlug;
+      }
+      if (typeof job.taskId === "string" && job.taskId.length > 0) {
+        item.taskId = job.taskId;
+      }
+      if (typeof job.sessionId === "string" && job.sessionId.length > 0) {
+        item.sessionId = job.sessionId;
+      }
+      if (evidenceRef) item.evidenceRef = evidenceRef;
+      out.push(item);
+    }
+
     const gates = Array.isArray(job.completionGates) ? job.completionGates : [];
     for (const gate of gates) {
       if (!gate || gate.kind !== "verify_pack") continue;
+      if (requestedItemIds.has(gate.id)) continue;
       if (gate.status !== "pending") continue;
       if (gate.required !== true) continue;
       const ref = typeof gate.id === "string" && gate.id.length > 0 ? gate.id : undefined;

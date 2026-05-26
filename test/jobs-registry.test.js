@@ -604,6 +604,47 @@ test("JobRegistry.create: verifyPack persists onto the JobRecord projection", as
   }
 });
 
+test("JobRegistry.create: running human_approval verify items emit requested events once", async () => {
+  const env = startEnv();
+  try {
+    const pack = makeVerifyPack({
+      items: [
+        { id: "approve.ship", kind: "human_approval", required: true, prompt: "Ship?" },
+        { id: "review.notes", kind: "human_approval", required: false, prompt: "Review notes" },
+      ],
+    });
+    const created = await env.registry.create(validJob({ verifyPack: pack }));
+
+    const requested = env.appendedEvents.filter((e) => e.type === "verify.human_approval.requested");
+    assert.equal(requested.length, 2);
+    assert.equal(requested[0].jobId, created.jobId);
+    assert.equal(requested[0].itemId, "approve.ship");
+    assert.equal(requested[0].required, true);
+    assert.equal(requested[0].blocksCompletion, true);
+    assert.equal(requested[0].title, "HUMAN APPROVAL REQUIRED");
+    assert.equal(requested[1].itemId, "review.notes");
+    assert.equal(requested[1].required, false);
+    assert.equal(requested[1].blocksCompletion, false);
+    assert.equal(requested[1].title, "HUMAN REVIEW READY");
+
+    const refetched = env.registry.get(created.jobId);
+    assert.equal(refetched.humanApprovalRequests.length, 2);
+    assert.equal(
+      refetched.completionGates.find((gate) => gate.id === "approve.ship").humanApproval,
+      true,
+    );
+    assert.equal(
+      refetched.completionGates.find((gate) => gate.id === "approve.ship").required,
+      true,
+    );
+
+    await env.registry.checkpoint(created.jobId, { status: "running", summary: "still running" });
+    assert.equal(env.appendedEvents.filter((e) => e.type === "verify.human_approval.requested").length, 2);
+  } finally {
+    env.close();
+  }
+});
+
 test("JobRegistry.create: without verifyPack the JobRecord has no verifyPack field", async () => {
   const env = startEnv();
   try {
@@ -688,17 +729,25 @@ test("JobRegistry.create: verifyPack flows through job.queued (predecessor) path
   const env = startEnv();
   try {
     const first = await env.registry.create(validJob({ taskId: "t-pred" }));
-    const pack = makeVerifyPack({ items: [{ id: "q1", kind: "command", cmd: "echo q", required: false }] });
+    const pack = makeVerifyPack({ items: [{ id: "q1", kind: "human_approval", required: true, prompt: "Approve q" }] });
     const second = await env.registry.create(
       validJob({ taskId: "t-succ", predecessorJobId: first.jobId, verifyPack: pack }),
     );
     assert.ok(second.job.verifyPack, "queued job has verifyPack");
     assert.equal(second.job.verifyPack.items[0].id, "q1");
     assert.equal(second.job.status, "queued");
+    assert.equal(env.appendedEvents.filter((e) => e.type === "verify.human_approval.requested").length, 0);
 
     const queuedEvt = env.appendedEvents.find((e) => e.type === "job.queued");
     assert.ok(queuedEvt.verifyPack, "job.queued event carries verifyPack");
     assert.equal(queuedEvt.verifyPack.items[0].id, "q1");
+
+    await env.registry.complete(first.jobId, { status: "completed", summary: "pred done" });
+    await env.registry.checkpoint(second.jobId, { status: "running", summary: "succ started" });
+    const requested = env.appendedEvents.filter((e) => e.type === "verify.human_approval.requested");
+    assert.equal(requested.length, 1);
+    assert.equal(requested[0].jobId, second.jobId);
+    assert.equal(requested[0].itemId, "q1");
   } finally {
     env.close();
   }

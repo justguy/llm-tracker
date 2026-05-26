@@ -3,6 +3,9 @@ import { validateTaskExtensions } from "../validator/task-extensions.js";
 // SH-5-04 composition core. The surrounding job lifecycle still stamps this
 // onto JobRecord once sh-3-05 lands; this module keeps composition deterministic.
 
+export const HUMAN_APPROVAL_REQUIRED_TITLE = "HUMAN APPROVAL REQUIRED";
+export const HUMAN_REVIEW_READY_TITLE = "HUMAN REVIEW READY";
+
 function cloneItems(items, { normalize = false } = {}) {
   return Object.freeze(
     items.map((item) => Object.freeze(normalize ? normalizeItem(item) : { ...item }))
@@ -80,4 +83,43 @@ export function stampVerifyPack(input = {}) {
     stampedFromRev,
     items
   }, { normalize: true });
+}
+
+export function collectReadyHumanApprovalRequests(job) {
+  if (!job || typeof job !== "object" || Array.isArray(job)) return [];
+  const items = Array.isArray(job.verifyPack?.items) ? job.verifyPack.items : [];
+  const gatesById = new Map();
+  for (const gate of Array.isArray(job.completionGates) ? job.completionGates : []) {
+    if (gate && typeof gate.id === "string" && gate.id.length > 0) {
+      gatesById.set(gate.id, gate);
+    }
+  }
+  const pendingRequests = new Set();
+  for (const request of Array.isArray(job.humanApprovalRequests) ? job.humanApprovalRequests : []) {
+    if (request?.status === "pending" && typeof request.itemId === "string") {
+      pendingRequests.add(request.itemId);
+    }
+  }
+
+  const requests = [];
+  for (const item of items) {
+    if (!item || item.kind !== "human_approval") continue;
+    if (typeof item.id !== "string" || item.id.length === 0) continue;
+    if (pendingRequests.has(item.id)) continue;
+    const gate = gatesById.get(item.id);
+    if (gate && (gate.status === "satisfied" || gate.status === "overridden" || gate.status === "failed")) {
+      continue;
+    }
+    const required = gate?.required === true || item.required === true;
+    const blocksCompletion = required && (!gate || gate.status === "pending" || gate.status === undefined);
+    requests.push({
+      itemId: item.id,
+      itemKind: "human_approval",
+      required,
+      blocksCompletion,
+      title: blocksCompletion ? HUMAN_APPROVAL_REQUIRED_TITLE : HUMAN_REVIEW_READY_TITLE,
+      ...(typeof item.prompt === "string" ? { prompt: item.prompt } : {}),
+    });
+  }
+  return requests;
 }

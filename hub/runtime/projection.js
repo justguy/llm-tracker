@@ -121,6 +121,7 @@ const HANDLERS = Object.freeze({
   "skill.run.started": handleSkillRunStarted,
   "skill.run.finished": handleSkillRunFinished,
   "verify.command.completed": handleVerifyCommandCompleted,
+  "verify.human_approval.requested": handleVerifyHumanApprovalRequested,
   "verify.human_approval.resolved": handleVerifyHumanApprovalResolved,
 });
 
@@ -524,6 +525,53 @@ function handleHumanOverride(p, e) {
   });
 }
 
+function handleVerifyHumanApprovalRequested(p, e) {
+  const jobId = e.jobId;
+  if (!isJobId(jobId)) return;
+  const job = p.jobs.get(jobId);
+  if (!job) return;
+  if (typeof e.id !== "string" || e.id.length === 0) return;
+  if (typeof e.itemId !== "string" || e.itemId.length === 0) return;
+
+  const existingRequests = Array.isArray(job.humanApprovalRequests)
+    ? job.humanApprovalRequests.filter((request) => request && typeof request === "object")
+    : [];
+  const hasPending = existingRequests.some(
+    (request) => request.itemId === e.itemId && request.status === "pending",
+  );
+  const humanApprovalRequests = hasPending
+    ? existingRequests.map((request) => ({ ...request }))
+    : [
+        ...existingRequests.map((request) => ({ ...request })),
+        {
+          itemId: e.itemId,
+          itemKind: "human_approval",
+          status: "pending",
+          eventId: e.id,
+          requestedAt: e.ts,
+          required: e.required === true,
+          blocksCompletion: e.blocksCompletion === true,
+          ...(typeof e.title === "string" ? { title: e.title } : {}),
+          ...(typeof e.prompt === "string" ? { prompt: e.prompt } : {}),
+        },
+      ];
+
+  const required = e.required === true || e.blocksCompletion === true;
+  const completionGates = ensureHumanApprovalGate(job.completionGates, {
+    itemId: e.itemId,
+    required,
+    prompt: e.prompt,
+    requestedEventId: e.id,
+  });
+
+  p.jobs.set(jobId, {
+    ...job,
+    humanApprovalRequests,
+    completionGates,
+    lastActivityAt: e.ts,
+  });
+}
+
 function handleVerifyCommandCompleted(p, e) {
   const status = e.status === "succeeded" ? "satisfied" : "failed";
   updateVerifyCompletionGate(p, e, {
@@ -540,6 +588,7 @@ function handleVerifyCommandCompleted(p, e) {
 }
 
 function handleVerifyHumanApprovalResolved(p, e) {
+  clearHumanApprovalRequest(p, e);
   const status = e.status === "satisfied" ? "satisfied" : "failed";
   updateVerifyCompletionGate(p, e, {
     itemId: e.itemId,
@@ -554,6 +603,52 @@ function handleVerifyHumanApprovalResolved(p, e) {
       ...(typeof e.user === "string" ? { user: e.user } : {}),
       ...(typeof e.summary === "string" ? { summary: e.summary } : {}),
     },
+  });
+}
+
+function ensureHumanApprovalGate(existingGates, { itemId, required, prompt, requestedEventId }) {
+  const gates = Array.isArray(existingGates) ? existingGates : [];
+  let found = false;
+  const next = gates
+    .filter((gate) => gate && typeof gate === "object")
+    .map((gate) => {
+      if (gate.id !== itemId || gate.kind !== "verify_pack") return { ...gate };
+      found = true;
+      return {
+        ...gate,
+        required: gate.required === true || required,
+        humanApproval: true,
+        ...(typeof prompt === "string" ? { prompt } : {}),
+        ...(typeof requestedEventId === "string" ? { requestedEventId } : {}),
+      };
+    });
+  if (!found) {
+    next.push({
+      id: itemId,
+      kind: "verify_pack",
+      required,
+      status: "pending",
+      humanApproval: true,
+      ...(typeof prompt === "string" ? { prompt } : {}),
+      ...(typeof requestedEventId === "string" ? { requestedEventId } : {}),
+    });
+  }
+  return next;
+}
+
+function clearHumanApprovalRequest(p, e) {
+  const jobId = e.jobId;
+  if (!isJobId(jobId)) return;
+  const job = p.jobs.get(jobId);
+  if (!job || !Array.isArray(job.humanApprovalRequests)) return;
+  if (typeof e.itemId !== "string" || e.itemId.length === 0) return;
+  const humanApprovalRequests = job.humanApprovalRequests
+    .filter((request) => request?.itemId !== e.itemId)
+    .map((request) => ({ ...request }));
+  p.jobs.set(jobId, {
+    ...job,
+    humanApprovalRequests,
+    lastActivityAt: e.ts,
   });
 }
 

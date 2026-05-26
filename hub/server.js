@@ -1443,6 +1443,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     runtimeProjection,
     runtimeBroadcaster,
     attentionEngine,
+    jobRegistry,
     close: () => closeHub({ exit: false })
   };
 }

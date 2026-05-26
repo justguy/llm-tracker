@@ -88,10 +88,10 @@ async function openWsWithFirstMessage(url, options) {
   return { ws, firstMessage: await firstMessage };
 }
 
-async function postJson(base, path, body) {
+async function postJson(base, path, body, headers = {}) {
   return fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -573,6 +573,82 @@ test("startHub wires attention routes to runtime attention broadcasts", { timeou
     assert.equal(afterClearRes.status, 200);
     const afterClearBody = await afterClearRes.json();
     assert.equal(afterClearBody.items.find((i) => i.id === item.id), undefined);
+  } finally {
+    if (runtimeWs) runtimeWs.close();
+    await hub.close();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("startHub pushes verify human approval attention and clears on resolve", { timeout: TEST_TIMEOUT }, async () => {
+  const workspace = setupWorkspace();
+  const port = await findFreePort();
+  const hub = await startHub({ workspace, port, uiDir: join(process.cwd(), "ui") });
+  let runtimeWs;
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const runtimeConn = await openWsWithFirstMessage(`ws://127.0.0.1:${port}/runtime/ws`, {
+      headers: { Origin: base },
+    });
+    runtimeWs = runtimeConn.ws;
+    assert.equal(runtimeConn.firstMessage.type, "runtime.snapshot");
+
+    const startedPromise = waitForEventOfType(runtimeWs, "session.started");
+    const createRes = await postJson(base, "/api/sessions", {
+      name: "human-approval",
+      tier: "manual",
+    });
+    assert.equal(createRes.status, 201);
+    const createBody = await createRes.json();
+    await startedPromise;
+
+    const requestedRuntimeEvent = waitForEventOfType(runtimeWs, "verify.human_approval.requested");
+    const requestedAttentionUpdate = waitForMessageType(runtimeWs, "attention.updated");
+    const created = await hub.jobRegistry.create({
+      sessionId: createBody.session.id,
+      projectSlug: "demo",
+      taskId: "t-human",
+      profileId: "code-implementer",
+      kind: "code",
+      source: "system",
+      verifyPack: {
+        jobId: null,
+        stampedAt: "2026-05-26T00:00:00.000Z",
+        stampedFromRev: 1,
+        items: [
+          { id: "approve.ship", kind: "human_approval", required: true, prompt: "Ship?" },
+        ],
+      },
+    });
+    assert.ok(JOB_ID_RE.test(created.jobId));
+
+    const requestedMsg = await requestedRuntimeEvent;
+    assert.equal(requestedMsg.event.jobId, created.jobId);
+    assert.equal(requestedMsg.event.itemId, "approve.ship");
+    assert.equal(requestedMsg.event.title, "HUMAN APPROVAL REQUIRED");
+
+    const raisedUpdate = await requestedAttentionUpdate;
+    const raisedItem = raisedUpdate.items.find((item) => item.evidenceRef === requestedMsg.event.id);
+    assert.ok(raisedItem);
+    assert.equal(raisedItem.kind, "approval_needed");
+    assert.equal(raisedItem.title, "HUMAN APPROVAL REQUIRED");
+
+    const resolvedRuntimeEvent = waitForEventOfType(runtimeWs, "verify.human_approval.resolved");
+    const resolvedAttentionUpdate = waitForMessageType(runtimeWs, "attention.updated");
+    const resolveRes = await postJson(
+      base,
+      `/api/jobs/${created.jobId}/verify-pack/items/approve.ship/resolve`,
+      { approved: true, reason: "approved in integration test" },
+      { "X-LT-Session-Token": createBody.token.token },
+    );
+    assert.equal(resolveRes.status, 200);
+
+    const resolvedMsg = await resolvedRuntimeEvent;
+    assert.equal(resolvedMsg.event.itemId, "approve.ship");
+    const clearUpdate = await resolvedAttentionUpdate;
+    const clearedItem = clearUpdate.items.find((item) => item.dedupeKey === raisedItem.dedupeKey);
+    assert.ok(!clearedItem || typeof clearedItem.clearedAt === "string");
   } finally {
     if (runtimeWs) runtimeWs.close();
     await hub.close();

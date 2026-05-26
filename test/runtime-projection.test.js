@@ -86,6 +86,48 @@ function skillRunFinished({ skillRunId, skillId = "verify", jobId, sessionId, st
   return baseEvent("skill.run.finished", { ts, skillRunId, skillId, jobId, sessionId, status, ...(summary ? { summary } : {}) });
 }
 
+function verifyHumanApprovalRequested({
+  jobId,
+  sessionId,
+  itemId = "approve.ship",
+  required = true,
+  blocksCompletion = true,
+  prompt = "Ship?",
+  title = "HUMAN APPROVAL REQUIRED",
+  ts = "2026-05-23T12:22:00Z",
+} = {}) {
+  return baseEvent("verify.human_approval.requested", {
+    ts,
+    jobId,
+    sessionId,
+    itemId,
+    itemKind: "human_approval",
+    required,
+    blocksCompletion,
+    prompt,
+    title,
+  });
+}
+
+function verifyHumanApprovalResolved({
+  jobId,
+  sessionId,
+  itemId = "approve.ship",
+  status = "satisfied",
+  reason = "approved",
+  ts = "2026-05-23T12:23:00Z",
+} = {}) {
+  return baseEvent("verify.human_approval.resolved", {
+    ts,
+    jobId,
+    sessionId,
+    itemId,
+    itemKind: "human_approval",
+    status,
+    reason,
+  });
+}
+
 // ---------------------------------------------------------------------------
 
 test("empty projection: toSnapshots returns three empty arrays", () => {
@@ -238,6 +280,48 @@ test("job.queued upserts a new job with status='queued'; job.unblocked flips to 
   [j] = p.toSnapshots().jobs;
   assert.equal(j.status, "running");
   assert.equal(j.lastActivityAt, "2026-05-23T12:13:00Z");
+});
+
+test("verify.human_approval requested/resolved records and clears attention source state", () => {
+  const p = new RuntimeProjection();
+  const sessionId = makeRuntimeId("ses");
+  const jobId = makeRuntimeId("job");
+  p.apply(sessionStarted({ sessionId, projectSlug: "demo", taskId: "t-1" }));
+  p.apply(jobStarted({ jobId, sessionId, projectSlug: "demo", taskId: "t-1" }));
+  const requested = verifyHumanApprovalRequested({ jobId, sessionId });
+  p.apply(requested);
+
+  let [job] = p.toSnapshots().jobs;
+  assert.equal(job.humanApprovalRequests.length, 1);
+  assert.deepEqual(job.humanApprovalRequests[0], {
+    itemId: "approve.ship",
+    itemKind: "human_approval",
+    status: "pending",
+    eventId: requested.id,
+    requestedAt: requested.ts,
+    required: true,
+    blocksCompletion: true,
+    title: "HUMAN APPROVAL REQUIRED",
+    prompt: "Ship?",
+  });
+  assert.deepEqual(job.completionGates[0], {
+    id: "approve.ship",
+    kind: "verify_pack",
+    required: true,
+    status: "pending",
+    humanApproval: true,
+    prompt: "Ship?",
+    requestedEventId: requested.id,
+  });
+
+  const resolved = verifyHumanApprovalResolved({ jobId, sessionId });
+  p.apply(resolved);
+  [job] = p.toSnapshots().jobs;
+  assert.deepEqual(job.humanApprovalRequests, []);
+  assert.equal(job.completionGates[0].status, "satisfied");
+  assert.equal(job.completionGates[0].evidenceRef, resolved.id);
+  assert.equal(job.completionGates[0].verifyItemKind, "human_approval");
+  assert.equal(job.completionGates[0].reason, "approved");
 });
 
 test("session.task_unbound clears task and active job while preserving queued jobs", () => {

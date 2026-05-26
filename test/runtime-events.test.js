@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createVerifyHumanApprovalRequestedEvent,
   createSessionAskEvent,
   validateRuntimeEvent,
   RUNTIME_EVENT_TYPES,
@@ -157,6 +158,28 @@ test("empty idempotencyKey is rejected", () => {
 
 test("non-empty idempotencyKey is accepted", () => {
   const evt = baseValidSessionStarted({ idempotencyKey: "dedupe-key-123" });
+  assert.equal(validateRuntimeEvent(evt), true);
+});
+
+test("createVerifyHumanApprovalRequestedEvent builds a valid generic runtime event", () => {
+  const evt = createVerifyHumanApprovalRequestedEvent({
+    jobId: makeRuntimeId("job"),
+    sessionId: makeRuntimeId("ses"),
+    workspace: "/tmp/lt",
+    itemId: "approve.ship",
+    prompt: "Ship?",
+    required: true,
+    blocksCompletion: true,
+    title: "HUMAN APPROVAL REQUIRED",
+    projectSlug: "demo",
+    taskId: "t-1",
+    id: makeRuntimeId("evt"),
+  });
+
+  assert.equal(evt.type, "verify.human_approval.requested");
+  assert.equal(evt.itemKind, "human_approval");
+  assert.equal(evt.required, true);
+  assert.equal(evt.blocksCompletion, true);
   assert.equal(validateRuntimeEvent(evt), true);
 });
 

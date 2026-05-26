@@ -693,6 +693,78 @@ export function createSessionTaskUnboundEvent(input) {
   return event;
 }
 
+export function createVerifyHumanApprovalRequestedEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: input must be an object");
+  }
+  const {
+    jobId,
+    sessionId,
+    workspace,
+    itemId,
+    prompt,
+    required,
+    blocksCompletion,
+    title,
+    projectSlug,
+    taskId,
+    source = "system",
+    ts,
+    id,
+    idempotencyKey,
+  } = input;
+  if (!isJobId(jobId)) {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: jobId must be a job_ id");
+  }
+  if (!isSessionId(sessionId)) {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: sessionId must be a ses_ id");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: workspace required (non-empty string)");
+  }
+  if (typeof itemId !== "string" || itemId.length === 0) {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: itemId required (non-empty string)");
+  }
+  if (typeof required !== "boolean") {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: required must be a boolean");
+  }
+  if (typeof blocksCompletion !== "boolean") {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: blocksCompletion must be a boolean");
+  }
+  if (prompt !== undefined && (typeof prompt !== "string" || prompt.length === 0)) {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: prompt must be a non-empty string when present");
+  }
+  if (title !== undefined && (typeof title !== "string" || title.length === 0)) {
+    throw new Error("createVerifyHumanApprovalRequestedEvent: title must be a non-empty string when present");
+  }
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "verify.human_approval.requested",
+    source,
+    workspace,
+    jobId,
+    sessionId,
+    itemId,
+    itemKind: "human_approval",
+    required,
+    blocksCompletion,
+  };
+  if (typeof prompt === "string") event.prompt = prompt;
+  if (typeof title === "string") event.title = title;
+  if (typeof projectSlug === "string" && projectSlug.length > 0) event.projectSlug = projectSlug;
+  if (typeof taskId === "string" && taskId.length > 0) event.taskId = taskId;
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
 // --- SH-4-05: Attention ack / snooze / cleared event factories ------------
 //
 // Build `attention.ack`, `attention.snoozed`, `attention.cleared` runtime
