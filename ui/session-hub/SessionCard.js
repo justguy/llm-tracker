@@ -3,6 +3,7 @@ import { StdioBadge } from "./StdioBadge.js";
 
 export const SESSION_CARD_SIZES = Object.freeze(["compact", "normal", "large"]);
 export const JOB_ACTION_UNBOUND_REASON = "session has no active job; bind a task first";
+export const UNBIND_ACTIVE_CONFIRMATION = "Unbind active job and cancel it first?";
 const JOB_ACTIONS = Object.freeze(["VERIFY", "COMPLETE", "SKILLS"]);
 
 export function normalizeSessionCardSize(size) {
@@ -34,15 +35,51 @@ function repoLabel(session) {
   return "repo unknown";
 }
 
-export function SessionCard({ session, size = "normal" } = {}) {
+function normalizeTaskLedger(session) {
+  const ledger = session?.taskLedger || session?.taskLedgerItems || session?.ledger;
+  if (!Array.isArray(ledger)) return [];
+  return ledger.filter((item) => item && typeof item.taskId === "string" && item.taskId.length > 0);
+}
+
+function defaultConfirmUnbind(message) {
+  if (typeof globalThis.confirm !== "function") return true;
+  return globalThis.confirm(message);
+}
+
+function taskLedgerLabel(item) {
+  return item.title || item.taskTitle || item.taskId;
+}
+
+export function SessionCard({
+  session,
+  size = "normal",
+  onUnbindTask,
+  confirmUnbind = defaultConfirmUnbind,
+} = {}) {
   if (!session || typeof session !== "object") return null;
   const warnings = Array.isArray(session.warnings) ? session.warnings : [];
   const asks = Array.isArray(session.asks) ? session.asks : [];
+  const taskLedger = normalizeTaskLedger(session);
   const cardSize = normalizeSessionCardSize(size);
   const activeJobId = typeof session.activeJobId === "string" && session.activeJobId.length > 0
     ? session.activeJobId
     : null;
   const jobActionDisabledReason = activeJobId ? null : JOB_ACTION_UNBOUND_REASON;
+  const handleUnbind = (item) => {
+    if (typeof onUnbindTask !== "function") return;
+    const requiresConfirmation = item.relation === "active_job" || (item.jobId && item.jobId === activeJobId);
+    if (requiresConfirmation && typeof confirmUnbind === "function") {
+      const accepted = confirmUnbind(UNBIND_ACTIVE_CONFIRMATION, { session, item });
+      if (!accepted) return;
+    }
+    onUnbindTask({
+      sessionId: session.id,
+      taskId: item.taskId,
+      jobId: item.jobId,
+      relation: item.relation,
+      force: requiresConfirmation,
+    });
+  };
 
   return html`
     <article
@@ -85,6 +122,32 @@ export function SessionCard({ session, size = "normal" } = {}) {
           ? html`<span class="session-card__job-action-reason">${jobActionDisabledReason}</span>`
           : null}
       </div>
+
+      ${taskLedger.length
+        ? html`
+            <ul class="session-card__task-ledger" aria-label="Session task ledger">
+              ${taskLedger.map((item) => {
+                const relation = item.relation || "mentioned";
+                const requiresConfirmation = relation === "active_job" || (item.jobId && item.jobId === activeJobId);
+                return html`
+                  <li key=${`${item.taskId}:${relation}`} class="session-card__task-ledger-row" data-relation=${relation}>
+                    <span class="session-card__task-ledger-task">${taskLedgerLabel(item)}</span>
+                    <span class="session-card__task-ledger-relation">${relation}</span>
+                    <button
+                      class="session-card__unbind-chip"
+                      type="button"
+                      disabled=${typeof onUnbindTask !== "function"}
+                      title=${requiresConfirmation ? UNBIND_ACTIVE_CONFIRMATION : "Unbind task from session"}
+                      onClick=${() => handleUnbind(item)}
+                    >
+                      [Unbind]
+                    </button>
+                  </li>
+                `;
+              })}
+            </ul>
+          `
+        : null}
 
       ${warnings.length
         ? html`

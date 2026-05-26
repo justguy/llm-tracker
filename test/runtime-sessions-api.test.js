@@ -821,6 +821,133 @@ test("POST /api/sessions/:sessionId/bind-task starts the first job for an untask
   }
 });
 
+test("POST /api/sessions/:sessionId/unbind-task force-cancels active job and preserves queued jobs", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-active", title: "Active", status: "in_progress" },
+            { id: "t-next", title: "Next", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+
+    const activeRes = await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-active",
+      profileId: "code-implementer",
+    });
+    assert.equal(activeRes.status, 201);
+    const active = await activeRes.json();
+
+    const queuedRes = await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-next",
+      profileId: "code-implementer",
+    });
+    assert.equal(queuedRes.status, 201);
+    const queued = await queuedRes.json();
+    assert.equal(queued.mode, "queued");
+
+    const blockedRes = await postJson(env.base, `/api/sessions/${target.session.id}/unbind-task`, {
+      reason: "change task",
+    });
+    assert.equal(blockedRes.status, 409);
+    assert.equal((await blockedRes.json()).error.code, "ACTIVE_JOB_RUNNING");
+
+    const unbindRes = await postJson(env.base, `/api/sessions/${target.session.id}/unbind-task`, {
+      reason: "change task",
+      force: true,
+    });
+    assert.equal(unbindRes.status, 200);
+    const unbound = await unbindRes.json();
+    assert.equal(unbound.ok, true);
+    assert.equal(unbound.mode, "untasked");
+    assert.equal(unbound.previousTaskId, "t-active");
+    assert.equal(unbound.previousActiveJobId, active.jobId);
+    assert.deepEqual(unbound.cancelledJobIds, [active.jobId]);
+    assert.equal(unbound.session.mode, "untasked");
+    assert.equal(unbound.session.taskId, undefined);
+    assert.equal(unbound.session.activeJobId, undefined);
+    assert.deepEqual(unbound.session.queuedJobIds, [queued.jobId]);
+    assert.equal(env.jobRegistry.get(active.jobId).status, "cancelled");
+    assert.equal(env.jobRegistry.get(queued.jobId).status, "queued");
+
+    const event = env.appendedEvents.find((item) => item.type === "session.task_unbound");
+    assert.equal(event.previousTaskId, "t-active");
+    assert.equal(event.previousActiveJobId, active.jobId);
+    assert.equal(event.reason, "change task");
+    assert.equal(event.force, true);
+
+    const ledgerRes = await fetch(`${env.base}/api/sessions/${target.session.id}/task-ledger`);
+    assert.equal(ledgerRes.status, 200);
+    const ledger = await ledgerRes.json();
+    const byTask = new Map(ledger.taskLedger.map((item) => [item.taskId, item]));
+    assert.equal(byTask.get("t-active").relation, "completed_in_session");
+    assert.equal(byTask.get("t-next").relation, "queued_next");
+    assert.equal(ledger.taskLedger.some((item) => item.relation === "mentioned"), false);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/unbind-task cascadeQueued cancels queued successors", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-active", title: "Active", status: "in_progress" },
+            { id: "t-next", title: "Next", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+    const active = await (await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-active",
+    })).json();
+    const queued = await (await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-next",
+    })).json();
+
+    const unbindRes = await postJson(env.base, `/api/sessions/${target.session.id}/unbind-task`, {
+      reason: "restart plan",
+      force: true,
+      cascadeQueued: true,
+    });
+    assert.equal(unbindRes.status, 200);
+    const unbound = await unbindRes.json();
+    assert.deepEqual(new Set(unbound.cancelledJobIds), new Set([active.jobId, queued.jobId]));
+    assert.equal(env.jobRegistry.get(active.jobId).status, "cancelled");
+    assert.equal(env.jobRegistry.get(queued.jobId).status, "cancelled");
+    assert.deepEqual(unbound.session.queuedJobIds, []);
+  } finally {
+    await env.close();
+  }
+});
+
 test("POST /api/sessions/:sessionId/attach-task queues behind an active job", { timeout: TEST_TIMEOUT }, async () => {
   const env = await startMiniApp({
     projects: {

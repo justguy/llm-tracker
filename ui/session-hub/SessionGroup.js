@@ -156,6 +156,72 @@ export async function previewSessionTaskDrop({
   return payload;
 }
 
+export async function requestSessionTaskUnbind({
+  fetcher = globalThis.fetch,
+  sessionId,
+  reason,
+  force = false,
+  cascadeQueued = false,
+} = {}) {
+  const targetSessionId = nonEmptyString(sessionId);
+  if (!targetSessionId) throw new Error("sessionId is required");
+  const body = {};
+  if (nonEmptyString(reason)) body.reason = nonEmptyString(reason);
+  if (force) body.force = true;
+  if (cascadeQueued) body.cascadeQueued = true;
+  const response = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/unbind-task`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
+export async function requestSessionTaskLedger({
+  fetcher = globalThis.fetch,
+  sessionId,
+} = {}) {
+  const targetSessionId = nonEmptyString(sessionId);
+  if (!targetSessionId) throw new Error("sessionId is required");
+  const response = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/task-ledger`, {
+    method: "GET",
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return Array.isArray(payload.taskLedger) ? payload.taskLedger : [];
+}
+
+function mergeSessionTaskLedger(sessions, sessionId, taskLedger) {
+  return upsertSession(sessions, sessionId, (session) => ({
+    ...session,
+    taskLedger: Array.isArray(taskLedger) ? taskLedger : [],
+  }));
+}
+
+function taskLedgerRefreshKey(sessions) {
+  return normalizeSessionList(sessions)
+    .map((session) => [
+      session.id,
+      session.taskId || "",
+      session.activeJobId || "",
+      ...(Array.isArray(session.queuedJobIds) ? session.queuedJobIds : []),
+    ].join(":"))
+    .join("|");
+}
+
+function clearBoundTask(session, event) {
+  const next = {
+    ...session,
+    mode: "untasked",
+    lastActivityAt: event.ts,
+  };
+  delete next.taskId;
+  delete next.activeJobId;
+  return next;
+}
+
 export function applyRuntimeSessionEvent(sessions, event) {
   if (!isRecord(event)) return normalizeSessionList(sessions);
 
@@ -249,6 +315,8 @@ export function applyRuntimeSessionEvent(sessions, event) {
           lastActivityAt: event.ts,
         };
       });
+    case "session.task_unbound":
+      return upsertSession(sessions, sessionId, (session) => clearBoundTask(session, event));
     case "session.stdio_capture_changed":
       return upsertSession(sessions, sessionId, (session) => ({
         ...session,
@@ -351,6 +419,7 @@ export function SessionGroupView({
   dropPreflight = null,
   onSizeChange,
   onAttach,
+  onUnbindTask,
   onTaskDropPreflight,
   onDismissDropPreflight,
 } = {}) {
@@ -420,7 +489,7 @@ export function SessionGroupView({
                   onDragOver=${handleTaskDragOver}
                   onDrop=${(event) => handleTaskDrop(event, session)}
                 >
-                  <${SessionCard} session=${session} size=${cardSize} />
+                  <${SessionCard} session=${session} size=${cardSize} onUnbindTask=${onUnbindTask} />
                 </div>
               `)}
             </div>
@@ -471,7 +540,9 @@ export function SessionGroup({
   WebSocketCtor = globalThis.WebSocket,
   runtimeWsUrl = runtimeWebSocketUrl(),
   reconnectMs = 1000,
+  fetcher = globalThis.fetch,
   onAttach,
+  onUnbindTask = null,
   projectSlug,
   dropPreflight,
   onTaskDropPreflight,
@@ -481,6 +552,15 @@ export function SessionGroup({
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
   const cardSize = useMemo(() => normalizeSessionCardSize(size), [size]);
+  const ledgerKey = useMemo(() => taskLedgerRefreshKey(sessions), [sessions]);
+  const handleUnbindTask = useMemo(
+    () => (
+      typeof onUnbindTask === "function"
+        ? onUnbindTask
+        : (payload) => requestSessionTaskUnbind({ fetcher, ...payload })
+    ),
+    [fetcher, onUnbindTask],
+  );
 
   useEffect(() => {
     return connectRuntimeSessions({
@@ -493,6 +573,30 @@ export function SessionGroup({
     });
   }, [WebSocketCtor, runtimeWsUrl, reconnectMs]);
 
+  useEffect(() => {
+    if (typeof fetcher !== "function") return undefined;
+    const list = normalizeSessionList(sessions);
+    if (list.length === 0) return undefined;
+    let cancelled = false;
+    Promise.allSettled(
+      list.map((session) => requestSessionTaskLedger({ fetcher, sessionId: session.id })
+        .then((taskLedger) => ({ sessionId: session.id, taskLedger }))),
+    ).then((results) => {
+      if (cancelled) return;
+      const fulfilled = results
+        .filter((result) => result.status === "fulfilled")
+        .map((result) => result.value);
+      if (fulfilled.length === 0) return;
+      setSessions((prev) => fulfilled.reduce(
+        (next, item) => mergeSessionTaskLedger(next, item.sessionId, item.taskLedger),
+        prev,
+      ));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetcher, ledgerKey]);
+
   return html`
     <${SessionGroupView}
       sessions=${sessions}
@@ -503,6 +607,7 @@ export function SessionGroup({
       dropPreflight=${dropPreflight}
       onSizeChange=${onSizeChange}
       onAttach=${onAttach}
+      onUnbindTask=${handleUnbindTask}
       onTaskDropPreflight=${onTaskDropPreflight}
       onDismissDropPreflight=${onDismissDropPreflight}
     />

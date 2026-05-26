@@ -24,6 +24,7 @@ import {
   createSessionAskEvent,
   createSessionStdioCaptureChangedEvent,
   createSessionTaskAttachedEvent,
+  createSessionTaskUnboundEvent,
   createSessionWarningEvent,
 } from "../runtime/events.js";
 import { isJobId } from "../runtime/ids.js";
@@ -83,6 +84,7 @@ const BIND_TASK_ALLOWED_FIELDS = new Set([
   ...ATTACH_PREVIEW_ALLOWED_FIELDS,
   "idempotencyKey",
 ]);
+const UNBIND_TASK_ALLOWED_FIELDS = new Set(["reason", "force", "cascadeQueued", "idempotencyKey"]);
 const ATTACH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
 const ATTACH_CANCEL_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
 const ATTACH_REORDER_ALLOWED_FIELDS = new Set(["jobIds"]);
@@ -558,6 +560,129 @@ export function registerSessionsRoutes(app, deps) {
         rev: attachAppend.rev,
         eventId: attachAppend.eventId,
         jobEventId: created.eventId,
+      });
+    });
+  });
+
+  // --- POST /api/sessions/:sessionId/unbind-task --------------------------
+  app.post("/api/sessions/:sessionId/unbind-task", async (req, res) => {
+    const { sessionId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+    if (!hasAttachJobRegistry(jobRegistry)) {
+      return sendError(res, 501, "UNBIND_JOB_REGISTRY_UNAVAILABLE", "unbind-task requires JobRegistry wiring");
+    }
+
+    const bodyOrError = validateUnbindTaskBody(req.body);
+    if (bodyOrError.error) {
+      return sendError(res, 400, bodyOrError.code, bodyOrError.error, bodyOrError.details);
+    }
+    const body = bodyOrError.value;
+
+    return runSerializedAttach(sessionId, async () => {
+      const session = projection.sessions.get(sessionId) || null;
+      if (!session) {
+        return sendError(res, 404, "UNKNOWN_SESSION", `session not found: ${sessionId}`);
+      }
+
+      const sessionJobs = jobRegistry.listBySession(sessionId);
+      const mirroredActiveJob =
+        typeof session.activeJobId === "string" && session.activeJobId.length > 0
+          ? jobRegistry.get(session.activeJobId)
+          : null;
+      const activeJob = mirroredActiveJob || firstActiveJobForSession(jobRegistry, sessionId);
+      const previousTaskId =
+        typeof session.taskId === "string" && session.taskId.length > 0
+          ? session.taskId
+          : typeof activeJob?.taskId === "string" && activeJob.taskId.length > 0
+            ? activeJob.taskId
+            : null;
+      const previousActiveJobId =
+        typeof session.activeJobId === "string" && session.activeJobId.length > 0
+          ? session.activeJobId
+          : activeJob?.id;
+      if (!previousTaskId) {
+        return sendError(res, 409, "SESSION_NOT_BOUND", "session has no task or active job to unbind", { sessionId });
+      }
+
+      const activeJobIsRunning = activeJob && ACTIVE_JOB_STATUSES.has(activeJob.status);
+      if (activeJobIsRunning && !body.force) {
+        return sendError(
+          res,
+          409,
+          "ACTIVE_JOB_RUNNING",
+          "active job is running; pass force:true to cancel it before unbinding",
+          { sessionId, jobId: activeJob.id, status: activeJob.status },
+        );
+      }
+
+      const cancelledJobIds = [];
+      const reason = body.reason || "session task unbound";
+      try {
+        if (body.force && activeJobIsRunning) {
+          const result = await jobRegistry.cancel(activeJob.id, {
+            summary: reason,
+            source: "http",
+            ...(body.idempotencyKey ? { idempotencyKey: `${body.idempotencyKey}:active` } : {}),
+          });
+          if (result.job?.id) cancelledJobIds.push(result.job.id);
+        }
+        if (body.force && body.cascadeQueued) {
+          for (const job of sessionJobs.filter((item) => item && item.status === "queued")) {
+            queuedAutoStarter.cancel(job.id);
+            const result = await jobRegistry.cancel(job.id, {
+              summary: reason,
+              source: "http",
+              ...(body.idempotencyKey ? { idempotencyKey: `${body.idempotencyKey}:queued:${job.id}` } : {}),
+            });
+            if (result.job?.id) cancelledJobIds.push(result.job.id);
+          }
+        }
+      } catch (err) {
+        return mapAttachRegistryError(res, err);
+      }
+
+      let unboundEvent;
+      try {
+        unboundEvent = createSessionTaskUnboundEvent({
+          sessionId,
+          previousTaskId,
+          ...(typeof previousActiveJobId === "string" && previousActiveJobId.length > 0
+            ? { previousActiveJobId }
+            : {}),
+          ...(body.reason ? { reason: body.reason } : {}),
+          force: body.force,
+          cascadeQueued: body.cascadeQueued,
+          cancelledJobIds,
+          workspace,
+          source: "http",
+          ...(body.idempotencyKey ? { idempotencyKey: `${body.idempotencyKey}:unbind` } : {}),
+        });
+      } catch (err) {
+        return sendError(res, 400, "INVALID_BODY", err.message || "failed to create session.task_unbound event");
+      }
+
+      let appendResult;
+      try {
+        appendResult = await runtimeStore.append(unboundEvent);
+      } catch (err) {
+        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+      }
+
+      return res.status(200).json({
+        ok: true,
+        mode: "untasked",
+        sessionId,
+        previousTaskId,
+        ...(typeof previousActiveJobId === "string" && previousActiveJobId.length > 0
+          ? { previousActiveJobId }
+          : {}),
+        force: body.force,
+        cancelledJobIds,
+        session: projection.sessions.get(sessionId) || null,
+        rev: appendResult.rev,
+        eventId: appendResult.eventId,
       });
     });
   });
@@ -1472,6 +1597,45 @@ function validateBindTaskBody(body) {
     return { code: "INVALID_BODY", error: "`idempotencyKey` must be a non-empty string when present" };
   }
   return { value: body };
+}
+
+function validateUnbindTaskBody(body) {
+  if (body === undefined || body === null) body = {};
+  if (typeof body !== "object" || Array.isArray(body)) {
+    return { code: "INVALID_BODY", error: "request body must be a JSON object" };
+  }
+  const unknown = unknownFields(body, UNBIND_TASK_ALLOWED_FIELDS);
+  if (unknown.length > 0) {
+    return {
+      code: "UNKNOWN_FIELDS",
+      error: `unknown body field(s): ${unknown.join(", ")}`,
+      details: { unknown },
+    };
+  }
+  const { reason, force = false, cascadeQueued = false, idempotencyKey } = body;
+  if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+    return { code: "INVALID_BODY", error: "`reason` must be a non-empty string when present" };
+  }
+  if (force !== undefined && typeof force !== "boolean") {
+    return { code: "INVALID_BODY", error: "`force` must be a boolean when present" };
+  }
+  if (cascadeQueued !== undefined && typeof cascadeQueued !== "boolean") {
+    return { code: "INVALID_BODY", error: "`cascadeQueued` must be a boolean when present" };
+  }
+  if (cascadeQueued && !force) {
+    return { code: "INVALID_BODY", error: "`cascadeQueued` requires force:true" };
+  }
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || idempotencyKey.length === 0)) {
+    return { code: "INVALID_BODY", error: "`idempotencyKey` must be a non-empty string when present" };
+  }
+  return {
+    value: {
+      ...(reason ? { reason } : {}),
+      force,
+      cascadeQueued,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    },
+  };
 }
 
 function firstActiveJobForSession(jobRegistry, sessionId) {

@@ -240,6 +240,31 @@ test("job.queued upserts a new job with status='queued'; job.unblocked flips to 
   assert.equal(j.lastActivityAt, "2026-05-23T12:13:00Z");
 });
 
+test("session.task_unbound clears task and active job while preserving queued jobs", () => {
+  const p = new RuntimeProjection();
+  const sessionId = makeRuntimeId("ses");
+  const activeJobId = makeRuntimeId("job");
+  const queuedJobId = makeRuntimeId("job");
+  p.apply(sessionStarted({ sessionId, projectSlug: "demo", taskId: "t-active" }));
+  p.apply(jobStarted({ jobId: activeJobId, sessionId, projectSlug: "demo", taskId: "t-active" }));
+  p.apply(jobQueued({ jobId: queuedJobId, sessionId }));
+
+  p.apply(baseEvent("session.task_unbound", {
+    ts: "2026-05-23T12:15:00Z",
+    sessionId,
+    previousTaskId: "t-active",
+    previousActiveJobId: activeJobId,
+    force: true,
+  }));
+
+  const [session] = p.toSnapshots().sessions;
+  assert.equal(session.mode, "untasked");
+  assert.equal(session.taskId, undefined);
+  assert.equal(session.activeJobId, undefined);
+  assert.deepEqual(session.queuedJobIds, [queuedJobId]);
+  assert.equal(session.lastActivityAt, "2026-05-23T12:15:00Z");
+});
+
 test("job.rollover_requested stamps rolloverRequestedAt and reason", () => {
   const p = new RuntimeProjection();
   const ses = makeRuntimeId("ses");

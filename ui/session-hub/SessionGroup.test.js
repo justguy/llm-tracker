@@ -1,14 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { JOB_ACTION_UNBOUND_REASON, normalizeSessionCardSize, SessionCard } from "./SessionCard.js";
+import {
+  JOB_ACTION_UNBOUND_REASON,
+  UNBIND_ACTIVE_CONFIRMATION,
+  normalizeSessionCardSize,
+  SessionCard,
+} from "./SessionCard.js";
 import {
   SessionGroupView,
   TASK_DROP_MIME,
   applyRuntimeSessionsMessage,
   buildTaskDropPreflightIntent,
   connectRuntimeSessions,
+  requestSessionTaskLedger,
   previewSessionTaskDrop,
+  requestSessionTaskUnbind,
   runtimeWebSocketUrl,
   taskDropPayloadFromEvent,
 } from "./SessionGroup.js";
@@ -154,6 +161,42 @@ test("SessionCard enables job-only actions when activeJobId is present", () => {
   assert.doesNotMatch(collectVNodeText(vnode), /bind a task first/);
 });
 
+test("SessionCard renders unbind chips and confirms active job unbind", () => {
+  let confirmed = null;
+  let unbound = null;
+  const vnode = SessionCard({
+    session: {
+      id: "ses_bound",
+      activeJobId: "job_active",
+      taskLedger: [
+        { taskId: "t-active", title: "Active", jobId: "job_active", relation: "active_job" },
+        { taskId: "t-next", title: "Next", jobId: "job_next", relation: "queued_next" },
+      ],
+    },
+    confirmUnbind: (message, context) => {
+      confirmed = { message, context };
+      return true;
+    },
+    onUnbindTask: (payload) => {
+      unbound = payload;
+    },
+  });
+  const chips = nodesByClassName(vnode, "session-card__unbind-chip");
+  assert.equal(chips.length, 2);
+  assert.match(collectVNodeText(vnode), /Active/);
+  assert.match(collectVNodeText(vnode), /queued_next/);
+  chips[0].props.onClick();
+  assert.equal(confirmed.message, UNBIND_ACTIVE_CONFIRMATION);
+  assert.equal(confirmed.context.item.taskId, "t-active");
+  assert.deepEqual(unbound, {
+    sessionId: "ses_bound",
+    taskId: "t-active",
+    jobId: "job_active",
+    relation: "active_job",
+    force: true,
+  });
+});
+
 test("SessionGroupView exposes exactly the three card-size choices", () => {
   const vnode = SessionGroupView({
     size: "compact",
@@ -274,6 +317,45 @@ test("previewSessionTaskDrop uses the pure attach preview endpoint only", async 
   assert.notEqual(calls[0][0], "/api/run-session/launch");
 });
 
+test("requestSessionTaskUnbind posts force payload to unbind endpoint", async () => {
+  const calls = [];
+  const result = await requestSessionTaskUnbind({
+    sessionId: "ses_target",
+    reason: "change task",
+    force: true,
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, mode: "untasked" }),
+      };
+    },
+  });
+  assert.equal(result.mode, "untasked");
+  assert.equal(calls[0][0], "/api/sessions/ses_target/unbind-task");
+  assert.equal(calls[0][1].method, "POST");
+  assert.deepEqual(JSON.parse(calls[0][1].body), { reason: "change task", force: true });
+});
+
+test("requestSessionTaskLedger reads derived ledger rows", async () => {
+  const calls = [];
+  const taskLedger = await requestSessionTaskLedger({
+    sessionId: "ses_target",
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({
+          taskLedger: [{ taskId: "t-active", relation: "active_job" }],
+        }),
+      };
+    },
+  });
+  assert.deepEqual(taskLedger, [{ taskId: "t-active", relation: "active_job" }]);
+  assert.equal(calls[0][0], "/api/sessions/ses_target/task-ledger");
+  assert.equal(calls[0][1].method, "GET");
+});
+
 test("applyRuntimeSessionsMessage replaces sessions from runtime.snapshot", () => {
   const sessions = applyRuntimeSessionsMessage(
     [{ id: "ses_old", tier: "manual" }],
@@ -373,6 +455,38 @@ test("applyRuntimeSessionsMessage projects session.task_attached onto the card m
   });
   assert.equal(sessions[0].activeJobId, "job_active");
   assert.deepEqual(sessions[0].queuedJobIds, ["job_queued", "job_next"]);
+});
+
+test("applyRuntimeSessionsMessage projects session.task_unbound onto the card model", () => {
+  const sessions = applyRuntimeSessionsMessage(
+    [{
+      id: "ses_a",
+      tier: "manual",
+      status: "active",
+      projectSlug: "demo",
+      taskId: "t-1",
+      activeJobId: "job_active",
+      queuedJobIds: ["job_queued"],
+    }],
+    {
+      type: "runtime.event",
+      event: {
+        id: "evt_unbind",
+        type: "session.task_unbound",
+        source: "http",
+        ts: "2026-05-25T15:05:00.000Z",
+        sessionId: "ses_a",
+        previousTaskId: "t-1",
+        previousActiveJobId: "job_active",
+        force: true,
+      },
+    },
+  );
+  assert.equal(sessions[0].mode, "untasked");
+  assert.equal(sessions[0].taskId, undefined);
+  assert.equal(sessions[0].activeJobId, undefined);
+  assert.deepEqual(sessions[0].queuedJobIds, ["job_queued"]);
+  assert.equal(sessions[0].lastActivityAt, "2026-05-25T15:05:00.000Z");
 });
 
 test("applyRuntimeSessionsMessage applies session.ask to the target session", () => {

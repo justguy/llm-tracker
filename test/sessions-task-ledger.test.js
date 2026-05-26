@@ -233,6 +233,27 @@ test("SessionTaskLedgerService: ignores stale or cross-session active/queued mir
   );
 });
 
+test("SessionTaskLedgerService: unbound session drops active and mentioned rows but keeps history", async () => {
+  const projection = seedProjection();
+  const session = projection.sessions.get(SESSION_ID);
+  const { taskId: _taskId, activeJobId: _activeJobId, ...unboundSession } = session;
+  projection.sessions.set(SESSION_ID, { ...unboundSession, mode: "untasked" });
+  projection.jobs.set(JOB_ACTIVE, {
+    ...projection.jobs.get(JOB_ACTIVE),
+    status: "cancelled",
+  });
+  const service = makeLedgerService(projection);
+
+  const items = await service.getLedger(SESSION_ID);
+  const byTask = new Map(items.map((item) => [item.taskId, item]));
+
+  assert.equal(byTask.get("active-task").relation, "completed_in_session");
+  assert.equal(byTask.get("active-task").source, "job_registry");
+  assert.equal(byTask.get("queued-task").relation, "queued_next");
+  assert.equal(byTask.get("mentioned-task"), undefined);
+  assert.equal(items.some((item) => item.relation === "active_job"), false);
+});
+
 test("SessionTaskLedgerService: computing the ledger never persists boundTasks or mutates SessionRecord", async () => {
   const projection = seedProjection();
   const service = makeLedgerService(projection);

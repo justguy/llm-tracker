@@ -110,6 +110,7 @@ const HANDLERS = Object.freeze({
   "session.stdio_capture_changed": handleSessionStdioCaptureChanged,
   "session.ask": handleSessionAsk,
   "session.task_attached": handleSessionTaskAttached,
+  "session.task_unbound": handleSessionTaskUnbound,
   "job.started": handleJobStarted,
   "job.checkpoint": handleJobCheckpoint,
   "job.completed": handleJobCompleted,
@@ -286,6 +287,22 @@ function handleSessionTaskAttached(p, e) {
     queuedJobIds: removeJobId(existing.queuedJobIds, e.jobId),
     lastActivityAt: e.ts,
   });
+}
+
+function handleSessionTaskUnbound(p, e) {
+  const id = e.sessionId;
+  if (!isSessionId(id)) return;
+  const existing = p.sessions.get(id);
+  if (!existing) return;
+
+  const next = {
+    ...existing,
+    mode: "untasked",
+    lastActivityAt: e.ts,
+  };
+  delete next.taskId;
+  delete next.activeJobId;
+  p.sessions.set(id, next);
 }
 
 const ACTIVE_JOB_STATUSES = new Set(["starting", "running", "blocked", "verifying"]);

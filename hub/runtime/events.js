@@ -602,6 +602,97 @@ export function createSessionTaskAttachedEvent(input) {
   return event;
 }
 
+/**
+ * Build a `session.task_unbound` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {string} input.previousTaskId
+ * @param {string} input.workspace
+ * @param {string} [input.previousActiveJobId]
+ * @param {string} [input.reason]
+ * @param {boolean} [input.force=false]
+ * @param {boolean} [input.cascadeQueued=false]
+ * @param {string[]} [input.cancelledJobIds]
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object} the validated runtime event
+ */
+export function createSessionTaskUnboundEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionTaskUnboundEvent: input must be an object");
+  }
+  const {
+    sessionId,
+    previousTaskId,
+    previousActiveJobId,
+    reason,
+    force = false,
+    cascadeQueued = false,
+    cancelledJobIds,
+    workspace,
+    source = "http",
+    ts,
+    id,
+    idempotencyKey,
+  } = input;
+  if (!isSessionId(sessionId)) {
+    throw new Error("createSessionTaskUnboundEvent: sessionId required (ses_<26 Crockford>)");
+  }
+  if (typeof previousTaskId !== "string" || previousTaskId.length === 0) {
+    throw new Error("createSessionTaskUnboundEvent: previousTaskId required (non-empty string)");
+  }
+  if (previousActiveJobId !== undefined && !isJobId(previousActiveJobId)) {
+    throw new Error("createSessionTaskUnboundEvent: previousActiveJobId must be a job_ id when present");
+  }
+  if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+    throw new Error("createSessionTaskUnboundEvent: reason must be a non-empty string when present");
+  }
+  if (typeof force !== "boolean") {
+    throw new Error("createSessionTaskUnboundEvent: force must be a boolean");
+  }
+  if (typeof cascadeQueued !== "boolean") {
+    throw new Error("createSessionTaskUnboundEvent: cascadeQueued must be a boolean");
+  }
+  if (cancelledJobIds !== undefined) {
+    if (!Array.isArray(cancelledJobIds) || cancelledJobIds.some((jobId) => !isJobId(jobId))) {
+      throw new Error("createSessionTaskUnboundEvent: cancelledJobIds must be JobId[] when present");
+    }
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionTaskUnboundEvent: workspace required (non-empty string)");
+  }
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.task_unbound",
+    source,
+    workspace,
+    sessionId,
+    previousTaskId,
+    force,
+  };
+  if (typeof previousActiveJobId === "string") event.previousActiveJobId = previousActiveJobId;
+  if (typeof reason === "string") event.reason = reason;
+  if (cascadeQueued) event.cascadeQueued = true;
+  if (Array.isArray(cancelledJobIds) && cancelledJobIds.length > 0) {
+    event.cancelledJobIds = [...cancelledJobIds];
+  }
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
 // --- SH-4-05: Attention ack / snooze / cleared event factories ------------
 //
 // Build `attention.ack`, `attention.snoozed`, `attention.cleared` runtime
