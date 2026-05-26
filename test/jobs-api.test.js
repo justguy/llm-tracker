@@ -22,11 +22,12 @@ import { RuntimeStore } from "../hub/runtime/store.js";
 import { RuntimeProjection } from "../hub/runtime/projection.js";
 import { makeRuntimeId } from "../hub/runtime/ids.js";
 import { validateRuntimeEvent } from "../hub/runtime/events.js";
+import { SessionTokenStore } from "../hub/sessions/auth/tokens.js";
 
 const SES = "ses_01h2x3y4z5a6b7c8d9e0f1g2h3";
 const GHOST_JOB = "job_01h2x3y4z5a6b7c8d9e0f1ghst";
 
-async function startApp() {
+async function startApp(opts = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "lt-jobs-api-"));
   const projection = new RuntimeProjection();
   const appendedEvents = [];
@@ -46,7 +47,18 @@ async function startApp() {
   });
   const app = express();
   app.use(express.json());
-  registerJobsRoutes(app, { jobRegistry });
+  registerJobsRoutes(app, {
+    jobRegistry,
+    ...(opts.tokenStore
+      ? {
+          tokenStore: opts.tokenStore,
+          runtimeStore,
+          makeRuntimeId,
+          validateRuntimeEvent,
+          workspace: workspaceRoot,
+        }
+      : {}),
+  });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve, reject) => {
     server.once("listening", resolve);
@@ -82,10 +94,10 @@ async function getJson(base, path) {
   return { status: res.status, body };
 }
 
-async function postJson(base, path, body) {
+async function postJson(base, path, body, headers = {}) {
   const init = {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
   };
   if (body !== undefined) init.body = JSON.stringify(body);
   const res = await fetch(`${base}${path}`, init);
@@ -226,6 +238,41 @@ test("POST /api/jobs/:id/checkpoint — non-object body is 400 INVALID_BODY", as
     const r = await postJson(app.base, `/api/jobs/${created.jobId}/checkpoint`, [1, 2, 3]);
     assert.equal(r.status, 400);
     assert.equal(r.body.error.code, "INVALID_BODY");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/checkpoint — tokenStore rejects missing and mismatched session tokens", async () => {
+  const tokenStore = new SessionTokenStore();
+  const app = await startApp({ tokenStore });
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const missing = await postJson(app.base, `/api/jobs/${created.jobId}/checkpoint`, { status: "blocked" });
+    assert.equal(missing.status, 401);
+    assert.equal(missing.body.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(missing.body.error.details.reason, "missing");
+
+    const wrong = tokenStore.issue({ sessionId: "ses_01h2x3y4z5a6b7c8d9e0f1zzzz" });
+    const mismatch = await postJson(app.base, `/api/jobs/${created.jobId}/checkpoint`, {
+      status: "blocked",
+    }, {
+      "X-LT-Session-Token": wrong.token,
+    });
+    assert.equal(mismatch.status, 401);
+    assert.equal(mismatch.body.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(mismatch.body.error.details.reason, "session_mismatch");
+
+    const valid = tokenStore.issue({ sessionId: SES });
+    const accepted = await postJson(app.base, `/api/jobs/${created.jobId}/checkpoint`, {
+      status: "blocked",
+      summary: "valid token",
+    }, {
+      "X-LT-Session-Token": valid.token,
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.job.status, "blocked");
+    assert.equal(accepted.body.job.lastCheckpointSummary, "valid token");
   } finally {
     await app.close();
   }
@@ -681,6 +728,30 @@ test("GET /api/jobs/:id/context-pack rejects malformed jobId before stubbing 501
   }
 });
 
+// --- GET /:id/skill-plan ----------------------------------------------------
+
+test("GET /api/jobs/:id/skill-plan builds the job profile skill plan", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput({ profileId: "code-implementer" }));
+    const r = await getJson(app.base, `/api/jobs/${created.jobId}/skill-plan`);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.jobId, created.jobId);
+    assert.equal(r.body.profileId, "code-implementer");
+    assert.ok(Array.isArray(r.body.skillPlan));
+    assert.ok(r.body.skillPlan.length > 0);
+    assert.deepEqual(r.body.skillPlan[0], {
+      id: "skill_plan_001",
+      skillId: "lt.execute_scope",
+      phase: "before_start",
+      required: true,
+      status: "pending",
+    });
+  } finally {
+    await app.close();
+  }
+});
+
 // --- POST /api/projects/:slug/tasks/:taskId/jobs (SH-5-18) ------------------
 
 test("POST /api/projects/:slug/tasks/:taskId/jobs — happy path: 201, registry.list contains it, job.started emitted", async () => {
@@ -730,6 +801,27 @@ test("POST /api/projects/:slug/tasks/:taskId/jobs — with predecessor emits job
     assert.equal(queued.length, 1);
     assert.equal(queued[0].source, "http");
     assert.equal(queued[0].predecessorJobId, pred.jobId);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/projects/:slug/tasks/:taskId/jobs — tokenStore rejects session mismatch from body sessionId", async () => {
+  const tokenStore = new SessionTokenStore();
+  const app = await startApp({ tokenStore });
+  try {
+    const wrong = tokenStore.issue({ sessionId: "ses_01h2x3y4z5a6b7c8d9e0f1zzzz" });
+    const r = await postJson(app.base, "/api/projects/demo/tasks/t-1/jobs", {
+      sessionId: SES,
+      profileId: "code-implementer",
+      kind: "code",
+    }, {
+      "X-LT-Session-Token": wrong.token,
+    });
+    assert.equal(r.status, 401);
+    assert.equal(r.body.error.code, "SESSION_TOKEN_REJECTED");
+    assert.equal(r.body.error.details.reason, "session_mismatch");
+    assert.deepEqual(app.jobRegistry.list(), []);
   } finally {
     await app.close();
   }

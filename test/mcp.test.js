@@ -179,6 +179,13 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_fuzzy_search",
       "tracker_help",
       "tracker_history",
+      "tracker_job_checkpoint",
+      "tracker_job_complete",
+      "tracker_job_context_pack",
+      "tracker_job_rollover",
+      "tracker_job_skill_plan",
+      "tracker_job_start",
+      "tracker_job_status",
       "tracker_next",
       "tracker_patch",
       "tracker_pick",
@@ -612,6 +619,135 @@ test("tracker_session_status forwards sessionToken to the running hub", async ()
       });
       assert.equal(usagePayload.session.lastStructuredEventAt, usagePayload.session.lastActivityAt);
       assert.deepEqual(usagePayload.session.warnings, [{ kind: "context_high", source: "mcp", percent: 85 }]);
+    } finally {
+      await client.close();
+    }
+  } finally {
+    stopDaemon(workspace);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_job_* tools start, checkpoint, status, and complete through the running hub", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-job-tools-");
+  writeFileSync(join(workspace, "trackers", "test-project.json"), JSON.stringify(validProject(), null, 2));
+  const port = await findFreePort();
+
+  try {
+    await startDaemonAndWait(runCli, { workspace, port, projectSlug: "test-project" });
+
+    const client = startMcp(workspace);
+    try {
+      await client.initialize();
+
+      const started = await client.request("tools/call", {
+        name: "tracker_session_start",
+        arguments: {
+          name: "mcp job test",
+          tier: "mcp_tracked",
+          projectSlug: "test-project",
+          taskId: "t1"
+        }
+      });
+      assert.notEqual(started.result.isError, true);
+      const startedPayload = JSON.parse(started.result.content[0].text);
+      const sessionId = startedPayload.session.id;
+      const sessionToken = startedPayload.token.token;
+
+      const jobStart = await client.request("tools/call", {
+        name: "tracker_job_start",
+        arguments: {
+          projectSlug: "test-project",
+          taskId: "t1",
+          sessionId,
+          sessionToken,
+          profileId: "code-implementer",
+          kind: "code"
+        }
+      });
+      assert.notEqual(jobStart.result.isError, true);
+      const jobStartPayload = JSON.parse(jobStart.result.content[0].text);
+      const jobId = jobStartPayload.jobId;
+      assert.match(jobId, /^job_/);
+      assert.equal(jobStartPayload.job.status, "running");
+      assert.equal(jobStartPayload.job.sessionId, sessionId);
+
+      const rejectedJobCheckpoint = await client.request("tools/call", {
+        name: "tracker_job_checkpoint",
+        arguments: {
+          jobId,
+          sessionToken: "not-a-real-session-token",
+          status: "blocked",
+          summary: "should be rejected"
+        }
+      });
+      assert.ok(rejectedJobCheckpoint.error);
+      assert.match(rejectedJobCheckpoint.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
+
+      const jobStatus = await client.request("tools/call", {
+        name: "tracker_job_status",
+        arguments: { jobId }
+      });
+      assert.notEqual(jobStatus.result.isError, true);
+      const jobStatusPayload = JSON.parse(jobStatus.result.content[0].text);
+      assert.equal(jobStatusPayload.id, jobId);
+      assert.equal(jobStatusPayload.status, "running");
+
+      const skillPlan = await client.request("tools/call", {
+        name: "tracker_job_skill_plan",
+        arguments: { jobId }
+      });
+      assert.notEqual(skillPlan.result.isError, true);
+      const skillPlanPayload = JSON.parse(skillPlan.result.content[0].text);
+      assert.equal(skillPlanPayload.jobId, jobId);
+      assert.equal(skillPlanPayload.profileId, "code-implementer");
+      assert.equal(skillPlanPayload.skillPlan[0].skillId, "lt.execute_scope");
+
+      const contextPack = await client.request("tools/call", {
+        name: "tracker_job_context_pack",
+        arguments: { jobId, kind: "start" }
+      });
+      assert.equal(contextPack.result.isError, true);
+      assert.match(contextPack.result.content[0].text, /NOT_IMPLEMENTED/);
+
+      const checkpoint = await client.request("tools/call", {
+        name: "tracker_job_checkpoint",
+        arguments: {
+          jobId,
+          sessionToken,
+          status: "blocked",
+          summary: "waiting on review"
+        }
+      });
+      assert.notEqual(checkpoint.result.isError, true);
+      const checkpointPayload = JSON.parse(checkpoint.result.content[0].text);
+      assert.equal(checkpointPayload.job.status, "blocked");
+      assert.equal(checkpointPayload.job.lastCheckpointSummary, "waiting on review");
+
+      const rollover = await client.request("tools/call", {
+        name: "tracker_job_rollover",
+        arguments: {
+          jobId,
+          sessionToken,
+          reason: "handoff needed"
+        }
+      });
+      assert.notEqual(rollover.result.isError, true);
+      const rolloverPayload = JSON.parse(rollover.result.content[0].text);
+      assert.equal(rolloverPayload.job.id, jobId);
+      assert.equal(rolloverPayload.job.rolloverReason, "handoff needed");
+
+      const complete = await client.request("tools/call", {
+        name: "tracker_job_complete",
+        arguments: {
+          jobId,
+          sessionToken,
+          summary: "complete through MCP"
+        }
+      });
+      assert.notEqual(complete.result.isError, true);
+      const completePayload = JSON.parse(complete.result.content[0].text);
+      assert.deepEqual(completePayload, { ok: true, mode: "completed", jobId });
     } finally {
       await client.close();
     }

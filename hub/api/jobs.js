@@ -16,6 +16,7 @@
 //   POST   /api/jobs/:jobId/rollover            — emit job.rollover_requested
 //   POST   /api/jobs/:jobId/unblock             — emit job.unblocked (SH-5-16)
 //   GET    /api/jobs/:jobId/context-pack        — 501 stub (SH-8-02)
+//   GET    /api/jobs/:jobId/skill-plan          — build/read SkillPlan for job profile
 //
 // The `/complete` route implements the JobCompleteResult union (§11.5.1):
 //   { ok: true,  mode: "completed", jobId }
@@ -26,6 +27,9 @@
 
 import { isJobId } from "../runtime/ids.js";
 import { TERMINAL_JOB_STATUS } from "../jobs/registry.js";
+import { buildSkillPlan } from "../jobs/skill-plan.js";
+import { SkillsRegistry } from "../skills/registry.js";
+import { requireSessionToken } from "./middleware/session-token.js";
 import {
   buildGatesPendingResult,
   findMissingRequiredGates,
@@ -61,6 +65,12 @@ const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "ha
 /**
  * @typedef {object} RegisterDeps
  * @property {import("../jobs/registry.js").JobRegistry} jobRegistry
+ * @property {import("../skills/registry.js").SkillsRegistry} [skillsRegistry]
+ * @property {import("../sessions/auth/tokens.js").SessionTokenStore} [tokenStore]
+ * @property {import("../runtime/store.js").RuntimeStore} [runtimeStore]
+ * @property {(prefix: string) => string} [makeRuntimeId]
+ * @property {(event: object) => true} [validateRuntimeEvent]
+ * @property {string} [workspace]
  */
 
 /**
@@ -73,7 +83,15 @@ export function registerJobsRoutes(app, deps) {
   if (!app || typeof app.get !== "function" || typeof app.post !== "function") {
     throw new Error("registerJobsRoutes: express app required");
   }
-  const { jobRegistry } = deps || {};
+  const {
+    jobRegistry,
+    tokenStore,
+    runtimeStore,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace,
+  } = deps || {};
+  const skillsRegistry = deps?.skillsRegistry || new SkillsRegistry();
   if (
     !jobRegistry ||
     typeof jobRegistry.list !== "function" ||
@@ -87,6 +105,17 @@ export function registerJobsRoutes(app, deps) {
   ) {
     throw new Error("registerJobsRoutes: jobRegistry (with list/get/checkpoint/complete/completeWithOverride/cancel/requestRollover/unblock) required");
   }
+  const tokenMiddleware =
+    tokenStore && typeof tokenStore.validate === "function"
+      ? requireSessionToken({
+          tokenStore,
+          ...(runtimeStore && typeof makeRuntimeId === "function" && typeof validateRuntimeEvent === "function" && typeof workspace === "string"
+            ? { runtimeStore, makeRuntimeId, validateRuntimeEvent, workspace }
+            : {}),
+          getSessionId: (req) => sessionIdForJobMutation(req, jobRegistry),
+        })
+      : null;
+  const requireToken = tokenMiddleware ? [tokenMiddleware] : [];
 
   // --- GET /api/jobs ------------------------------------------------------
   app.get("/api/jobs", (_req, res) => {
@@ -96,7 +125,7 @@ export function registerJobsRoutes(app, deps) {
   // --- POST /api/projects/:slug/tasks/:taskId/jobs ------------------------
   // SH-5-18. §12.2 start/create route — JobRegistry.create() picks the right
   // verb (`job.started` vs `job.queued`) based on `predecessorJobId`.
-  app.post("/api/projects/:slug/tasks/:taskId/jobs", async (req, res) => {
+  app.post("/api/projects/:slug/tasks/:taskId/jobs", ...requireToken, async (req, res) => {
     const { slug, taskId } = req.params;
     if (typeof slug !== "string" || slug.length === 0) {
       return sendError(res, 400, "INVALID_INPUT", "slug path param required");
@@ -147,7 +176,7 @@ export function registerJobsRoutes(app, deps) {
   // --- PATCH /api/jobs/:jobId ---------------------------------------------
   // SH-5-18. Thin delegation to JobRegistry.checkpoint — reconciles §12.2's
   // generic lifecycle update with the explicit checkpoint route below.
-  app.patch("/api/jobs/:jobId", async (req, res) => {
+  app.patch("/api/jobs/:jobId", ...requireToken, async (req, res) => {
     const { jobId } = req.params;
     if (!isJobId(jobId)) {
       return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
@@ -171,7 +200,7 @@ export function registerJobsRoutes(app, deps) {
   });
 
   // --- POST /api/jobs/:jobId/checkpoint -----------------------------------
-  app.post("/api/jobs/:jobId/checkpoint", async (req, res) => {
+  app.post("/api/jobs/:jobId/checkpoint", ...requireToken, async (req, res) => {
     const { jobId } = req.params;
     if (!isJobId(jobId)) {
       return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
@@ -196,7 +225,7 @@ export function registerJobsRoutes(app, deps) {
 
   // --- POST /api/jobs/:jobId/complete -------------------------------------
   // JobCompleteResult union per TDD §11.5.1.
-  app.post("/api/jobs/:jobId/complete", async (req, res) => {
+  app.post("/api/jobs/:jobId/complete", ...requireToken, async (req, res) => {
     const { jobId } = req.params;
     if (!isJobId(jobId)) {
       return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
@@ -260,7 +289,7 @@ export function registerJobsRoutes(app, deps) {
   // Human override of missing completion gates. The human.override event is
   // recorded first; its canonical event id becomes each overridden gate's
   // evidenceRef before the job.completed terminal transition is emitted.
-  app.post("/api/jobs/:jobId/complete-override", async (req, res) => {
+  app.post("/api/jobs/:jobId/complete-override", ...requireToken, async (req, res) => {
     const { jobId } = req.params;
     if (!isJobId(jobId)) {
       return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
@@ -305,7 +334,7 @@ export function registerJobsRoutes(app, deps) {
   });
 
   // --- POST /api/jobs/:jobId/cancel ---------------------------------------
-  app.post("/api/jobs/:jobId/cancel", async (req, res) => {
+  app.post("/api/jobs/:jobId/cancel", ...requireToken, async (req, res) => {
     const { jobId } = req.params;
     if (!isJobId(jobId)) {
       return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
@@ -328,7 +357,7 @@ export function registerJobsRoutes(app, deps) {
   });
 
   // --- POST /api/jobs/:jobId/rollover -------------------------------------
-  app.post("/api/jobs/:jobId/rollover", async (req, res) => {
+  app.post("/api/jobs/:jobId/rollover", ...requireToken, async (req, res) => {
     const { jobId } = req.params;
     if (!isJobId(jobId)) {
       return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
@@ -354,7 +383,7 @@ export function registerJobsRoutes(app, deps) {
   // SH-5-16. Manual override of the `blocked` status (per TDD §12.8). Emits a
   // JobUnblockedEvent; if the predecessor is still active, the registry also
   // emits a follow-up job.checkpoint that flips status to `queued`.
-  app.post("/api/jobs/:jobId/unblock", async (req, res) => {
+  app.post("/api/jobs/:jobId/unblock", ...requireToken, async (req, res) => {
     const { jobId } = req.params;
     if (!isJobId(jobId)) {
       return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
@@ -402,6 +431,40 @@ export function registerJobsRoutes(app, deps) {
       "context-pack composition lands with SH-8-02; sh-5-09 reserves the route.",
     );
   });
+
+  // --- GET /api/jobs/:jobId/skill-plan ------------------------------------
+  app.get("/api/jobs/:jobId/skill-plan", (req, res) => {
+    const { jobId } = req.params;
+    if (!isJobId(jobId)) {
+      return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
+    }
+    const job = jobRegistry.get(jobId);
+    if (!job) {
+      return sendError(res, 404, "JOB_NOT_FOUND", `job not found: ${jobId}`);
+    }
+    if (Array.isArray(job.skillPlan)) {
+      return res.status(200).json({
+        jobId,
+        profileId: job.profileId,
+        skillPlan: job.skillPlan,
+      });
+    }
+    try {
+      let nextId = 0;
+      const skillPlan = buildSkillPlan({
+        profileId: job.profileId,
+        skillsRegistry,
+        makeId: () => `skill_plan_${String(++nextId).padStart(3, "0")}`,
+      });
+      return res.status(200).json({
+        jobId,
+        profileId: job.profileId,
+        skillPlan,
+      });
+    } catch (err) {
+      return mapSkillPlanError(res, err);
+    }
+  });
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -426,6 +489,18 @@ function rejectUnknownFields(body, allowed) {
     if (!allowed.has(key)) unknown.push(key);
   }
   return unknown.length > 0 ? unknown : null;
+}
+
+function sessionIdForJobMutation(req, jobRegistry) {
+  const jobId = req?.params?.jobId;
+  if (isJobId(jobId)) {
+    const job = jobRegistry.get(jobId);
+    if (typeof job?.sessionId === "string" && job.sessionId.length > 0) {
+      return job.sessionId;
+    }
+  }
+  const sessionId = req?.body?.sessionId;
+  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
 }
 
 /**
@@ -493,6 +568,19 @@ function mapGateError(res, err) {
       return sendError(res, 500, "GATE_STATE_FAILED", err.message, details);
     default:
       return sendError(res, 500, "GATE_STATE_FAILED", (err && err.message) || "completion gate state failed");
+  }
+}
+
+function mapSkillPlanError(res, err) {
+  const code = err && err.code;
+  const details = err && err.details;
+  switch (code) {
+    case "UNKNOWN_PROFILE":
+      return sendError(res, 404, "UNKNOWN_PROFILE", err.message, details);
+    case "INVALID_INPUT":
+      return sendError(res, 500, "SKILL_PLAN_FAILED", err.message, details);
+    default:
+      return sendError(res, 500, "SKILL_PLAN_FAILED", (err && err.message) || "skill plan composition failed");
   }
 }
 

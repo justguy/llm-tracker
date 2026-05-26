@@ -25,6 +25,20 @@ export const READ_TOOL_NAMES = [
   "tracker_history"
 ];
 
+export const JOB_MUTATION_TOOL_NAMES = [
+  "tracker_job_start",
+  "tracker_job_checkpoint",
+  "tracker_job_complete",
+  "tracker_job_rollover"
+];
+
+export const JOB_TOOL_NAMES = [
+  ...JOB_MUTATION_TOOL_NAMES,
+  "tracker_job_status",
+  "tracker_job_context_pack",
+  "tracker_job_skill_plan"
+];
+
 export const WRITE_TOOL_NAMES = [
   "tracker_patch",
   "tracker_pick",
@@ -39,7 +53,8 @@ export const WRITE_TOOL_NAMES = [
   "tracker_session_handoff",
   "tracker_session_context_usage",
   "tracker_session_complete",
-  "tracker_session_broadcast"
+  "tracker_session_broadcast",
+  ...JOB_MUTATION_TOOL_NAMES
 ];
 
 export const SESSION_TOOL_NAMES = [
@@ -169,9 +184,11 @@ export function workspaceStatusPayload(workspace) {
     mcp: {
       readToolsRequireDaemon: false,
       writeToolsRequireDaemon: true,
+      jobToolsRequireDaemon: true,
       readTools: READ_TOOL_NAMES,
       writeTools: WRITE_TOOL_NAMES,
-      sessionTools: SESSION_TOOL_NAMES
+      sessionTools: SESSION_TOOL_NAMES,
+      jobTools: JOB_TOOL_NAMES
     },
     projectCount: projects.length,
     projects
@@ -208,8 +225,10 @@ export function workspaceRuntimePayload(workspace) {
     daemonRule: {
       readToolsRequireDaemon: false,
       writeToolsRequireDaemon: true,
+      jobToolsRequireDaemon: true,
       writeTools: WRITE_TOOL_NAMES,
-      sessionTools: SESSION_TOOL_NAMES
+      sessionTools: SESSION_TOOL_NAMES,
+      jobTools: JOB_TOOL_NAMES
     }
   };
 }

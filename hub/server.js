@@ -603,7 +603,14 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     store,
     activityThresholds: workspaceConfig.resolved.sessionHub.activity
   });
-  registerJobsRoutes(app, { jobRegistry });
+  registerJobsRoutes(app, {
+    jobRegistry,
+    tokenStore: sessionTokenStore,
+    runtimeStore,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace
+  });
   const runSessionDraftStore = createDraftStore();
   const runSessionDraftSweepTimer = setInterval(() => {
     try {
