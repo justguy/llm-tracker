@@ -13,6 +13,11 @@ import {
   applyRuntimeSessionsMessage,
   buildTaskDropPreflightIntent,
   connectRuntimeSessions,
+  requestJobComplete,
+  requestOverrideJobComplete,
+  requestResolveHumanApproval,
+  requestRunMissingGates,
+  requestSpawnReviewerDraft,
   requestSessionTaskLedger,
   previewSessionTaskDrop,
   requestSessionTaskUnbind,
@@ -159,6 +164,35 @@ test("SessionCard enables job-only actions when activeJobId is present", () => {
   assert.ok(buttons.every((button) => button.props.disabled === false));
   assert.ok(buttons.every((button) => button.props.title === "job_active"));
   assert.doesNotMatch(collectVNodeText(vnode), /bind a task first/);
+});
+
+test("SessionCard COMPLETE action calls active job completion handler", () => {
+  let payload = null;
+  const vnode = SessionCard({
+    session: { id: "ses_bound", name: "Bound", tier: "manual", activeJobId: "job_active" },
+    onCompleteJob: (next) => {
+      payload = next;
+    },
+  });
+  const complete = nodesByClassName(vnode, "session-card__job-action")
+    .find((button) => collectVNodeText(button).trim() === "COMPLETE");
+  complete.props.onClick();
+  assert.equal(payload.sessionId, "ses_bound");
+  assert.equal(payload.jobId, "job_active");
+});
+
+test("SessionCard renders completion gates panel for active job", () => {
+  const vnode = SessionCard({
+    session: { id: "ses_bound", activeJobId: "job_active" },
+    completionPanel: {
+      result: {
+        mode: "gates_pending",
+        missing: [{ id: "cmd.ok", kind: "verify_pack", required: true, status: "pending" }],
+      },
+    },
+  });
+  assert.match(collectVNodeText(vnode), /Completion gates/);
+  assert.match(collectVNodeText(vnode), /cmd\.ok/);
 });
 
 test("SessionCard renders unbind chips and confirms active job unbind", () => {
@@ -354,6 +388,104 @@ test("requestSessionTaskLedger reads derived ledger rows", async () => {
   assert.deepEqual(taskLedger, [{ taskId: "t-active", relation: "active_job" }]);
   assert.equal(calls[0][0], "/api/sessions/ses_target/task-ledger");
   assert.equal(calls[0][1].method, "GET");
+});
+
+test("job completion helpers call the Session Hub lifecycle endpoints", async () => {
+  const calls = [];
+  const fetcher = async (url, options) => {
+    calls.push([url, options]);
+    return {
+      ok: true,
+      json: async () => ({ ok: false, mode: "gates_pending", missing: [] }),
+    };
+  };
+  const result = await requestJobComplete({ jobId: "job_123", fetcher });
+  assert.equal(result.mode, "gates_pending");
+  assert.equal(calls[0][0], "/api/jobs/job_123/complete");
+  assert.equal(calls[0][1].method, "POST");
+  assert.deepEqual(JSON.parse(calls[0][1].body), {});
+});
+
+test("requestRunMissingGates runs only runnable verify-pack gates", async () => {
+  const calls = [];
+  await requestRunMissingGates({
+    jobId: "job_123",
+    missing: [
+      { id: "cmd.ok", kind: "verify_pack", status: "pending" },
+      { id: "approve.ship", kind: "verify_pack", humanApproval: true, verifyItemKind: "human_approval" },
+    ],
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, mode: "command_completed" }),
+      };
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "/api/jobs/job_123/verify-pack/items/cmd.ok/run");
+  assert.deepEqual(JSON.parse(calls[0][1].body), { source: "ui" });
+});
+
+test("requestResolveHumanApproval resolves human approval through verify-pack endpoint", async () => {
+  const calls = [];
+  const result = await requestResolveHumanApproval({
+    jobId: "job_123",
+    gate: { id: "approve.ship", humanApproval: true },
+    reason: "ship it",
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, mode: "verify_item_resolved", status: "satisfied" }),
+      };
+    },
+  });
+  assert.equal(result.status, "satisfied");
+  assert.equal(calls[0][0], "/api/jobs/job_123/verify-pack/items/approve.ship/resolve");
+  assert.deepEqual(JSON.parse(calls[0][1].body), { approved: true, source: "ui", reason: "ship it" });
+});
+
+test("requestSpawnReviewerDraft creates reviewer draft from active session and job", async () => {
+  const calls = [];
+  const result = await requestSpawnReviewerDraft({
+    jobId: "job_123",
+    session: { projectSlug: "demo", taskId: "t-1" },
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({ draft: { id: "draft_123" } }),
+      };
+    },
+  });
+  assert.equal(result.draft.id, "draft_123");
+  assert.equal(calls[0][0], "/api/run-session/draft");
+  const body = JSON.parse(calls[0][1].body);
+  assert.equal(body.profileId, "reviewer");
+  assert.equal(body.contextPackKind, "changed_since");
+  assert.equal(body.contextFromJobId, "job_123");
+});
+
+test("requestOverrideJobComplete requires a reason and posts override endpoint", async () => {
+  await assert.rejects(
+    requestOverrideJobComplete({ jobId: "job_123", reason: "" }),
+    /Override reason is required/,
+  );
+  const calls = [];
+  await requestOverrideJobComplete({
+    jobId: "job_123",
+    reason: "operator accepted",
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, mode: "completed_via_override" }),
+      };
+    },
+  });
+  assert.equal(calls[0][0], "/api/jobs/job_123/complete-override");
+  assert.deepEqual(JSON.parse(calls[0][1].body), { reason: "operator accepted" });
 });
 
 test("applyRuntimeSessionsMessage replaces sessions from runtime.snapshot", () => {

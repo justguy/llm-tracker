@@ -17,6 +17,11 @@ import {
   SessionGroupView,
   applyRuntimeSessionsMessage,
   previewSessionTaskDrop,
+  requestJobComplete,
+  requestOverrideJobComplete,
+  requestResolveHumanApproval,
+  requestRunMissingGates,
+  requestSpawnReviewerDraft,
 } from "./session-hub/SessionGroup.js";
 import { RunSessionWizard } from "./run-session/RunSessionWizard.js";
 import {
@@ -68,6 +73,10 @@ const TERMINAL_RUNTIME_JOB_STATUSES = new Set(["completed", "cancelled", "rolled
 
 function isRuntimeRecord(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function normalizeRuntimeJobList(jobs) {
@@ -182,6 +191,7 @@ function App() {
   const [attachOpen, setAttachOpen] = useState(false);
   const [dropRunSession, setDropRunSession] = useState(null);
   const [sessionDropPreflight, setSessionDropPreflight] = useState(null);
+  const [completionPanels, setCompletionPanels] = useState({});
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [attentionItems, setAttentionItems] = useState([]);
   const [runtimeSessions, setRuntimeSessions] = useState([]);
@@ -211,6 +221,15 @@ function App() {
       else next.add(b);
       return next;
     });
+  const setCompletionPanel = (jobId, patch) => {
+    const targetJobId = nonEmptyString(jobId);
+    if (!targetJobId) return;
+    setCompletionPanels((prev) => {
+      const current = prev[targetJobId] || {};
+      const nextPanel = typeof patch === "function" ? patch(current) : { ...current, ...patch };
+      return { ...prev, [targetJobId]: nextPanel };
+    });
+  };
   const shortcutsSuspended = shouldSuspendGlobalShortcuts({
     helpOpen,
     settingsOpen,
@@ -541,6 +560,98 @@ function App() {
     }
   };
 
+  const onCompleteJob = async ({ jobId }) => {
+    const targetJobId = nonEmptyString(jobId);
+    if (!targetJobId) return;
+    setCompletionPanel(targetJobId, { busyAction: "complete", error: null, message: null });
+    try {
+      const result = await requestJobComplete({ jobId: targetJobId });
+      if (result?.mode === "gates_pending") {
+        setCompletionPanel(targetJobId, { result, busyAction: null, error: null, message: null });
+        return;
+      }
+      setCompletionPanels((prev) => {
+        const next = { ...prev };
+        delete next[targetJobId];
+        return next;
+      });
+    } catch (err) {
+      setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "complete failed" });
+    }
+  };
+
+  const onCloseCompletionGates = ({ jobId }) => {
+    const targetJobId = nonEmptyString(jobId);
+    if (!targetJobId) return;
+    setCompletionPanels((prev) => {
+      const next = { ...prev };
+      delete next[targetJobId];
+      return next;
+    });
+  };
+
+  const onRunMissingGates = async ({ jobId, missing }) => {
+    const targetJobId = nonEmptyString(jobId);
+    if (!targetJobId) return;
+    setCompletionPanel(targetJobId, { busyAction: "run_missing", error: null, message: null });
+    try {
+      const result = await requestRunMissingGates({ jobId: targetJobId, missing });
+      setCompletionPanel(targetJobId, {
+        busyAction: null,
+        error: null,
+        message: `${result.results.length} verify item${result.results.length === 1 ? "" : "s"} run`,
+      });
+    } catch (err) {
+      setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "verify run failed" });
+    }
+  };
+
+  const onResolveHumanApproval = async ({ jobId, gate, reason }) => {
+    const targetJobId = nonEmptyString(jobId);
+    if (!targetJobId) return;
+    setCompletionPanel(targetJobId, { busyAction: "resolve_human_approval", error: null, message: null });
+    try {
+      await requestResolveHumanApproval({ jobId: targetJobId, gate, reason });
+      setCompletionPanel(targetJobId, { busyAction: null, error: null, message: "Human approval resolved" });
+    } catch (err) {
+      setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "approval resolve failed" });
+    }
+  };
+
+  const onSpawnReviewer = async ({ jobId, session }) => {
+    const targetJobId = nonEmptyString(jobId);
+    if (!targetJobId) return;
+    setCompletionPanel(targetJobId, { busyAction: "spawn_reviewer", error: null, message: null });
+    try {
+      const result = await requestSpawnReviewerDraft({ session, jobId: targetJobId });
+      const draftId = result?.draft?.id || "draft";
+      setCompletionPanel(targetJobId, { busyAction: null, error: null, message: `Reviewer ${draftId} created` });
+    } catch (err) {
+      setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "reviewer draft failed" });
+    }
+  };
+
+  const onOverrideComplete = async ({ jobId, reason }) => {
+    const targetJobId = nonEmptyString(jobId);
+    if (!targetJobId) return;
+    setCompletionPanel(targetJobId, { busyAction: "override_complete", error: null, message: null });
+    try {
+      await requestOverrideJobComplete({ jobId: targetJobId, reason });
+      setCompletionPanels((prev) => {
+        const next = { ...prev };
+        delete next[targetJobId];
+        return next;
+      });
+    } catch (err) {
+      setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "override complete failed" });
+    }
+  };
+
+  const onCompletionPanelValidationError = (message, payload = {}) => {
+    const targetJobId = nonEmptyString(payload.jobId);
+    if (targetJobId) setCompletionPanel(targetJobId, { busyAction: null, error: message });
+  };
+
   const onPickTask = async (slug, taskId = null) => {
     if (!slug) return;
     try {
@@ -855,8 +966,16 @@ function App() {
         connected=${runtimeWsUp}
         projectSlug=${activeSlug || ""}
         dropPreflight=${sessionDropPreflight}
+        completionPanels=${completionPanels}
         onSizeChange=${setSessionCardSize}
         onAttach=${() => setAttachOpen(true)}
+        onCompleteJob=${onCompleteJob}
+        onCloseCompletionGates=${onCloseCompletionGates}
+        onRunMissingGates=${onRunMissingGates}
+        onResolveHumanApproval=${onResolveHumanApproval}
+        onSpawnReviewer=${onSpawnReviewer}
+        onOverrideComplete=${onOverrideComplete}
+        onCompletionPanelValidationError=${onCompletionPanelValidationError}
         onTaskDropPreflight=${onTaskDropPreflight}
         onDismissDropPreflight=${() => setSessionDropPreflight(null)}
       />

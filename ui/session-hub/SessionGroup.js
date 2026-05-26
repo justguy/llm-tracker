@@ -193,6 +193,148 @@ export async function requestSessionTaskLedger({
   return Array.isArray(payload.taskLedger) ? payload.taskLedger : [];
 }
 
+export async function requestJobComplete({
+  fetcher = globalThis.fetch,
+  jobId,
+} = {}) {
+  const targetJobId = nonEmptyString(jobId);
+  if (!targetJobId) throw new Error("jobId is required");
+  const response = await fetcher(`/api/jobs/${encodeURIComponent(targetJobId)}/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
+function gateId(gate) {
+  return nonEmptyString(gate?.id);
+}
+
+function isHumanApprovalGate(gate) {
+  return gate?.humanApproval === true ||
+    gate?.verifyItemKind === "human_approval" ||
+    gate?.itemKind === "human_approval" ||
+    gate?.kind === "human_approval";
+}
+
+function runnableMissingGates(missing) {
+  const out = [];
+  for (const gate of Array.isArray(missing) ? missing : []) {
+    const id = gateId(gate);
+    if (!id || isHumanApprovalGate(gate)) continue;
+    if (gate.kind === "verify_pack") out.push({ ...gate, id });
+  }
+  return out;
+}
+
+export async function requestRunMissingGates({
+  fetcher = globalThis.fetch,
+  jobId,
+  missing = [],
+} = {}) {
+  const targetJobId = nonEmptyString(jobId);
+  if (!targetJobId) throw new Error("jobId is required");
+  const gates = runnableMissingGates(missing);
+  const results = [];
+  for (const gate of gates) {
+    const response = await fetcher(`/api/jobs/${encodeURIComponent(targetJobId)}/verify-pack/items/${encodeURIComponent(gate.id)}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "ui" }),
+    });
+    const payload = await parseJsonBody(response);
+    if (!response.ok) throw new Error(parseApiError(payload, response));
+    results.push(payload);
+  }
+  return {
+    ok: results.every((result) => result?.ok !== false),
+    mode: "verify_items_run",
+    jobId: targetJobId,
+    results,
+  };
+}
+
+export async function requestResolveHumanApproval({
+  fetcher = globalThis.fetch,
+  jobId,
+  gate,
+  reason,
+} = {}) {
+  const targetJobId = nonEmptyString(jobId);
+  const targetGateId = gateId(gate);
+  if (!targetJobId) throw new Error("jobId is required");
+  if (!targetGateId) throw new Error("gate id is required");
+  const body = { approved: true, source: "ui" };
+  const trimmedReason = nonEmptyString(reason);
+  if (trimmedReason) body.reason = trimmedReason;
+  const response = await fetcher(`/api/jobs/${encodeURIComponent(targetJobId)}/verify-pack/items/${encodeURIComponent(targetGateId)}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
+export async function requestSpawnReviewerDraft({
+  fetcher = globalThis.fetch,
+  session,
+  jobId,
+} = {}) {
+  const targetJobId = nonEmptyString(jobId);
+  const projectSlug = nonEmptyString(session?.projectSlug);
+  const taskId = nonEmptyString(session?.taskId);
+  if (!targetJobId) throw new Error("jobId is required");
+  if (!projectSlug) throw new Error("projectSlug is required");
+  if (!taskId) throw new Error("taskId is required");
+  const draft = {
+    source: "hub_run",
+    mode: "task_backed",
+    projectSlug,
+    taskId,
+    taskLocked: false,
+    runtime: "codex_app_server",
+    providerId: "codex_app_server",
+    profileId: "reviewer",
+    sandbox: "workspace-write",
+    claimMode: "join",
+    refreshContext: true,
+    contextPackKind: "changed_since",
+    contextFromJobId: targetJobId,
+  };
+  const response = await fetcher("/api/run-session/draft", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
+export async function requestOverrideJobComplete({
+  fetcher = globalThis.fetch,
+  jobId,
+  reason,
+} = {}) {
+  const targetJobId = nonEmptyString(jobId);
+  const trimmedReason = nonEmptyString(reason);
+  if (!targetJobId) throw new Error("jobId is required");
+  if (!trimmedReason) throw new Error("Override reason is required");
+  const response = await fetcher(`/api/jobs/${encodeURIComponent(targetJobId)}/complete-override`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: trimmedReason }),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
 function mergeSessionTaskLedger(sessions, sessionId, taskLedger) {
   return upsertSession(sessions, sessionId, (session) => ({
     ...session,
@@ -417,9 +559,17 @@ export function SessionGroupView({
   error = null,
   projectSlug = "",
   dropPreflight = null,
+  completionPanels = {},
   onSizeChange,
   onAttach,
   onUnbindTask,
+  onCompleteJob,
+  onCloseCompletionGates,
+  onRunMissingGates,
+  onResolveHumanApproval,
+  onSpawnReviewer,
+  onOverrideComplete,
+  onCompletionPanelValidationError,
   onTaskDropPreflight,
   onDismissDropPreflight,
 } = {}) {
@@ -489,7 +639,19 @@ export function SessionGroupView({
                   onDragOver=${handleTaskDragOver}
                   onDrop=${(event) => handleTaskDrop(event, session)}
                 >
-                  <${SessionCard} session=${session} size=${cardSize} onUnbindTask=${onUnbindTask} />
+                  <${SessionCard}
+                    session=${session}
+                    size=${cardSize}
+                    onUnbindTask=${onUnbindTask}
+                    completionPanel=${session.activeJobId ? completionPanels[session.activeJobId] : null}
+                    onCompleteJob=${onCompleteJob}
+                    onCloseCompletionGates=${onCloseCompletionGates}
+                    onRunMissingGates=${onRunMissingGates}
+                    onResolveHumanApproval=${onResolveHumanApproval}
+                    onSpawnReviewer=${onSpawnReviewer}
+                    onOverrideComplete=${onOverrideComplete}
+                    onCompletionPanelValidationError=${onCompletionPanelValidationError}
+                  />
                 </div>
               `)}
             </div>
@@ -551,6 +713,7 @@ export function SessionGroup({
   const [sessions, setSessions] = useState(() => normalizeSessionList(initialSessions));
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
+  const [completionPanels, setCompletionPanels] = useState({});
   const cardSize = useMemo(() => normalizeSessionCardSize(size), [size]);
   const ledgerKey = useMemo(() => taskLedgerRefreshKey(sessions), [sessions]);
   const handleUnbindTask = useMemo(
@@ -560,6 +723,125 @@ export function SessionGroup({
         : (payload) => requestSessionTaskUnbind({ fetcher, ...payload })
     ),
     [fetcher, onUnbindTask],
+  );
+  const setCompletionPanel = useMemo(
+    () => (jobId, patch) => {
+      const targetJobId = nonEmptyString(jobId);
+      if (!targetJobId) return;
+      setCompletionPanels((prev) => {
+        const current = prev[targetJobId] || {};
+        const nextPanel = typeof patch === "function" ? patch(current) : { ...current, ...patch };
+        return { ...prev, [targetJobId]: nextPanel };
+      });
+    },
+    [],
+  );
+  const handleCompleteJob = useMemo(
+    () => async ({ jobId }) => {
+      const targetJobId = nonEmptyString(jobId);
+      if (!targetJobId) return;
+      setCompletionPanel(targetJobId, { busyAction: "complete", error: null, message: null });
+      try {
+        const result = await requestJobComplete({ fetcher, jobId: targetJobId });
+        if (result?.mode === "gates_pending") {
+          setCompletionPanel(targetJobId, { result, busyAction: null, error: null, message: null });
+          return;
+        }
+        setCompletionPanels((prev) => {
+          const next = { ...prev };
+          delete next[targetJobId];
+          return next;
+        });
+      } catch (err) {
+        setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "complete failed" });
+      }
+    },
+    [fetcher, setCompletionPanel],
+  );
+  const handleCloseCompletionGates = useMemo(
+    () => ({ jobId }) => {
+      const targetJobId = nonEmptyString(jobId);
+      if (!targetJobId) return;
+      setCompletionPanels((prev) => {
+        const next = { ...prev };
+        delete next[targetJobId];
+        return next;
+      });
+    },
+    [],
+  );
+  const handleRunMissingGates = useMemo(
+    () => async ({ jobId, missing }) => {
+      const targetJobId = nonEmptyString(jobId);
+      if (!targetJobId) return;
+      setCompletionPanel(targetJobId, { busyAction: "run_missing", error: null, message: null });
+      try {
+        const result = await requestRunMissingGates({ fetcher, jobId: targetJobId, missing });
+        setCompletionPanel(targetJobId, {
+          busyAction: null,
+          error: null,
+          message: `${result.results.length} verify item${result.results.length === 1 ? "" : "s"} run`,
+        });
+      } catch (err) {
+        setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "verify run failed" });
+      }
+    },
+    [fetcher, setCompletionPanel],
+  );
+  const handleResolveHumanApproval = useMemo(
+    () => async ({ jobId, gate, reason }) => {
+      const targetJobId = nonEmptyString(jobId);
+      if (!targetJobId) return;
+      setCompletionPanel(targetJobId, { busyAction: "resolve_human_approval", error: null, message: null });
+      try {
+        await requestResolveHumanApproval({ fetcher, jobId: targetJobId, gate, reason });
+        setCompletionPanel(targetJobId, { busyAction: null, error: null, message: "Human approval resolved" });
+      } catch (err) {
+        setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "approval resolve failed" });
+      }
+    },
+    [fetcher, setCompletionPanel],
+  );
+  const handleSpawnReviewer = useMemo(
+    () => async ({ jobId, session }) => {
+      const targetJobId = nonEmptyString(jobId);
+      if (!targetJobId) return;
+      setCompletionPanel(targetJobId, { busyAction: "spawn_reviewer", error: null, message: null });
+      try {
+        const result = await requestSpawnReviewerDraft({ fetcher, session, jobId: targetJobId });
+        const draftId = result?.draft?.id || "draft";
+        setCompletionPanel(targetJobId, { busyAction: null, error: null, message: `Reviewer ${draftId} created` });
+      } catch (err) {
+        setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "reviewer draft failed" });
+      }
+    },
+    [fetcher, setCompletionPanel],
+  );
+  const handleOverrideComplete = useMemo(
+    () => async ({ jobId, reason }) => {
+      const targetJobId = nonEmptyString(jobId);
+      if (!targetJobId) return;
+      setCompletionPanel(targetJobId, { busyAction: "override_complete", error: null, message: null });
+      try {
+        await requestOverrideJobComplete({ fetcher, jobId: targetJobId, reason });
+        setCompletionPanels((prev) => {
+          const next = { ...prev };
+          delete next[targetJobId];
+          return next;
+        });
+      } catch (err) {
+        setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "override complete failed" });
+      }
+    },
+    [fetcher, setCompletionPanel],
+  );
+  const handleCompletionPanelValidationError = useMemo(
+    () => (message, payload = {}) => {
+      const targetJobId = nonEmptyString(payload.jobId);
+      if (targetJobId) setCompletionPanel(targetJobId, { busyAction: null, error: message });
+      else setError(message);
+    },
+    [setCompletionPanel],
   );
 
   useEffect(() => {
@@ -605,9 +887,17 @@ export function SessionGroup({
       error=${error}
       projectSlug=${projectSlug}
       dropPreflight=${dropPreflight}
+      completionPanels=${completionPanels}
       onSizeChange=${onSizeChange}
       onAttach=${onAttach}
       onUnbindTask=${handleUnbindTask}
+      onCompleteJob=${handleCompleteJob}
+      onCloseCompletionGates=${handleCloseCompletionGates}
+      onRunMissingGates=${handleRunMissingGates}
+      onResolveHumanApproval=${handleResolveHumanApproval}
+      onSpawnReviewer=${handleSpawnReviewer}
+      onOverrideComplete=${handleOverrideComplete}
+      onCompletionPanelValidationError=${handleCompletionPanelValidationError}
       onTaskDropPreflight=${onTaskDropPreflight}
       onDismissDropPreflight=${onDismissDropPreflight}
     />

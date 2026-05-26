@@ -1,4 +1,5 @@
 import { html } from "htm/preact";
+import { CompletionGatesPanel } from "./CompletionGatesPanel.js";
 import { StdioBadge } from "./StdioBadge.js";
 
 export const SESSION_CARD_SIZES = Object.freeze(["compact", "normal", "large"]);
@@ -55,6 +56,14 @@ export function SessionCard({
   size = "normal",
   onUnbindTask,
   confirmUnbind = defaultConfirmUnbind,
+  completionPanel = null,
+  onCompleteJob,
+  onCloseCompletionGates,
+  onRunMissingGates,
+  onResolveHumanApproval,
+  onSpawnReviewer,
+  onOverrideComplete,
+  onCompletionPanelValidationError,
 } = {}) {
   if (!session || typeof session !== "object") return null;
   const warnings = Array.isArray(session.warnings) ? session.warnings : [];
@@ -79,6 +88,12 @@ export function SessionCard({
       relation: item.relation,
       force: requiresConfirmation,
     });
+  };
+  const handleJobAction = (label) => {
+    if (!activeJobId) return;
+    if (label === "COMPLETE" && typeof onCompleteJob === "function") {
+      onCompleteJob({ sessionId: session.id, jobId: activeJobId, session });
+    }
   };
 
   return html`
@@ -114,6 +129,7 @@ export function SessionCard({
             disabled=${!activeJobId}
             title=${jobActionDisabledReason || activeJobId}
             aria-label=${jobActionDisabledReason ? `${label}: ${jobActionDisabledReason}` : `${label}: ${activeJobId}`}
+            onClick=${() => handleJobAction(label)}
           >
             ${label}
           </button>
@@ -146,6 +162,25 @@ export function SessionCard({
                 `;
               })}
             </ul>
+          `
+        : null}
+
+      ${completionPanel
+        ? html`
+            <${CompletionGatesPanel}
+              result=${completionPanel.result}
+              session=${session}
+              jobId=${activeJobId}
+              busyAction=${completionPanel.busyAction}
+              message=${completionPanel.message}
+              error=${completionPanel.error}
+              onClose=${onCloseCompletionGates}
+              onRunMissing=${onRunMissingGates}
+              onResolveHumanApproval=${onResolveHumanApproval}
+              onSpawnReviewer=${onSpawnReviewer}
+              onOverrideComplete=${onOverrideComplete}
+              onValidationError=${onCompletionPanelValidationError}
+            />
           `
         : null}
 

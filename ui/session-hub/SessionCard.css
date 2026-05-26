@@ -1,4 +1,5 @@
 @import "./StdioBadge.css";
+@import "./CompletionGatesPanel.css";
 
 .session-card {
   display: grid;
