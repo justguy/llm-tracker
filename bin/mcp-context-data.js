@@ -29,7 +29,8 @@ export const JOB_MUTATION_TOOL_NAMES = [
   "tracker_job_start",
   "tracker_job_checkpoint",
   "tracker_job_complete",
-  "tracker_job_rollover"
+  "tracker_job_rollover",
+  "tracker_job_unblock"
 ];
 
 export const SESSION_BOOTSTRAP_TOOL_NAMES = [

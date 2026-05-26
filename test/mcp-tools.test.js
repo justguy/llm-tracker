@@ -175,6 +175,7 @@ test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O"
       tracker_job_checkpoint: { jobId, status: "running" },
       tracker_job_complete: { jobId, summary: "done" },
       tracker_job_rollover: { jobId, reason: "context" },
+      tracker_job_unblock: { jobId, reason: "ready" },
       tracker_skill_run_start: { jobId, skillId: "lt.verify" },
       tracker_skill_run_complete: { jobId, skillRunId },
       tracker_skill_run_skip: { jobId, skillRunId },
@@ -297,6 +298,49 @@ test("tracker_job_complete preserves the gates_pending union as a normal MCP res
     assert.equal(payload.mode, "gates_pending");
     assert.equal(payload.requiresOverride, true);
     assert.equal(payload.overridePromptUrl, `/api/jobs/${jobId}/complete-override`);
+  } finally {
+    await closeServer(server);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_job_unblock forwards reason and sessionToken to the HTTP unblock handler", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-job-unblock-");
+  const jobId = "job_01h2x3y4z5a6b7c8d9e0f1g2h3";
+  let requestBody = null;
+  let sessionToken = null;
+  const server = createServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== `/api/jobs/${jobId}/unblock`) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "NOT_FOUND" } }));
+      return;
+    }
+    sessionToken = req.headers["x-lt-session-token"];
+    requestBody = await readBody(req);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      rev: 12,
+      eventId: "evt_job_unblocked",
+      job: { id: jobId, status: "running" }
+    }));
+  });
+
+  try {
+    const port = await listen(server);
+    const tool = createTools(workspace, port).get("tracker_job_unblock");
+    const result = await tool.handler({
+      jobId,
+      sessionToken: "session-token",
+      reason: "ready",
+      idempotencyKey: "job-unblock-1"
+    });
+    assert.notEqual(result.isError, true);
+    assert.equal(sessionToken, "session-token");
+    assert.deepEqual(requestBody, { reason: "ready", idempotencyKey: "job-unblock-1" });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.eventId, "evt_job_unblocked");
+    assert.equal(payload.job.id, jobId);
+    assert.equal(payload.job.status, "running");
   } finally {
     await closeServer(server);
     rmSync(workspace, { recursive: true, force: true });

@@ -250,6 +250,34 @@ export function createJobTools(workspace, portFlag) {
       }
     }),
     createJobTool({
+      name: "tracker_job_unblock",
+      description: "Unblock a blocked job through the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          jobId: { type: "string", description: "Runtime job id" },
+          sessionToken: mcpSessionTokenProperty,
+          reason: optionalStringProperty("Optional unblock reason"),
+          idempotencyKey: optionalStringProperty("Optional idempotency key")
+        },
+        required: ["jobId", "sessionToken"]
+      },
+      prepareRequest(args = {}) {
+        const prepared = prepareJobMutation(args, "tracker_job_unblock", ["reason", "idempotencyKey"]);
+        if (prepared.error) return prepared;
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: `/api/jobs/${prepared.jobId}/unblock`,
+          label: "tracker_job_unblock",
+          body: prepared.body,
+          headers: prepared.headers,
+          jsonRpcErrorOnFailure: true
+        };
+      }
+    }),
+    createJobTool({
       name: "tracker_job_context_pack",
       description: "Fetch a job context-pack from the running hub.",
       inputSchema: {

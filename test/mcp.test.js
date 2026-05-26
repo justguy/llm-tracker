@@ -187,6 +187,7 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_job_skill_plan",
       "tracker_job_start",
       "tracker_job_status",
+      "tracker_job_unblock",
       "tracker_next",
       "tracker_patch",
       "tracker_pick",
@@ -776,6 +777,28 @@ test("tracker_job_* tools start, checkpoint, status, and complete through the ru
       assert.ok(rejectedJobCheckpoint.error);
       assert.match(rejectedJobCheckpoint.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
 
+      const rejectedJobUnblockToken = await client.request("tools/call", {
+        name: "tracker_job_unblock",
+        arguments: {
+          jobId,
+          sessionToken: "not-a-real-session-token",
+          reason: "should be rejected"
+        }
+      });
+      assert.ok(rejectedJobUnblockToken.error);
+      assert.match(rejectedJobUnblockToken.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
+
+      const rejectedJobUnblockState = await client.request("tools/call", {
+        name: "tracker_job_unblock",
+        arguments: {
+          jobId,
+          sessionToken,
+          reason: "not blocked yet"
+        }
+      });
+      assert.ok(rejectedJobUnblockState.error);
+      assert.match(rejectedJobUnblockState.error.message, /INVALID_JOB_STATE|409/);
+
       const jobStatus = await client.request("tools/call", {
         name: "tracker_job_status",
         arguments: { jobId }
@@ -873,6 +896,21 @@ test("tracker_job_* tools start, checkpoint, status, and complete through the ru
       const checkpointPayload = JSON.parse(checkpoint.result.content[0].text);
       assert.equal(checkpointPayload.job.status, "blocked");
       assert.equal(checkpointPayload.job.lastCheckpointSummary, "waiting on review");
+
+      const unblock = await client.request("tools/call", {
+        name: "tracker_job_unblock",
+        arguments: {
+          jobId,
+          sessionToken,
+          reason: "dependency resolved"
+        }
+      });
+      assert.notEqual(unblock.result.isError, true);
+      const unblockPayload = JSON.parse(unblock.result.content[0].text);
+      assert.equal(typeof unblockPayload.eventId, "string");
+      assert.equal(typeof unblockPayload.rev, "number");
+      assert.equal(unblockPayload.job.id, jobId);
+      assert.ok(["running", "queued"].includes(unblockPayload.job.status));
 
       const rollover = await client.request("tools/call", {
         name: "tracker_job_rollover",
