@@ -16,7 +16,9 @@ import { AttachDialog } from "./session-hub/AttachDialog.js";
 import {
   SessionGroupView,
   applyRuntimeSessionsMessage,
+  previewSessionTaskDrop,
 } from "./session-hub/SessionGroup.js";
+import { RunSessionWizard } from "./run-session/RunSessionWizard.js";
 import {
   deleteProject,
   deleteTask,
@@ -178,6 +180,8 @@ function App() {
   const [taskDrawer, setTaskDrawer] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [dropRunSession, setDropRunSession] = useState(null);
+  const [sessionDropPreflight, setSessionDropPreflight] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [attentionItems, setAttentionItems] = useState([]);
   const [runtimeSessions, setRuntimeSessions] = useState([]);
@@ -513,6 +517,30 @@ function App() {
     setProjectIntel({ slug: activeSlug, initialMode });
   };
 
+  const onTaskDropPreflight = async (intent) => {
+    if (!intent?.taskId) return;
+    const projectSlug = intent.projectSlug || activeSlug || "";
+    if (intent.kind === "new_session") {
+      setSessionDropPreflight(null);
+      setDropRunSession({ ...intent, projectSlug });
+      return;
+    }
+
+    const pending = { ...intent, projectSlug, status: "loading" };
+    setDropRunSession(null);
+    setSessionDropPreflight(pending);
+    try {
+      const preview = await previewSessionTaskDrop({
+        sessionId: intent.sessionId,
+        taskId: intent.taskId,
+        projectSlug,
+      });
+      setSessionDropPreflight({ ...pending, status: "ready", preview });
+    } catch (err) {
+      setSessionDropPreflight({ ...pending, status: "error", error: err?.message || "attach preflight failed" });
+    }
+  };
+
   const onPickTask = async (slug, taskId = null) => {
     if (!slug) return;
     try {
@@ -742,6 +770,29 @@ function App() {
         onClose=${() => setTaskModal(null)}
       />`
     : null;
+  const dropRunProject = dropRunSession?.projectSlug ? projects[dropRunSession.projectSlug] : null;
+  const runSessionDropEl = dropRunSession
+    ? html`
+        <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Run session preflight" onClick=${() => setDropRunSession(null)}>
+          <div class="modal" onClick=${(e) => e.stopPropagation()}>
+            <div class="modal-header">
+              <span class="brand">[RUN SESSION PREFLIGHT]</span>
+              <button class="icon-btn" type="button" aria-label="Close run session preflight" onClick=${() => setDropRunSession(null)} title="Close">×</button>
+            </div>
+            <div class="modal-body">
+              <${RunSessionWizard}
+                projectSlug=${dropRunSession.projectSlug || ""}
+                taskId=${dropRunSession.taskId || ""}
+                source="task_card"
+                taskLocked=${true}
+                initialDraft=${Number.isInteger(dropRunProject?.rev) ? { expectedTrackerRev: dropRunProject.rev } : null}
+                onLaunch=${() => setDropRunSession(null)}
+              />
+            </div>
+          </div>
+        </div>
+      `
+    : null;
   const attachDialogEl = html`
     <${AttachDialog}
       open=${attachOpen}
@@ -802,8 +853,12 @@ function App() {
         sessions=${visibleRuntimeSessions}
         size=${sessionCardSize}
         connected=${runtimeWsUp}
+        projectSlug=${activeSlug || ""}
+        dropPreflight=${sessionDropPreflight}
         onSizeChange=${setSessionCardSize}
         onAttach=${() => setAttachOpen(true)}
+        onTaskDropPreflight=${onTaskDropPreflight}
+        onDismissDropPreflight=${() => setSessionDropPreflight(null)}
       />
     </div>
   `;
@@ -871,6 +926,7 @@ function App() {
         ${historyEl}
         ${taskModalEl}
         ${attachDialogEl}
+        ${runSessionDropEl}
         ${paletteEl}
         ${triageEl}
       </div>
@@ -924,6 +980,7 @@ function App() {
         ${historyEl}
         ${projectIntelEl}
         ${attachDialogEl}
+        ${runSessionDropEl}
         ${taskModalEl}
         ${paletteEl}
         ${triageEl}
@@ -1055,6 +1112,7 @@ function App() {
       ${projectIntelEl}
       ${taskModalEl}
       ${attachDialogEl}
+      ${runSessionDropEl}
       ${paletteEl}
       ${triageEl}
     </div>

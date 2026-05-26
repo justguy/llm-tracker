@@ -31,6 +31,118 @@ function sourceFromEvent(event) {
   return { kind: event.source, eventId: event.id, eventType: event.type };
 }
 
+export const TASK_DROP_MIME = "application/x-llm-tracker-task";
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readTransferData(transfer, type) {
+  try {
+    return typeof transfer?.getData === "function" ? transfer.getData(type) : "";
+  } catch {
+    return "";
+  }
+}
+
+function parseTaskDropPayload(value) {
+  const raw = nonEmptyString(value);
+  if (!raw) return null;
+  if (raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (isRecord(parsed)) {
+        return {
+          taskId: nonEmptyString(parsed.taskId || parsed.id),
+          projectSlug: nonEmptyString(parsed.projectSlug || parsed.slug),
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+  return { taskId: raw, projectSlug: null };
+}
+
+function transferTypes(transfer) {
+  if (!transfer?.types) return [];
+  return Array.from(transfer.types);
+}
+
+export function eventHasTaskDropData(event) {
+  const types = transferTypes(event?.dataTransfer);
+  return types.includes(TASK_DROP_MIME) || types.includes("application/json") || types.includes("text/plain");
+}
+
+export function taskDropPayloadFromEvent(event) {
+  const transfer = event?.dataTransfer;
+  if (!transfer) return null;
+  for (const type of [TASK_DROP_MIME, "application/json", "text/plain"]) {
+    const payload = parseTaskDropPayload(readTransferData(transfer, type));
+    if (payload?.taskId) return payload;
+  }
+  return null;
+}
+
+export function buildTaskDropPreflightIntent({ event, session = null, projectSlug = "" } = {}) {
+  const payload = taskDropPayloadFromEvent(event);
+  const taskId = payload?.taskId;
+  if (!taskId) return null;
+  const targetProjectSlug =
+    payload.projectSlug ||
+    nonEmptyString(session?.projectSlug) ||
+    nonEmptyString(projectSlug) ||
+    null;
+  const sessionId = nonEmptyString(session?.id);
+  if (sessionId) {
+    return {
+      kind: "attach_existing",
+      source: "task_drop",
+      taskId,
+      projectSlug: targetProjectSlug,
+      sessionId,
+    };
+  }
+  return {
+    kind: "new_session",
+    source: "task_drop",
+    taskId,
+    projectSlug: targetProjectSlug,
+    sessionId: null,
+  };
+}
+
+async function parseJsonBody(response) {
+  return response.json().catch(() => ({}));
+}
+
+function parseApiError(body, response) {
+  return body?.error?.message || body?.error || response?.statusText || "request failed";
+}
+
+export async function previewSessionTaskDrop({
+  fetcher = globalThis.fetch,
+  sessionId,
+  projectSlug,
+  taskId,
+} = {}) {
+  const targetSessionId = nonEmptyString(sessionId);
+  const targetTaskId = nonEmptyString(taskId);
+  if (!targetSessionId) throw new Error("sessionId is required");
+  if (!targetTaskId) throw new Error("taskId is required");
+  const body = { taskId: targetTaskId };
+  const slug = nonEmptyString(projectSlug);
+  if (slug) body.projectSlug = slug;
+  const response = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/attach-task/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
 export function applyRuntimeSessionEvent(sessions, event) {
   if (!isRecord(event)) return normalizeSessionList(sessions);
 
@@ -197,11 +309,27 @@ export function SessionGroupView({
   size = "normal",
   connected = false,
   error = null,
+  projectSlug = "",
+  dropPreflight = null,
   onSizeChange,
   onAttach,
+  onTaskDropPreflight,
+  onDismissDropPreflight,
 } = {}) {
   const cardSize = normalizeSessionCardSize(size);
   const list = normalizeSessionList(sessions);
+  const handleTaskDragOver = (event) => {
+    if (!eventHasTaskDropData(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const handleTaskDrop = (event, session = null) => {
+    const intent = buildTaskDropPreflightIntent({ event, session, projectSlug });
+    if (!intent) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof onTaskDropPreflight === "function") onTaskDropPreflight(intent);
+  };
 
   return html`
     <section class="session-group" data-connected=${connected ? "true" : "false"}>
@@ -232,17 +360,68 @@ export function SessionGroupView({
         </div>
       </header>
       ${error ? html`<div class="session-group__error" role="status">${error}</div>` : null}
+      <div
+        class="session-group__drop-zone"
+        data-drop-zone="new-session"
+        onDragOver=${handleTaskDragOver}
+        onDrop=${(event) => handleTaskDrop(event)}
+      >
+        <span>New session preflight</span>
+      </div>
+      <${SessionDropPreflightPanel} preflight=${dropPreflight} onClose=${onDismissDropPreflight} />
       ${list.length === 0
         ? html`<div class="session-group__empty">No sessions</div>`
         : html`
             <div class=${`session-group__cards session-group__cards--${cardSize}`} role="list">
               ${list.map((session) => html`
-                <div key=${session.id} role="listitem">
+                <div
+                  key=${session.id}
+                  role="listitem"
+                  class="session-group__card-drop-target"
+                  data-session-id=${session.id}
+                  onDragOver=${handleTaskDragOver}
+                  onDrop=${(event) => handleTaskDrop(event, session)}
+                >
                   <${SessionCard} session=${session} size=${cardSize} />
                 </div>
               `)}
             </div>
           `}
+    </section>
+  `;
+}
+
+export function SessionDropPreflightPanel({ preflight = null, onClose } = {}) {
+  if (!preflight) return null;
+  const checks = Array.isArray(preflight.preview?.checks) ? preflight.preview.checks : [];
+  const title = preflight.kind === "attach_existing" ? "Attach preflight" : "Run preflight";
+  const status = preflight.status || "ready";
+  return html`
+    <section class=${`session-group__drop-preflight session-group__drop-preflight--${status}`} role="status">
+      <div class="session-group__drop-preflight-head">
+        <strong>${title}</strong>
+        <button class="session-group__drop-preflight-close" type="button" onClick=${onClose}>[CLOSE]</button>
+      </div>
+      <div class="session-group__drop-preflight-meta">
+        <span>${preflight.projectSlug || "project unknown"}</span>
+        <span>${preflight.taskId || "task unknown"}</span>
+        ${preflight.sessionId ? html`<span>${preflight.sessionId}</span>` : null}
+      </div>
+      ${status === "loading" ? html`<div class="session-group__drop-preflight-note">Loading</div>` : null}
+      ${preflight.error ? html`<div class="session-group__drop-preflight-error">${preflight.error}</div>` : null}
+      ${checks.length
+        ? html`
+            <ul class="session-group__drop-preflight-checks">
+              ${checks.map((check) => html`
+                <li key=${check.id || check.label} data-status=${check.status || "unknown"}>
+                  <span>${check.status || "unknown"}</span>
+                  <strong>${check.label || check.id || "check"}</strong>
+                  <em>${check.detail || ""}</em>
+                </li>
+              `)}
+            </ul>
+          `
+        : null}
     </section>
   `;
 }
@@ -255,6 +434,10 @@ export function SessionGroup({
   runtimeWsUrl = runtimeWebSocketUrl(),
   reconnectMs = 1000,
   onAttach,
+  projectSlug,
+  dropPreflight,
+  onTaskDropPreflight,
+  onDismissDropPreflight,
 } = {}) {
   const [sessions, setSessions] = useState(() => normalizeSessionList(initialSessions));
   const [connected, setConnected] = useState(false);
@@ -278,8 +461,12 @@ export function SessionGroup({
       size=${cardSize}
       connected=${connected}
       error=${error}
+      projectSlug=${projectSlug}
+      dropPreflight=${dropPreflight}
       onSizeChange=${onSizeChange}
       onAttach=${onAttach}
+      onTaskDropPreflight=${onTaskDropPreflight}
+      onDismissDropPreflight=${onDismissDropPreflight}
     />
   `;
 }

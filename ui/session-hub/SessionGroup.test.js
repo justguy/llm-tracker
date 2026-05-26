@@ -4,9 +4,13 @@ import assert from "node:assert/strict";
 import { normalizeSessionCardSize, SessionCard } from "./SessionCard.js";
 import {
   SessionGroupView,
+  TASK_DROP_MIME,
   applyRuntimeSessionsMessage,
+  buildTaskDropPreflightIntent,
   connectRuntimeSessions,
+  previewSessionTaskDrop,
   runtimeWebSocketUrl,
+  taskDropPayloadFromEvent,
 } from "./SessionGroup.js";
 
 function collectVNodeText(node) {
@@ -44,6 +48,27 @@ function nodesByClassName(vnode, className) {
     const cls = n?.props?.class;
     return typeof cls === "string" && cls.split(/\s+/).includes(className);
   });
+}
+
+function makeDragEvent(dataByType = {}) {
+  const event = {
+    prevented: false,
+    stopped: false,
+    dataTransfer: {
+      types: Object.keys(dataByType),
+      dropEffect: "",
+      getData(type) {
+        return dataByType[type] || "";
+      },
+    },
+    preventDefault() {
+      this.prevented = true;
+    },
+    stopPropagation() {
+      this.stopped = true;
+    },
+  };
+  return event;
 }
 
 test("normalizeSessionCardSize permits only compact, normal, and large", () => {
@@ -131,6 +156,99 @@ test("SessionGroupView exposes attach action when supplied", () => {
   assert.ok(attach, "attach button is rendered");
   attach.props.onClick();
   assert.equal(opened, true);
+});
+
+test("task drop payload accepts structured and plain drag data", () => {
+  assert.deepEqual(
+    taskDropPayloadFromEvent(makeDragEvent({
+      [TASK_DROP_MIME]: JSON.stringify({ taskId: "t1", projectSlug: "demo" }),
+    })),
+    { taskId: "t1", projectSlug: "demo" },
+  );
+  assert.deepEqual(taskDropPayloadFromEvent(makeDragEvent({ "text/plain": "t2" })), {
+    taskId: "t2",
+    projectSlug: null,
+  });
+});
+
+test("SessionGroupView routes drop-zone task drops to new-session preflight", () => {
+  let intent = null;
+  const vnode = SessionGroupView({
+    projectSlug: "demo",
+    sessions: [],
+    onTaskDropPreflight: (next) => {
+      intent = next;
+    },
+  });
+  const dropZone = nodesByClassName(vnode, "session-group__drop-zone")[0];
+  const event = makeDragEvent({ "text/plain": "t1" });
+  dropZone.props.onDragOver(event);
+  assert.equal(event.prevented, true);
+  assert.equal(event.dataTransfer.dropEffect, "copy");
+  dropZone.props.onDrop(event);
+  assert.deepEqual(intent, {
+    kind: "new_session",
+    source: "task_drop",
+    taskId: "t1",
+    projectSlug: "demo",
+    sessionId: null,
+  });
+  assert.equal(event.stopped, true);
+});
+
+test("SessionGroupView routes session-card task drops to attach preflight", () => {
+  let intent = null;
+  const vnode = SessionGroupView({
+    projectSlug: "demo",
+    sessions: [{ id: "ses_target", projectSlug: "demo", tier: "manual" }],
+    onTaskDropPreflight: (next) => {
+      intent = next;
+    },
+  });
+  const target = nodesByClassName(vnode, "session-group__card-drop-target")[0];
+  target.props.onDrop(makeDragEvent({ [TASK_DROP_MIME]: JSON.stringify({ taskId: "t1" }) }));
+  assert.deepEqual(intent, {
+    kind: "attach_existing",
+    source: "task_drop",
+    taskId: "t1",
+    projectSlug: "demo",
+    sessionId: "ses_target",
+  });
+});
+
+test("buildTaskDropPreflightIntent prefers payload project over fallback", () => {
+  const intent = buildTaskDropPreflightIntent({
+    event: makeDragEvent({
+      [TASK_DROP_MIME]: JSON.stringify({ taskId: "t1", projectSlug: "from-payload" }),
+    }),
+    session: { id: "ses_target", projectSlug: "from-session" },
+    projectSlug: "from-prop",
+  });
+  assert.equal(intent.projectSlug, "from-payload");
+  assert.equal(intent.sessionId, "ses_target");
+});
+
+test("previewSessionTaskDrop uses the pure attach preview endpoint only", async () => {
+  const calls = [];
+  const preview = await previewSessionTaskDrop({
+    sessionId: "ses_target",
+    projectSlug: "demo",
+    taskId: "t1",
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({ checks: [{ id: "task_not_already_bound", status: "ok" }] }),
+      };
+    },
+  });
+  assert.deepEqual(preview.checks.map((check) => check.id), ["task_not_already_bound"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "/api/sessions/ses_target/attach-task/preview");
+  assert.equal(calls[0][1].method, "POST");
+  assert.deepEqual(JSON.parse(calls[0][1].body), { taskId: "t1", projectSlug: "demo" });
+  assert.notEqual(calls[0][0], "/api/sessions");
+  assert.notEqual(calls[0][0], "/api/run-session/launch");
 });
 
 test("applyRuntimeSessionsMessage replaces sessions from runtime.snapshot", () => {
