@@ -35,7 +35,7 @@ import {
   DEPRECATED_WARNING_KINDS,
   assertValidWarning,
 } from "../sessions/warnings.js";
-import { isSessionId } from "./ids.js";
+import { isJobId, isSessionId } from "./ids.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const schemaPath = path.resolve(here, "..", "..", "schema", "runtime-events.schema.json");
@@ -498,6 +498,99 @@ export function createSessionAskEvent(input) {
     to: targetSessionId,
     prompt: normalizedPrompt,
   };
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
+// --- SH-3-21: Attach task event -------------------------------------------
+//
+// `session.task_attached` is currently represented by the GenericRuntimeEvent
+// schema variant. This factory supplies the stricter local contract used by the
+// attach-confirm HTTP path while still validating against the runtime schema.
+
+/**
+ * Build a `session.task_attached` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {string} input.jobId
+ * @param {string} input.projectSlug
+ * @param {string} input.taskId
+ * @param {string} input.profileId
+ * @param {"started" | "queued"} input.mode
+ * @param {string} input.workspace
+ * @param {string} [input.predecessorJobId]
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object} the validated runtime event
+ */
+export function createSessionTaskAttachedEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionTaskAttachedEvent: input must be an object");
+  }
+  const {
+    sessionId,
+    jobId,
+    projectSlug,
+    taskId,
+    profileId,
+    mode,
+    predecessorJobId,
+    workspace,
+    source = "http",
+    ts,
+    id,
+    idempotencyKey,
+  } = input;
+  if (!isSessionId(sessionId)) {
+    throw new Error("createSessionTaskAttachedEvent: sessionId required (ses_<26 Crockford>)");
+  }
+  if (!isJobId(jobId)) {
+    throw new Error("createSessionTaskAttachedEvent: jobId required (job_<26 Crockford>)");
+  }
+  if (typeof projectSlug !== "string" || projectSlug.length === 0) {
+    throw new Error("createSessionTaskAttachedEvent: projectSlug required (non-empty string)");
+  }
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    throw new Error("createSessionTaskAttachedEvent: taskId required (non-empty string)");
+  }
+  if (typeof profileId !== "string" || profileId.length === 0) {
+    throw new Error("createSessionTaskAttachedEvent: profileId required (non-empty string)");
+  }
+  if (mode !== "started" && mode !== "queued") {
+    throw new Error("createSessionTaskAttachedEvent: mode must be started|queued");
+  }
+  if (predecessorJobId !== undefined && !isJobId(predecessorJobId)) {
+    throw new Error("createSessionTaskAttachedEvent: predecessorJobId must be a job_ id when present");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionTaskAttachedEvent: workspace required (non-empty string)");
+  }
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.task_attached",
+    source,
+    workspace,
+    sessionId,
+    jobId,
+    projectSlug,
+    taskId,
+    profileId,
+    mode,
+  };
+  if (typeof predecessorJobId === "string") event.predecessorJobId = predecessorJobId;
   if (typeof id === "string") event.id = id;
   if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
 

@@ -20,11 +20,19 @@
 
 import { log } from "../logging/index.js";
 import { requireSessionToken } from "./middleware/session-token.js";
-import { createSessionAskEvent, createSessionStdioCaptureChangedEvent, createSessionWarningEvent } from "../runtime/events.js";
+import {
+  createSessionAskEvent,
+  createSessionStdioCaptureChangedEvent,
+  createSessionTaskAttachedEvent,
+  createSessionWarningEvent,
+} from "../runtime/events.js";
+import { isJobId } from "../runtime/ids.js";
 import { SessionTaskLedgerService } from "../sessions/task-ledger.js";
 import { DEFAULT_THRESHOLDS } from "../sessions/activity.js";
 import { contextHighWarning } from "../sessions/warnings.js";
 import { buildAttachTaskPreflight } from "../run-session/attach-preflight.js";
+import { TERMINAL_JOB_STATUS } from "../jobs/registry.js";
+import { BUILT_IN_PROFILES_BY_ID } from "../jobs/profiles.js";
 
 // Allowed body fields on POST. Anything else triggers UNKNOWN_FIELDS (400).
 const POST_ALLOWED_FIELDS = new Set([
@@ -64,6 +72,18 @@ const ATTACH_PREVIEW_ALLOWED_FIELDS = new Set([
   "contextBriefTokens",
   "contextBudget",
 ]);
+
+const ATTACH_CONFIRM_ALLOWED_FIELDS = new Set([
+  ...ATTACH_PREVIEW_ALLOWED_FIELDS,
+  "claimMode",
+  "force",
+  "idempotencyKey",
+]);
+const ATTACH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
+const ATTACH_CANCEL_ALLOWED_FIELDS = new Set(["summary", "idempotencyKey"]);
+const ATTACH_REORDER_ALLOWED_FIELDS = new Set(["jobIds"]);
+const ACTIVE_JOB_STATUSES = new Set(["starting", "running", "blocked", "verifying"]);
+const DEFAULT_ATTACH_PROFILE_ID = "code-implementer";
 
 // TDD §6.1 ActivityState enum (mirrors schema SessionStatusEvent.status).
 const ACTIVITY_STATES = new Set([
@@ -178,6 +198,20 @@ export function registerSessionsRoutes(app, deps) {
     jobRegistry,
     store,
   });
+  const runSerializedAttach = createPerSessionSerializer();
+  const queuedAutoStarter = createQueuedAutoStarter({
+    jobRegistry,
+    projection,
+    attach,
+    runSerialized: runSerializedAttach,
+  });
+  if (jobRegistry && typeof jobRegistry.onJobCompleted === "function") {
+    jobRegistry.onJobCompleted(({ sessionId, jobId, previousStatus }) => {
+      if (ACTIVE_JOB_STATUSES.has(previousStatus)) {
+        queuedAutoStarter.schedule(sessionId, jobId);
+      }
+    });
+  }
 
   // --- GET /api/sessions --------------------------------------------------
   app.get("/api/sessions", (_req, res) => {
@@ -282,6 +316,252 @@ export function registerSessionsRoutes(app, deps) {
       return sendError(res, 500, "ATTACH_PREFLIGHT_FAILED", err.message || "attach preflight failed");
     }
     res.status(200).json(preview);
+  });
+
+  // --- POST /api/sessions/:sessionId/attach-task --------------------------
+  app.post("/api/sessions/:sessionId/attach-task", async (req, res) => {
+    const { sessionId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+    if (!hasAttachJobRegistry(jobRegistry)) {
+      return sendError(res, 501, "ATTACH_JOB_REGISTRY_UNAVAILABLE", "attach-task confirm requires JobRegistry wiring");
+    }
+
+    const bodyOrError = validateAttachConfirmBody(req.body);
+    if (bodyOrError.error) {
+      return sendError(res, 400, bodyOrError.code, bodyOrError.error, bodyOrError.details);
+    }
+    const body = bodyOrError.value;
+
+    return runSerializedAttach(sessionId, async () => {
+      const session = projection.sessions.get(sessionId) || null;
+      const projectSlug = body.projectSlug || session?.projectSlug || "";
+      const project =
+        projectSlug && store && typeof store.get === "function"
+          ? store.get(projectSlug)
+          : null;
+      const tasks = Array.isArray(project?.data?.tasks) ? project.data.tasks : [];
+      const task = tasks.find((item) => item && item.id === body.taskId) || null;
+      const snapshots = projection.toSnapshots();
+      const sessions = snapshots.sessions || [];
+      const jobs = jobRegistry.list();
+
+      let preflight;
+      try {
+        preflight = buildAttachTaskPreflight({
+          sessionId,
+          projectSlug,
+          taskId: body.taskId,
+          session,
+          task,
+          sessions,
+          jobs,
+          profileId: body.profileId,
+          estBriefTokens: body.estBriefTokens,
+          contextBriefTokens: body.contextBriefTokens,
+          contextBudget: body.contextBudget,
+          config: { attach },
+        });
+      } catch (err) {
+        return sendError(res, 500, "ATTACH_PREFLIGHT_FAILED", err.message || "attach preflight failed");
+      }
+      if (preflight.hasFail) {
+        return sendError(res, 409, "ATTACH_PREFLIGHT_FAILED", "attach preflight failed", { preflight });
+      }
+
+      const profileId = body.profileId || DEFAULT_ATTACH_PROFILE_ID;
+      const profile = BUILT_IN_PROFILES_BY_ID.get(profileId);
+      const activeJob = firstActiveJobForSession(jobRegistry, sessionId);
+      const predecessorJobId = activeJob?.id || null;
+      const mode = predecessorJobId ? "queued" : "started";
+
+      let created;
+      try {
+        created = await jobRegistry.create({
+          sessionId,
+          projectSlug,
+          taskId: body.taskId,
+          profileId,
+          kind: profile?.kind || "code",
+          ...(predecessorJobId ? { predecessorJobId } : {}),
+          ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+          source: "http",
+        });
+      } catch (err) {
+        return mapAttachRegistryError(res, err);
+      }
+
+      let attachEvent;
+      try {
+        attachEvent = createSessionTaskAttachedEvent({
+          sessionId,
+          jobId: created.jobId,
+          projectSlug,
+          taskId: body.taskId,
+          profileId,
+          mode,
+          ...(predecessorJobId ? { predecessorJobId } : {}),
+          workspace,
+          source: "http",
+        });
+      } catch (err) {
+        return sendError(res, 400, "INVALID_BODY", err.message || "failed to create session.task_attached event");
+      }
+
+      let attachAppend;
+      try {
+        attachAppend = await runtimeStore.append(attachEvent);
+      } catch (err) {
+        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+      }
+
+      return res.status(201).json({
+        ok: true,
+        mode,
+        sessionId,
+        jobId: created.jobId,
+        ...(predecessorJobId ? { predecessorJobId } : {}),
+        job: jobRegistry.get(created.jobId) || created.job,
+        session: projection.sessions.get(sessionId) || session,
+        preflight,
+        rev: attachAppend.rev,
+        eventId: attachAppend.eventId,
+        jobEventId: created.eventId,
+      });
+    });
+  });
+
+  // --- POST /api/sessions/:sessionId/queue/:jobId/cancel ------------------
+  app.post("/api/sessions/:sessionId/queue/:jobId/cancel", async (req, res) => {
+    const { sessionId, jobId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+    if (!isJobId(jobId)) {
+      return sendError(res, 400, "INVALID_JOB_ID", `not a valid job_ id: ${jobId}`);
+    }
+    if (!hasAttachJobRegistry(jobRegistry)) {
+      return sendError(res, 501, "ATTACH_JOB_REGISTRY_UNAVAILABLE", "queue cancel requires JobRegistry wiring");
+    }
+    const body = req.body || {};
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
+    }
+    const unknown = unknownFields(body, ATTACH_CANCEL_ALLOWED_FIELDS);
+    if (unknown.length > 0) {
+      return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+    }
+    if (body.summary !== undefined && (typeof body.summary !== "string" || body.summary.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`summary` must be a non-empty string when present");
+    }
+    if (body.idempotencyKey !== undefined && (typeof body.idempotencyKey !== "string" || body.idempotencyKey.length === 0)) {
+      return sendError(res, 400, "INVALID_BODY", "`idempotencyKey` must be a non-empty string when present");
+    }
+
+    return runSerializedAttach(sessionId, async () => {
+      const job = jobRegistry.get(jobId);
+      if (!job) {
+        return sendError(res, 404, "JOB_NOT_FOUND", `job not found: ${jobId}`);
+      }
+      if (job.sessionId !== sessionId) {
+        return sendError(res, 400, "SESSION_MISMATCH", "queued job does not belong to session", {
+          expected: sessionId,
+          actual: job.sessionId,
+        });
+      }
+      if (job.status !== "queued") {
+        return sendError(res, 409, "JOB_NOT_QUEUED", `job '${jobId}' is ${job.status}`, { jobId, status: job.status });
+      }
+      queuedAutoStarter.cancel(jobId);
+      try {
+        const result = await jobRegistry.cancel(jobId, {
+          summary: body.summary || "cancelled from session queue",
+          ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+          source: "http",
+        });
+        return res.status(200).json({
+          ok: true,
+          sessionId,
+          jobId,
+          job: result.job,
+          session: projection.sessions.get(sessionId) || null,
+          rev: result.rev,
+          eventId: result.eventId,
+        });
+      } catch (err) {
+        return mapAttachRegistryError(res, err);
+      }
+    });
+  });
+
+  // --- POST /api/sessions/:sessionId/queue/reorder ------------------------
+  app.post("/api/sessions/:sessionId/queue/reorder", async (req, res) => {
+    const { sessionId } = req.params;
+    if (!isSessionIdShape(sessionId)) {
+      return sendError(res, 400, "INVALID_SESSION_ID", `not a valid ses_ id: ${sessionId}`);
+    }
+    if (!hasAttachJobRegistry(jobRegistry)) {
+      return sendError(res, 501, "ATTACH_JOB_REGISTRY_UNAVAILABLE", "queue reorder requires JobRegistry wiring");
+    }
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object");
+    }
+    const unknown = unknownFields(body, ATTACH_REORDER_ALLOWED_FIELDS);
+    if (unknown.length > 0) {
+      return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+    }
+    if (!Array.isArray(body.jobIds) || body.jobIds.some((jobId) => !isJobId(jobId))) {
+      return sendError(res, 400, "INVALID_BODY", "`jobIds` must be a JobId[]");
+    }
+
+    return runSerializedAttach(sessionId, async () => {
+      const queued = queuedJobsForSession(jobRegistry, projection, sessionId);
+      const currentIds = queued.map((job) => job.id);
+      if (!sameSet(body.jobIds, currentIds)) {
+        return sendError(res, 409, "QUEUE_REORDER_MISMATCH", "`jobIds` must be a permutation of the current queued jobs", {
+          expected: currentIds,
+          actual: body.jobIds,
+        });
+      }
+
+      const eventForValidation = {
+        schemaVersion: 1,
+        id: makeRuntimeId("evt"),
+        ts: new Date().toISOString(),
+        type: "session.task_attached",
+        source: "http",
+        workspace,
+        sessionId,
+        mode: "queue_reordered",
+        queuedJobIds: body.jobIds,
+      };
+      try {
+        validateRuntimeEvent(eventForValidation);
+      } catch (err) {
+        return sendError(res, 400, "INVALID_BODY", err.message || "event failed schema validation", {
+          errors: err.errors,
+        });
+      }
+      const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
+
+      let appendResult;
+      try {
+        appendResult = await runtimeStore.append(eventForAppend);
+      } catch (err) {
+        return sendError(res, 500, "APPEND_FAILED", err.message || "runtime store append failed");
+      }
+
+      return res.status(200).json({
+        ok: true,
+        sessionId,
+        queuedJobIds: body.jobIds,
+        session: projection.sessions.get(sessionId) || null,
+        rev: appendResult.rev,
+        eventId: appendResult.eventId,
+      });
+    });
   });
 
   // --- GET /api/sessions/:id ----------------------------------------------
@@ -960,6 +1240,180 @@ function resolveContextHighPercent(thresholds) {
       : DEFAULT_THRESHOLDS.contextHighPercent;
   if (Number.isFinite(percent) && percent > 0 && percent <= 100) return percent;
   return DEFAULT_THRESHOLDS.contextHighPercent;
+}
+
+function hasAttachJobRegistry(jobRegistry) {
+  return !!(
+    jobRegistry &&
+    typeof jobRegistry.create === "function" &&
+    typeof jobRegistry.get === "function" &&
+    typeof jobRegistry.list === "function" &&
+    typeof jobRegistry.listBySession === "function" &&
+    typeof jobRegistry.checkpoint === "function" &&
+    typeof jobRegistry.cancel === "function"
+  );
+}
+
+function unknownFields(body, allowed) {
+  const unknown = [];
+  for (const key of Object.keys(body || {})) {
+    if (!allowed.has(key)) unknown.push(key);
+  }
+  return unknown;
+}
+
+function validateAttachConfirmBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { code: "INVALID_BODY", error: "request body must be a JSON object" };
+  }
+  const unknown = unknownFields(body, ATTACH_CONFIRM_ALLOWED_FIELDS);
+  if (unknown.length > 0) {
+    return {
+      code: "UNKNOWN_FIELDS",
+      error: `unknown body field(s): ${unknown.join(", ")}`,
+      details: { unknown },
+    };
+  }
+  const { taskId, profileId, estBriefTokens, contextBriefTokens, contextBudget, claimMode, force, idempotencyKey } = body;
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    return { code: "INVALID_BODY", error: "`taskId` is required (non-empty string)" };
+  }
+  if ("projectSlug" in body && (typeof body.projectSlug !== "string" || body.projectSlug.length === 0)) {
+    return { code: "INVALID_BODY", error: "`projectSlug` must be a non-empty string when present" };
+  }
+  if (profileId !== undefined && (typeof profileId !== "string" || profileId.length === 0)) {
+    return { code: "INVALID_BODY", error: "`profileId` must be a non-empty string when present" };
+  }
+  for (const [field, value] of Object.entries({ estBriefTokens, contextBriefTokens })) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+      return { code: "INVALID_BODY", error: `\`${field}\` must be a non-negative number when present` };
+    }
+  }
+  if (contextBudget !== undefined && (!contextBudget || typeof contextBudget !== "object" || Array.isArray(contextBudget))) {
+    return { code: "INVALID_BODY", error: "`contextBudget` must be a JSON object when present" };
+  }
+  if (claimMode !== undefined && (typeof claimMode !== "string" || !ATTACH_CLAIM_MODES.has(claimMode))) {
+    return {
+      code: "INVALID_BODY",
+      error: `\`claimMode\` must be one of: ${[...ATTACH_CLAIM_MODES].join(", ")}`,
+      details: { allowed: [...ATTACH_CLAIM_MODES] },
+    };
+  }
+  if (force !== undefined && typeof force !== "boolean") {
+    return { code: "INVALID_BODY", error: "`force` must be a boolean when present" };
+  }
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || idempotencyKey.length === 0)) {
+    return { code: "INVALID_BODY", error: "`idempotencyKey` must be a non-empty string when present" };
+  }
+  return { value: body };
+}
+
+function firstActiveJobForSession(jobRegistry, sessionId) {
+  const jobs = jobRegistry
+    .listBySession(sessionId)
+    .filter((job) => job && ACTIVE_JOB_STATUSES.has(job.status));
+  if (jobs.length === 0) return null;
+  jobs.sort(compareJobActivityOrder);
+  return jobs[0];
+}
+
+function queuedJobsForSession(jobRegistry, projection, sessionId) {
+  if (!hasAttachJobRegistry(jobRegistry)) return [];
+  const all = jobRegistry.listBySession(sessionId).filter((job) => job && job.status === "queued");
+  const byId = new Map(all.map((job) => [job.id, job]));
+  const session = projection?.sessions?.get(sessionId) || null;
+  const out = [];
+  if (Array.isArray(session?.queuedJobIds)) {
+    for (const jobId of session.queuedJobIds) {
+      const job = byId.get(jobId);
+      if (job && !out.some((item) => item.id === job.id)) out.push(job);
+    }
+  }
+  const rest = all
+    .filter((job) => !out.some((item) => item.id === job.id))
+    .sort(compareJobActivityOrder);
+  return [...out, ...rest];
+}
+
+function compareJobActivityOrder(a, b) {
+  const aAt = a.startedAt || a.queuedAt || "";
+  const bAt = b.startedAt || b.queuedAt || "";
+  if (aAt < bAt) return -1;
+  if (aAt > bAt) return 1;
+  return String(a.id || "").localeCompare(String(b.id || ""));
+}
+
+function sameSet(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const seen = new Set(a);
+  if (seen.size !== a.length) return false;
+  return b.every((item) => seen.has(item));
+}
+
+function createQueuedAutoStarter({ jobRegistry, projection, attach, runSerialized }) {
+  const timers = new Map();
+  const rawGrace = attach?.autoStartQueuedOnCompletionGraceSec;
+  const graceSec = Number.isFinite(rawGrace) && rawGrace >= 0 ? rawGrace : 5;
+  const delayMs = Math.max(0, Math.round(graceSec * 1000));
+
+  function cancel(jobId) {
+    const timer = timers.get(jobId);
+    if (!timer) return;
+    clearTimeout(timer);
+    timers.delete(jobId);
+  }
+
+  function schedule(sessionId, predecessorJobId) {
+    if (!isSessionIdShape(sessionId) || !hasAttachJobRegistry(jobRegistry)) return;
+    const queued = queuedJobsForSession(jobRegistry, projection, sessionId)[0];
+    if (!queued || timers.has(queued.id)) return;
+    const timer = setTimeout(() => {
+      timers.delete(queued.id);
+      runSerialized(sessionId, async () => {
+        const current = jobRegistry.get(queued.id);
+        if (!current || current.status !== "queued") return;
+        const firstQueued = queuedJobsForSession(jobRegistry, projection, sessionId)[0];
+        if (!firstQueued || firstQueued.id !== current.id) return;
+        if (firstActiveJobForSession(jobRegistry, sessionId)) return;
+        if (current.predecessorJobId) {
+          const predecessor = jobRegistry.get(current.predecessorJobId);
+          if (predecessor && !TERMINAL_JOB_STATUS.includes(predecessor.status)) return;
+        } else if (predecessorJobId) {
+          const predecessor = jobRegistry.get(predecessorJobId);
+          if (predecessor && !TERMINAL_JOB_STATUS.includes(predecessor.status)) return;
+        }
+        try {
+          await jobRegistry.checkpoint(current.id, {
+            status: "running",
+            summary: "auto-start queued task after predecessor completed",
+            source: "system",
+          });
+        } catch {
+          // Timer callbacks cannot report through the original HTTP response.
+          // The job remains queued; a later completion or manual action can
+          // retry through the same public endpoints.
+        }
+      }).catch(() => {});
+    }, delayMs);
+    if (typeof timer.unref === "function") timer.unref();
+    timers.set(queued.id, timer);
+  }
+
+  return { cancel, schedule };
+}
+
+function mapAttachRegistryError(res, err) {
+  const code = err?.code || "JOB_REGISTRY_FAILED";
+  if (code === "UNKNOWN_JOB" || code === "UNKNOWN_PREDECESSOR") {
+    return sendError(res, 404, code, err.message || "job not found", err.details);
+  }
+  if (code === "JOB_TERMINAL" || code === "INVALID_JOB_STATE") {
+    return sendError(res, 409, code, err.message || "job state conflict", err.details);
+  }
+  if (String(code).startsWith("INVALID") || code === "TERMINAL_STATUS_FORBIDDEN") {
+    return sendError(res, 400, code, err.message || "invalid job registry input", err.details);
+  }
+  return sendError(res, 500, code, err?.message || "job registry failed", err?.details);
 }
 
 function sendError(res, status, code, message, details) {

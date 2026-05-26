@@ -109,6 +109,7 @@ const HANDLERS = Object.freeze({
   "session.stopped": handleSessionStopped,
   "session.stdio_capture_changed": handleSessionStdioCaptureChanged,
   "session.ask": handleSessionAsk,
+  "session.task_attached": handleSessionTaskAttached,
   "job.started": handleJobStarted,
   "job.checkpoint": handleJobCheckpoint,
   "job.completed": handleJobCompleted,
@@ -255,6 +256,116 @@ function handleSessionAsk(p, e) {
   p.sessions.set(targetId, { ...existing, asks });
 }
 
+function handleSessionTaskAttached(p, e) {
+  const id = e.sessionId;
+  if (!isSessionId(id)) return;
+  const existing = p.sessions.get(id);
+  if (!existing) return;
+
+  if (Array.isArray(e.queuedJobIds)) {
+    const queuedJobIds = uniqueJobIds(e.queuedJobIds);
+    p.sessions.set(id, { ...existing, queuedJobIds, lastActivityAt: e.ts });
+    return;
+  }
+
+  if (!isJobId(e.jobId)) return;
+  if (e.mode === "queued" || isJobId(e.predecessorJobId)) {
+    p.sessions.set(id, {
+      ...existing,
+      queuedJobIds: appendUniqueJobId(existing.queuedJobIds, e.jobId),
+      lastActivityAt: e.ts,
+    });
+    return;
+  }
+
+  p.sessions.set(id, {
+    ...existing,
+    ...(typeof e.projectSlug === "string" ? { projectSlug: e.projectSlug } : {}),
+    ...(typeof e.taskId === "string" ? { taskId: e.taskId } : {}),
+    activeJobId: e.jobId,
+    queuedJobIds: removeJobId(existing.queuedJobIds, e.jobId),
+    lastActivityAt: e.ts,
+  });
+}
+
+const ACTIVE_JOB_STATUSES = new Set(["starting", "running", "blocked", "verifying"]);
+
+function uniqueJobIds(values) {
+  const out = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    if (isJobId(value) && !out.includes(value)) out.push(value);
+  }
+  return out;
+}
+
+function appendUniqueJobId(values, jobId) {
+  const out = uniqueJobIds(values);
+  if (isJobId(jobId) && !out.includes(jobId)) out.push(jobId);
+  return out;
+}
+
+function removeJobId(values, jobId) {
+  return uniqueJobIds(values).filter((value) => value !== jobId);
+}
+
+function appendSessionQueuedJob(p, sessionId, jobId, e) {
+  if (!isSessionId(sessionId) || !isJobId(jobId)) return;
+  const session = p.sessions.get(sessionId);
+  if (!session) return;
+  p.sessions.set(sessionId, {
+    ...session,
+    queuedJobIds: appendUniqueJobId(session.queuedJobIds, jobId),
+    lastActivityAt: e.ts,
+  });
+}
+
+function setSessionActiveJob(p, sessionId, jobId, e) {
+  if (!isSessionId(sessionId) || !isJobId(jobId)) return;
+  const session = p.sessions.get(sessionId);
+  if (!session) return;
+  p.sessions.set(sessionId, {
+    ...session,
+    ...(typeof e.projectSlug === "string" ? { projectSlug: e.projectSlug } : {}),
+    ...(typeof e.taskId === "string" ? { taskId: e.taskId } : {}),
+    activeJobId: jobId,
+    queuedJobIds: removeJobId(session.queuedJobIds, jobId),
+    lastActivityAt: e.ts,
+  });
+}
+
+function clearSessionJob(p, sessionId, jobId, e) {
+  if (!isSessionId(sessionId) || !isJobId(jobId)) return;
+  const session = p.sessions.get(sessionId);
+  if (!session) return;
+  const next = {
+    ...session,
+    queuedJobIds: removeJobId(session.queuedJobIds, jobId),
+    lastActivityAt: e.ts,
+  };
+  if (session.activeJobId === jobId) {
+    next.activeJobId = null;
+  }
+  p.sessions.set(sessionId, next);
+}
+
+function syncSessionForJobStatus(p, sessionId, jobId, status, e) {
+  if (ACTIVE_JOB_STATUSES.has(status)) {
+    setSessionActiveJob(p, sessionId, jobId, e);
+  } else if (status === "queued") {
+    const session = p.sessions.get(sessionId);
+    if (!session) return;
+    const next = {
+      ...session,
+      queuedJobIds: appendUniqueJobId(session.queuedJobIds, jobId),
+      lastActivityAt: e.ts,
+    };
+    if (session.activeJobId === jobId) {
+      next.activeJobId = null;
+    }
+    p.sessions.set(sessionId, next);
+  }
+}
+
 // --- job handlers ----------------------------------------------------------
 
 function handleJobStarted(p, e) {
@@ -278,6 +389,7 @@ function handleJobStarted(p, e) {
     status: "running",
     startedAt: e.ts,
   });
+  setSessionActiveJob(p, e.sessionId, id, e);
 }
 
 function handleJobCheckpoint(p, e) {
@@ -291,6 +403,9 @@ function handleJobCheckpoint(p, e) {
     ...(typeof e.status === "string" ? { status: e.status } : {}),
     ...(typeof e.summary === "string" ? { lastCheckpointSummary: e.summary } : {}),
   });
+  if (typeof e.status === "string") {
+    syncSessionForJobStatus(p, existing.sessionId, id, e.status, e);
+  }
 }
 
 function handleJobCompleted(p, e) {
@@ -304,6 +419,7 @@ function handleJobCompleted(p, e) {
     completedAt: e.ts,
     ...(typeof e.summary === "string" ? { summary: e.summary } : {}),
   });
+  clearSessionJob(p, existing.sessionId, id, e);
 }
 
 function handleJobQueued(p, e) {
@@ -329,6 +445,7 @@ function handleJobQueued(p, e) {
     status: "queued",
     queuedAt: e.ts,
   });
+  appendSessionQueuedJob(p, e.sessionId, id, e);
 }
 
 function handleJobUnblocked(p, e) {
@@ -341,6 +458,7 @@ function handleJobUnblocked(p, e) {
     status: "running",
     lastActivityAt: e.ts,
   });
+  setSessionActiveJob(p, existing.sessionId, id, e);
 }
 
 function handleJobRolloverRequested(p, e) {

@@ -17,6 +17,7 @@ import { RuntimeStore } from "../hub/runtime/store.js";
 import { RuntimeProjection } from "../hub/runtime/projection.js";
 import { makeRuntimeId, SESSION_ID_RE } from "../hub/runtime/ids.js";
 import { validateRuntimeEvent } from "../hub/runtime/events.js";
+import { JobRegistry } from "../hub/jobs/registry.js";
 import { SessionTokenStore } from "../hub/sessions/auth/tokens.js";
 import { setAuditSink, resetSinks } from "../hub/logging/index.js";
 
@@ -42,6 +43,13 @@ async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = nu
       projection.apply(event);
     },
   });
+  const effectiveJobRegistry = jobRegistry || new JobRegistry({
+    runtimeStore,
+    projection,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace: workspaceRoot,
+  });
   const app = express();
   app.use(express.json());
   registerSessionsRoutes(app, {
@@ -51,7 +59,7 @@ async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = nu
     validateRuntimeEvent,
     workspace: workspaceRoot,
     store: makeStoreStub(projects),
-    ...(jobRegistry ? { jobRegistry } : {}),
+    jobRegistry: effectiveJobRegistry,
     ...(attach ? { attach } : {}),
     ...(tokenStore ? { tokenStore } : {}),
   });
@@ -66,6 +74,7 @@ async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = nu
     workspaceRoot,
     projection,
     runtimeStore,
+    jobRegistry: effectiveJobRegistry,
     appendedEvents,
     close: async () => {
       await new Promise((resolve) => server.close(() => resolve()));
@@ -99,6 +108,10 @@ async function patchJson(base, path, body) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 test("POST creates a session; GET lists it; GET /:id returns it", { timeout: TEST_TIMEOUT }, async () => {
@@ -712,6 +725,238 @@ test("POST /api/sessions/:sessionId/attach-task/preview returns modal shape for 
     assert.equal(missingProject.hasFail, true);
     assert.equal(missingProject.checks.find((item) => item.id === "session_accepts_new_task").status, "fail");
     assert.equal(missingProject.checks.find((item) => item.id === "task_scope_allowed_paths").status, "fail");
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task starts first job and mirrors activeJobId", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-start", title: "Start task", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+
+    const attachRes = await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-start",
+      profileId: "code-implementer",
+    });
+    assert.equal(attachRes.status, 201);
+    const attach = await attachRes.json();
+    assert.equal(attach.ok, true);
+    assert.equal(attach.mode, "started");
+    assert.equal(attach.job.status, "running");
+    assert.equal(attach.session.activeJobId, attach.jobId);
+    assert.equal(env.jobRegistry.get(attach.jobId).status, "running");
+    assert.equal(env.appendedEvents.filter((event) => event.type === "job.started").length, 1);
+    assert.equal(env.appendedEvents.filter((event) => event.type === "session.task_attached").length, 1);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task queues behind an active job", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-first", title: "First task", status: "not_started" },
+            { id: "t-second", title: "Second task", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+
+    const firstRes = await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-first",
+    });
+    const first = await firstRes.json();
+    const secondRes = await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-second",
+    });
+    assert.equal(secondRes.status, 201);
+    const second = await secondRes.json();
+
+    assert.equal(second.mode, "queued");
+    assert.equal(second.predecessorJobId, first.jobId);
+    assert.equal(second.job.status, "queued");
+    assert.equal(second.job.predecessorJobId, first.jobId);
+    assert.equal(env.jobRegistry.get(first.jobId).successorJobId, second.jobId);
+    const session = env.projection.sessions.get(target.session.id);
+    assert.equal(session.activeJobId, first.jobId);
+    assert.deepEqual(session.queuedJobIds, [second.jobId]);
+    assert.equal(env.appendedEvents.filter((event) => event.type === "job.queued").length, 1);
+    assert.equal(env.appendedEvents.filter((event) => event.type === "session.task_attached").length, 2);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task serializes concurrent confirms", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-a", title: "Task A", status: "not_started" },
+            { id: "t-b", title: "Task B", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+
+    const [aRes, bRes] = await Promise.all([
+      postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+        projectSlug: "demo",
+        taskId: "t-a",
+      }),
+      postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+        projectSlug: "demo",
+        taskId: "t-b",
+      }),
+    ]);
+    assert.equal(aRes.status, 201);
+    assert.equal(bRes.status, 201);
+    const jobs = env.jobRegistry.listBySession(target.session.id);
+    assert.equal(jobs.filter((job) => job.status === "running").length, 1);
+    assert.equal(jobs.filter((job) => job.status === "queued").length, 1);
+  } finally {
+    await env.close();
+  }
+});
+
+test("session queue reorder, cancel, and grace auto-start use queuedJobIds", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    attach: { autoStartQueuedOnCompletionGraceSec: 0.01 },
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-one", title: "One", status: "not_started" },
+            { id: "t-two", title: "Two", status: "not_started" },
+            { id: "t-three", title: "Three", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+    const attach = async (taskId) => {
+      const res = await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+        projectSlug: "demo",
+        taskId,
+      });
+      assert.equal(res.status, 201);
+      return res.json();
+    };
+
+    const first = await attach("t-one");
+    const second = await attach("t-two");
+    const third = await attach("t-three");
+    assert.deepEqual(env.projection.sessions.get(target.session.id).queuedJobIds, [second.jobId, third.jobId]);
+
+    const badReorderRes = await postJson(env.base, `/api/sessions/${target.session.id}/queue/reorder`, {
+      jobIds: [third.jobId],
+    });
+    assert.equal(badReorderRes.status, 409);
+    const reorderRes = await postJson(env.base, `/api/sessions/${target.session.id}/queue/reorder`, {
+      jobIds: [third.jobId, second.jobId],
+    });
+    assert.equal(reorderRes.status, 200);
+    assert.deepEqual(env.projection.sessions.get(target.session.id).queuedJobIds, [third.jobId, second.jobId]);
+
+    await env.jobRegistry.complete(first.jobId, { status: "completed", source: "http" });
+    await delay(50);
+    assert.equal(env.jobRegistry.get(third.jobId).status, "running");
+    assert.equal(env.projection.sessions.get(target.session.id).activeJobId, third.jobId);
+    assert.deepEqual(env.projection.sessions.get(target.session.id).queuedJobIds, [second.jobId]);
+
+    const cancelRes = await postJson(env.base, `/api/sessions/${target.session.id}/queue/${second.jobId}/cancel`, {
+      summary: "drop successor",
+    });
+    assert.equal(cancelRes.status, 200);
+    assert.equal(env.jobRegistry.get(second.jobId).status, "cancelled");
+    assert.deepEqual(env.projection.sessions.get(target.session.id).queuedJobIds, []);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/attach-task rejects failed preflight", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp({
+    projects: {
+      demo: {
+        rev: 7,
+        data: {
+          tasks: [
+            { id: "t-context", title: "Context task", status: "not_started" },
+          ],
+        },
+      },
+    },
+  });
+  try {
+    const targetRes = await postJson(env.base, "/api/sessions", {
+      name: "target",
+      tier: "codex_app_server",
+      projectSlug: "demo",
+    });
+    const target = await targetRes.json();
+    const before = env.appendedEvents.length;
+
+    const attachRes = await postJson(env.base, `/api/sessions/${target.session.id}/attach-task`, {
+      projectSlug: "demo",
+      taskId: "t-context",
+      contextBudget: { currentUsed: 950, capacity: 1000, estBriefTokens: 75 },
+    });
+    assert.equal(attachRes.status, 409);
+    const body = await attachRes.json();
+    assert.equal(body.error.code, "ATTACH_PREFLIGHT_FAILED");
+    assert.equal(body.error.details.preflight.hasFail, true);
+    assert.equal(env.appendedEvents.length, before);
   } finally {
     await env.close();
   }

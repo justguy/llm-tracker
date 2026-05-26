@@ -168,6 +168,8 @@ export class JobRegistry {
     this.validateRuntimeEvent = validateRuntimeEvent;
     this.workspace = workspace;
     this.now = typeof now === "function" ? now : () => new Date().toISOString();
+    /** @type {Set<(payload: { jobId: string; sessionId?: string; previousStatus?: string; status?: string; result: object }) => void>} */
+    this.jobCompletedListeners = new Set();
   }
 
   /**
@@ -204,6 +206,24 @@ export class JobRegistry {
   listBySession(sessionId) {
     if (typeof sessionId !== "string") return [];
     return this.list().filter((job) => job.sessionId === sessionId);
+  }
+
+  /**
+   * Subscribe to terminal job completion events emitted through this registry.
+   * Used by session attach queue orchestration to auto-start successors after
+   * the configured grace period.
+   *
+   * @param {(payload: { jobId: string; sessionId?: string; previousStatus?: string; status?: string; result: object }) => void} listener
+   * @returns {() => void}
+   */
+  onJobCompleted(listener) {
+    if (typeof listener !== "function") {
+      throw makeError("onJobCompleted: listener must be a function", "INVALID_INPUT", { field: "listener" });
+    }
+    this.jobCompletedListeners.add(listener);
+    return () => {
+      this.jobCompletedListeners.delete(listener);
+    };
   }
 
   /**
@@ -402,7 +422,7 @@ export class JobRegistry {
       throw makeError("complete: summary must be a non-empty string when present", "INVALID_INPUT", { field: "summary" });
     }
 
-    return this.#appendEvent({
+    const result = await this.#appendEvent({
       type: "job.completed",
       source,
       jobId,
@@ -411,6 +431,14 @@ export class JobRegistry {
       ...(summary ? { summary } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
+    this.#notifyJobCompleted({
+      jobId,
+      sessionId: existing.sessionId,
+      previousStatus: existing.status,
+      status,
+      result,
+    });
+    return result;
   }
 
   /**
@@ -715,5 +743,17 @@ export class JobRegistry {
     const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
     const result = await this.runtimeStore.append(eventForAppend);
     return { rev: result.rev, eventId: result.eventId, job: this.get(payload.jobId) };
+  }
+
+  #notifyJobCompleted(payload) {
+    for (const listener of this.jobCompletedListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Completion side effects are advisory. The terminal job event has
+        // already committed; listeners must not make the primary transition
+        // fail after the fact.
+      }
+    }
   }
 }
