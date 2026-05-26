@@ -31,6 +31,7 @@ import { buildSkillPlan } from "../jobs/skill-plan.js";
 import { BUILT_IN_PROFILES } from "../jobs/profiles.js";
 import { SkillsRegistry } from "../skills/registry.js";
 import { requireSessionToken } from "./middleware/session-token.js";
+import { registerVerifyPackRoutes } from "./verify-pack.js";
 import {
   buildGatesPendingResult,
   findMissingRequiredGates,
@@ -125,6 +126,16 @@ export function registerJobsRoutes(app, deps) {
         })
       : null;
   const requireToken = tokenMiddleware ? [tokenMiddleware] : [];
+
+  registerVerifyPackRoutes(app, {
+    jobRegistry,
+    runtimeStore,
+    makeRuntimeId,
+    validateRuntimeEvent,
+    workspace,
+    runVerifyCommand: deps?.runVerifyCommand,
+    mutationMiddleware: requireToken,
+  });
 
   // --- GET /api/skills ----------------------------------------------------
   app.get("/api/skills", (_req, res) => {

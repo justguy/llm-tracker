@@ -118,6 +118,8 @@ const HANDLERS = Object.freeze({
   "human.override": handleHumanOverride,
   "skill.run.started": handleSkillRunStarted,
   "skill.run.finished": handleSkillRunFinished,
+  "verify.command.completed": handleVerifyCommandCompleted,
+  "verify.human_approval.resolved": handleVerifyHumanApprovalResolved,
 });
 
 // --- session handlers ------------------------------------------------------
@@ -385,6 +387,88 @@ function handleHumanOverride(p, e) {
     completionGates: nextGates,
     lastActivityAt: e.ts,
   });
+}
+
+function handleVerifyCommandCompleted(p, e) {
+  const status = e.status === "succeeded" ? "satisfied" : "failed";
+  updateVerifyCompletionGate(p, e, {
+    itemId: e.itemId,
+    status,
+    gateKinds: new Set(["verify_pack"]),
+    patch: {
+      verifyCommandStatus: e.status,
+      ...(Number.isInteger(e.exitCode) ? { exitCode: e.exitCode } : {}),
+      ...(Number.isInteger(e.expectExit) ? { expectExit: e.expectExit } : {}),
+      ...(e.timedOut === true ? { timedOut: true } : {}),
+    },
+  });
+}
+
+function handleVerifyHumanApprovalResolved(p, e) {
+  const status = e.status === "satisfied" ? "satisfied" : "failed";
+  updateVerifyCompletionGate(p, e, {
+    itemId: e.itemId,
+    status,
+    gateKinds:
+      e.itemKind === "dod_check"
+        ? new Set(["dod_checked"])
+        : new Set(["verify_pack"]),
+    patch: {
+      ...(typeof e.itemKind === "string" ? { verifyItemKind: e.itemKind } : {}),
+      ...(typeof e.reason === "string" ? { reason: e.reason } : {}),
+      ...(typeof e.user === "string" ? { user: e.user } : {}),
+      ...(typeof e.summary === "string" ? { summary: e.summary } : {}),
+    },
+  });
+}
+
+function updateVerifyCompletionGate(p, e, { itemId, status, gateKinds, patch }) {
+  const jobId = e.jobId;
+  if (!isJobId(jobId)) return;
+  const job = p.jobs.get(jobId);
+  if (!job || !Array.isArray(job.completionGates)) return;
+  if (typeof itemId !== "string" || itemId.length === 0) return;
+  if (typeof e.id !== "string" || e.id.length === 0) return;
+
+  let changed = false;
+  const completionGates = job.completionGates.map((gate) => {
+    if (!gate || typeof gate !== "object") return gate;
+    if (gate.id !== itemId || !gateKinds.has(gate.kind)) return { ...gate };
+    if (gate.status === "overridden") return { ...gate };
+    changed = true;
+    return {
+      ...clearVerifyGateResultFields(gate),
+      ...patch,
+      status,
+      evidenceRef: e.id,
+    };
+  });
+  if (!changed) return;
+  p.jobs.set(jobId, {
+    ...job,
+    completionGates,
+    lastActivityAt: e.ts,
+  });
+}
+
+const VERIFY_GATE_RESULT_FIELDS = Object.freeze([
+  "status",
+  "evidenceRef",
+  "verifyCommandStatus",
+  "exitCode",
+  "expectExit",
+  "timedOut",
+  "verifyItemKind",
+  "reason",
+  "user",
+  "summary",
+  "overrideReason",
+]);
+
+function clearVerifyGateResultFields(gate) {
+  const next = { ...gate };
+  for (const field of VERIFY_GATE_RESULT_FIELDS) delete next[field];
+  return next;
 }
 
 // --- skill run handlers ----------------------------------------------------

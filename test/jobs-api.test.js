@@ -53,6 +53,11 @@ async function startApp(opts = {}) {
     makeRuntimeId,
     validateRuntimeEvent,
     workspace: workspaceRoot,
+    ...(opts.runVerifyCommand
+      ? {
+          runVerifyCommand: opts.runVerifyCommand,
+        }
+      : {}),
     ...(opts.tokenStore
       ? {
           tokenStore: opts.tokenStore,
@@ -87,6 +92,15 @@ function validJobInput(overrides = {}) {
     kind: "code",
     ...overrides,
   };
+}
+
+function verifyPack(items) {
+  return Object.freeze({
+    jobId: null,
+    stampedAt: "2026-05-26T00:00:00.000Z",
+    stampedFromRev: 1,
+    items: Object.freeze(items.map((item) => Object.freeze({ ...item }))),
+  });
 }
 
 async function getJson(base, path) {
@@ -873,6 +887,365 @@ test("skill-run HTTP endpoints append structured events and satisfy required_ski
       status: "satisfied",
       evidenceRef: complete.body.eventId,
     });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/jobs/:id/verify-pack returns the stamped pack and item gate state", async () => {
+  const app = await startApp();
+  try {
+    const pack = verifyPack([
+      { id: "lt.test", kind: "command", required: true, cmd: "npm test", expectExit: 0 },
+      { id: "approve", kind: "human_approval", required: false, prompt: "Ship?" },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "lt.test", kind: "verify_pack", required: true, status: "pending" },
+    ];
+
+    const r = await getJson(app.base, `/api/jobs/${created.jobId}/verify-pack`);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.jobId, created.jobId);
+    assert.deepEqual(
+      r.body.verifyPack.items.map((item) => item.id),
+      ["lt.test", "approve"],
+    );
+    assert.equal(r.body.items[0].gate.status, "pending");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/verify-pack/items/:itemId/run appends started/completed events and satisfies command gates", async () => {
+  const app = await startApp({
+    runVerifyCommand: async ({ command, timeoutMs }) => ({
+      exitCode: command === "node ok.js" ? 7 : 1,
+      timedOut: false,
+      durationMs: Math.min(timeoutMs, 12),
+      stdout: "ok\n",
+      stderr: "",
+    }),
+  });
+  try {
+    const pack = verifyPack([
+      { id: "cmd.ok", kind: "command", required: true, cmd: "node ok.js", timeoutSec: 2, expectExit: 7 },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "cmd.ok", kind: "verify_pack", required: true, status: "pending" },
+    ];
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/cmd.ok/run`, {
+      source: "http",
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, true);
+    assert.equal(r.body.status, "succeeded");
+    assert.equal(r.body.exitCode, 7);
+    assert.equal(r.body.expectExit, 7);
+    assert.equal(r.body.timedOut, false);
+    assert.match(r.body.startedEventId, /^evt_/);
+    assert.match(r.body.completedEventId, /^evt_/);
+
+    const startedEvent = app.appendedEvents.find((event) => event.type === "verify.command.started");
+    assert.ok(startedEvent);
+    assert.equal(startedEvent.itemId, "cmd.ok");
+    assert.equal(startedEvent.timeoutSec, 2);
+    assert.equal(startedEvent.expectExit, 7);
+
+    const completedEvent = app.appendedEvents.find((event) => event.type === "verify.command.completed");
+    assert.ok(completedEvent);
+    assert.equal(completedEvent.status, "succeeded");
+    assert.equal(completedEvent.exitCode, 7);
+
+    assert.deepEqual(app.jobRegistry.get(created.jobId).completionGates[0], {
+      id: "cmd.ok",
+      kind: "verify_pack",
+      required: true,
+      status: "satisfied",
+      evidenceRef: r.body.completedEventId,
+      verifyCommandStatus: "succeeded",
+      exitCode: 7,
+      expectExit: 7,
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/verify-pack/items/:itemId/run fails gates on timeout or exit mismatch", async () => {
+  const app = await startApp({
+    runVerifyCommand: async () => ({
+      exitCode: null,
+      timedOut: true,
+      durationMs: 1000,
+      stdout: "",
+      stderr: "timed out",
+    }),
+  });
+  try {
+    const pack = verifyPack([
+      { id: "cmd.timeout", kind: "command", required: true, cmd: "sleep 10", timeoutSec: 1, expectExit: 0 },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "cmd.timeout", kind: "verify_pack", required: true, status: "pending" },
+    ];
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/cmd.timeout/run`, {});
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, false);
+    assert.equal(r.body.status, "failed");
+    assert.equal(r.body.timedOut, true);
+    assert.equal(app.jobRegistry.get(created.jobId).completionGates[0].status, "failed");
+    assert.equal(app.jobRegistry.get(created.jobId).completionGates[0].timedOut, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/verify-pack/items/:itemId/run clears stale timeout metadata after later success", async () => {
+  let runCount = 0;
+  const app = await startApp({
+    runVerifyCommand: async () => {
+      runCount += 1;
+      return runCount === 1
+        ? {
+            exitCode: null,
+            timedOut: true,
+            durationMs: 1000,
+            stdout: "",
+            stderr: "timed out",
+          }
+        : {
+            exitCode: 0,
+            timedOut: false,
+            durationMs: 5,
+            stdout: "ok\n",
+            stderr: "",
+          };
+    },
+  });
+  try {
+    const pack = verifyPack([
+      { id: "cmd.retry", kind: "command", required: true, cmd: "node test.js", expectExit: 0 },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "cmd.retry", kind: "verify_pack", required: true, status: "pending" },
+    ];
+
+    const failed = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/cmd.retry/run`, {});
+    assert.equal(failed.status, 200);
+    assert.equal(failed.body.ok, false);
+    assert.equal(app.jobRegistry.get(created.jobId).completionGates[0].timedOut, true);
+
+    const passed = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/cmd.retry/run`, {});
+    assert.equal(passed.status, 200);
+    assert.equal(passed.body.ok, true);
+
+    const gate = app.jobRegistry.get(created.jobId).completionGates[0];
+    assert.equal(gate.status, "satisfied");
+    assert.equal(gate.evidenceRef, passed.body.completedEventId);
+    assert.equal(gate.verifyCommandStatus, "succeeded");
+    assert.equal(gate.exitCode, 0);
+    assert.equal(gate.expectExit, 0);
+    assert.equal("timedOut" in gate, false);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/verify-pack/items/:itemId/run preserves overridden gates", async () => {
+  const app = await startApp({
+    runVerifyCommand: async () => ({
+      exitCode: 1,
+      timedOut: false,
+      durationMs: 2,
+      stdout: "",
+      stderr: "failed",
+    }),
+  });
+  try {
+    const pack = verifyPack([
+      { id: "cmd.overridden", kind: "command", required: true, cmd: "node fail.js", expectExit: 0 },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      {
+        id: "cmd.overridden",
+        kind: "verify_pack",
+        required: true,
+        status: "overridden",
+        evidenceRef: "evt_01h2x3y4z5a6b7c8d9e0f1g2h3",
+        overrideReason: "operator accepted risk",
+      },
+    ];
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/cmd.overridden/run`, {});
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, false);
+    assert.deepEqual(app.jobRegistry.get(created.jobId).completionGates[0], record.completionGates[0]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/verify-pack/items/:itemId/run real timeout returns without waiting for SIGTERM-resistant command", async () => {
+  const app = await startApp();
+  try {
+    const pack = verifyPack([
+      {
+        id: "cmd.real-timeout",
+        kind: "command",
+        required: true,
+        cmd: "node -e \"process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)\"",
+        timeoutSec: 1,
+        expectExit: 0,
+      },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "cmd.real-timeout", kind: "verify_pack", required: true, status: "pending" },
+    ];
+
+    const startedAt = Date.now();
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/cmd.real-timeout/run`, {});
+    const elapsedMs = Date.now() - startedAt;
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, false);
+    assert.equal(r.body.timedOut, true);
+    assert.ok(elapsedMs < 2500, `timeout response took ${elapsedMs}ms`);
+    assert.equal(app.jobRegistry.get(created.jobId).completionGates[0].status, "failed");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/verify-pack/items/:itemId/resolve clears stale human and DoD resolution metadata", async () => {
+  const app = await startApp();
+  try {
+    const pack = verifyPack([
+      { id: "approve.ship", kind: "human_approval", required: true, prompt: "Ship?" },
+      { id: "dod.1", kind: "dod_check", required: true, ref: "definition_of_done[0]" },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      {
+        id: "approve.ship",
+        kind: "verify_pack",
+        required: true,
+        status: "failed",
+        humanApproval: true,
+        evidenceRef: "evt_01h2x3y4z5a6b7c8d9e0f1old1",
+        reason: "old reason",
+        user: "old-user",
+        summary: "old summary",
+      },
+      {
+        id: "dod.1",
+        kind: "dod_checked",
+        required: true,
+        status: "failed",
+        evidenceRef: "evt_01h2x3y4z5a6b7c8d9e0f1old2",
+        reason: "old dod reason",
+        user: "old-dod-user",
+        summary: "old dod summary",
+      },
+    ];
+
+    const approval = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/approve.ship/resolve`, {
+      approved: true,
+      reason: "fresh approval",
+    });
+    assert.equal(approval.status, 200);
+
+    const dod = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/dod.1/resolve`, {
+      satisfied: true,
+      summary: "fresh DoD",
+    });
+    assert.equal(dod.status, 200);
+
+    const job = app.jobRegistry.get(created.jobId);
+    assert.deepEqual(job.completionGates[0], {
+      id: "approve.ship",
+      kind: "verify_pack",
+      required: true,
+      humanApproval: true,
+      reason: "fresh approval",
+      status: "satisfied",
+      evidenceRef: approval.body.eventId,
+      verifyItemKind: "human_approval",
+    });
+    assert.deepEqual(job.completionGates[1], {
+      id: "dod.1",
+      kind: "dod_checked",
+      required: true,
+      summary: "fresh DoD",
+      status: "satisfied",
+      evidenceRef: dod.body.eventId,
+      verifyItemKind: "dod_check",
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/jobs/:id/verify-pack/items/:itemId/resolve handles human_approval and dod_check", async () => {
+  const app = await startApp();
+  try {
+    const pack = verifyPack([
+      { id: "approve.ship", kind: "human_approval", required: true, prompt: "Ship?" },
+      { id: "dod.1", kind: "dod_check", required: true, ref: "definition_of_done[0]" },
+    ]);
+    const created = await app.jobRegistry.create(validJobInput({ verifyPack: pack }));
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "approve.ship", kind: "verify_pack", required: true, status: "pending", humanApproval: true },
+      { id: "dod.1", kind: "dod_checked", required: true, status: "pending" },
+    ];
+
+    const approval = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/approve.ship/resolve`, {
+      approved: true,
+      reason: "operator approved",
+      user: "adi",
+    });
+    assert.equal(approval.status, 200);
+    assert.equal(approval.body.ok, true);
+    assert.equal(approval.body.status, "satisfied");
+    const approvalEvent = app.appendedEvents.find(
+      (event) => event.type === "verify.human_approval.resolved" && event.itemId === "approve.ship",
+    );
+    assert.ok(approvalEvent);
+    assert.equal(approvalEvent.itemKind, "human_approval");
+
+    const dod = await postJson(app.base, `/api/jobs/${created.jobId}/verify-pack/items/dod.1/resolve`, {
+      satisfied: true,
+      summary: "DoD checked",
+    });
+    assert.equal(dod.status, 200);
+    assert.equal(dod.body.ok, true);
+    const dodEvent = app.appendedEvents.find(
+      (event) => event.type === "verify.human_approval.resolved" && event.itemId === "dod.1",
+    );
+    assert.ok(dodEvent);
+    assert.equal(dodEvent.itemKind, "dod_check");
+
+    const job = app.jobRegistry.get(created.jobId);
+    assert.equal(job.completionGates[0].status, "satisfied");
+    assert.equal(job.completionGates[0].evidenceRef, approval.body.eventId);
+    assert.equal(job.completionGates[0].reason, "operator approved");
+    assert.equal(job.completionGates[1].status, "satisfied");
+    assert.equal(job.completionGates[1].evidenceRef, dod.body.eventId);
+    assert.equal(job.completionGates[1].summary, "DoD checked");
   } finally {
     await app.close();
   }
