@@ -41,6 +41,7 @@ export const SESSION_TOKEN_MUTATION_TOOL_NAMES = [
   "tracker_session_status",
   "tracker_session_note",
   "tracker_session_blocked",
+  "tracker_session_unblocked",
   "tracker_session_handoff",
   "tracker_session_context_usage",
   "tracker_session_complete",

@@ -75,3 +75,13 @@ test("blocked: trigger gone (job.status=running) returns []", () => {
   const job = { id: "job_b4", status: "running" };
   assert.deepEqual(blockedRule(baseInput({ jobs: [job] })), []);
 });
+
+test("blocked: trigger gone (session.status=active) returns []", () => {
+  const session = {
+    id: "ses_b5",
+    status: "active",
+    statusSource: { kind: "mcp", eventId: "evt_1" },
+    projectSlug: "p",
+  };
+  assert.deepEqual(blockedRule(baseInput({ sessions: [session] })), []);
+});

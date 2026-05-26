@@ -159,6 +159,7 @@ test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O"
       tracker_session_status: { sessionId, status: "active" },
       tracker_session_note: { sessionId, note: "note" },
       tracker_session_blocked: { sessionId, reason: "blocked" },
+      tracker_session_unblocked: { sessionId, reason: "unblocked" },
       tracker_session_handoff: { sessionId, summary: "handoff" },
       tracker_session_context_usage: { sessionId, percent: 80 },
       tracker_session_complete: { sessionId, summary: "done" },

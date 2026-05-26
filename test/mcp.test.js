@@ -207,6 +207,7 @@ test("llm-tracker mcp initializes and lists tracker tools", async () => {
       "tracker_session_note",
       "tracker_session_start",
       "tracker_session_status",
+      "tracker_session_unblocked",
       "tracker_skill_run_complete",
       "tracker_skill_run_fail",
       "tracker_skill_run_skip",
@@ -579,6 +580,48 @@ test("tracker_session_status forwards sessionToken to the running hub", async ()
       assert.notEqual(accepted.result.isError, true);
       const acceptedPayload = JSON.parse(accepted.result.content[0].text);
       assert.equal(acceptedPayload.session.status, "quiet");
+
+      const blocked = await client.request("tools/call", {
+        name: "tracker_session_blocked",
+        arguments: {
+          sessionId,
+          sessionToken,
+          reason: "waiting on dependency"
+        }
+      });
+      assert.notEqual(blocked.result.isError, true);
+      const blockedPayload = JSON.parse(blocked.result.content[0].text);
+      assert.equal(blockedPayload.session.status, "blocked");
+
+      const rejectedUnblock = await client.request("tools/call", {
+        name: "tracker_session_unblocked",
+        arguments: {
+          sessionId,
+          sessionToken: "not-a-real-session-token",
+          reason: "dependency cleared"
+        }
+      });
+      assert.ok(rejectedUnblock.error);
+      assert.match(rejectedUnblock.error.message, /SESSION_TOKEN_REJECTED|not recognized|401/);
+
+      const afterRejectedUnblock = await client.request("tools/call", {
+        name: "tracker_session_context",
+        arguments: { sessionId, sessionToken }
+      });
+      const afterRejectedUnblockPayload = JSON.parse(afterRejectedUnblock.result.content[0].text);
+      assert.equal(afterRejectedUnblockPayload.session.status, "blocked");
+
+      const unblocked = await client.request("tools/call", {
+        name: "tracker_session_unblocked",
+        arguments: {
+          sessionId,
+          sessionToken,
+          reason: "dependency cleared"
+        }
+      });
+      assert.notEqual(unblocked.result.isError, true);
+      const unblockedPayload = JSON.parse(unblocked.result.content[0].text);
+      assert.equal(unblockedPayload.session.status, "active");
 
       const usageBelow = await client.request("tools/call", {
         name: "tracker_session_context_usage",

@@ -94,11 +94,11 @@ function createStatusMutation(
     description,
     inputSchema: {
       type: "object",
-        properties: {
-          sessionId: sessionIdProperty(),
-          sessionToken: mcpSessionTokenProperty,
-          ...extraProperties
-        },
+      properties: {
+        sessionId: sessionIdProperty(),
+        sessionToken: mcpSessionTokenProperty,
+        ...extraProperties
+      },
       required: ["sessionId", "sessionToken"]
     },
     prepareRequest(args = {}) {
@@ -223,6 +223,18 @@ export function createSessionTools(workspace, portFlag) {
       {
         reason: optionalStringProperty("Blocker reason"),
         note: optionalStringProperty("Optional blocker note")
+      }
+    ),
+    createStatusMutation(
+      workspace,
+      portFlag,
+      "tracker_session_unblocked",
+      "Report a previously blocked session as active again.",
+      () => "active",
+      (args) => nonEmptyString(args.reason) || nonEmptyString(args.note),
+      {
+        reason: optionalStringProperty("Unblock reason"),
+        note: optionalStringProperty("Optional unblock note")
       }
     ),
     createStatusMutation(
