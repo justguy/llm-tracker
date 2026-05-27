@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 
 import { isJobId, isRuntimeEventId, isSessionId } from "../runtime/ids.js";
+import { evaluateAllowedPathForRepoChange } from "../workspaces/allowed-paths.js";
 
 /**
  * @typedef {"open" | "reviewed" | "changes_requested" | "approved" | "closed"} DiffReviewStatus
@@ -232,6 +233,83 @@ export function updateDiffReviewStatus(record, status, options = {}) {
 }
 
 /**
+ * Annotate on-demand diff file rows with outside-allowed-path warning evidence.
+ * The returned rows are presentation data only and are not persisted in
+ * DiffReviewRecord storage.
+ *
+ * @param {Array<Record<string, unknown>>} files
+ * @param {{ task?: object, repoRoot?: string }} [options]
+ * @returns {{ files: Array<Record<string, unknown>>, allowedPathWarnings: string[] }}
+ */
+export function annotateDiffAllowedPathWarnings(files = [], options = {}) {
+  if (!Array.isArray(files)) {
+    throw new TypeError("annotateDiffAllowedPathWarnings: files must be an array");
+  }
+  const allowedPathWarnings = [];
+  const annotatedFiles = files.map((file) => {
+    const warnings = diffAllowedPathWarningsForFile(file, options);
+    if (warnings.length === 0) return { ...file };
+    allowedPathWarnings.push(...warnings.map((warning) => warning.id));
+    return {
+      ...file,
+      outsideAllowedPaths: true,
+      allowedPathWarnings: mergeStringLists(
+        file.allowedPathWarnings,
+        warnings.map((warning) => warning.id),
+      ),
+      allowedPathWarningDetails: mergeWarningDetails(file.allowedPathWarningDetails, warnings),
+    };
+  });
+
+  return {
+    files: annotatedFiles,
+    allowedPathWarnings: Array.from(new Set(allowedPathWarnings)),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} file
+ * @param {{ task?: object, repoRoot?: string }} [options]
+ * @returns {object | null}
+ */
+export function diffAllowedPathWarningForFile(file, options = {}) {
+  return diffAllowedPathWarningsForFile(file, options)[0] || null;
+}
+
+/**
+ * @param {Record<string, unknown>} file
+ * @param {{ task?: object, repoRoot?: string }} [options]
+ * @returns {object[]}
+ */
+export function diffAllowedPathWarningsForFile(file, options = {}) {
+  if (!isPlainObject(file)) return [];
+  const repoRoot = firstString(options.repoRoot, file.repoRoot, taskPrimaryRoot(options.task));
+  const warnings = [];
+  const seen = new Set();
+
+  for (const candidate of diffFilePathCandidates(file)) {
+    const result = evaluateAllowedPathForRepoChange({
+      task: options.task,
+      repoRoot,
+      path: candidate.path,
+      filePath: candidate.filePath,
+    });
+    if (!result.outsideAllowedPaths || seen.has(result.changedPath)) continue;
+    seen.add(result.changedPath);
+    warnings.push({
+      id: diffAllowedPathWarningId(repoRoot, result.changedPath),
+      kind: "outside_allowed_paths",
+      path: result.changedPath,
+      allowedPaths: result.patterns.slice(),
+      repoRoot: repoRoot || null,
+      reason: result.reason,
+    });
+  }
+
+  return warnings;
+}
+
+/**
  * Validate a persisted DiffReviewRecord. Throws on the first violation.
  *
  * @param {unknown} record
@@ -286,6 +364,11 @@ export function makeDiffReviewId() {
   return `dfr_${randomUUID().replace(/-/g, "")}`;
 }
 
+export function diffAllowedPathWarningId(repoRoot, path) {
+  const rootPart = repoRoot ? `${encodeURIComponent(String(repoRoot))}:` : "";
+  return `outside_allowed_paths:${rootPart}${encodeURIComponent(String(path || ""))}`;
+}
+
 function assertNoPersistedDiffContent(value) {
   if (!isPlainObject(value)) return;
   for (const key of DIFF_REVIEW_FORBIDDEN_PERSISTED_KEYS) {
@@ -315,6 +398,41 @@ function mergeEvidenceRefs(current, next) {
     throw new Error("DiffReviewRecord.evidenceRefs must be an array");
   }
   return Array.from(new Set([...current, ...next]));
+}
+
+function mergeStringLists(current, next) {
+  return Array.from(new Set([...arrayOrEmpty(current).filter(isNonEmptyString), ...next]));
+}
+
+function mergeWarningDetails(current, next) {
+  return [...arrayOrEmpty(current).filter(isPlainObject), ...next];
+}
+
+function diffFilePathCandidates(file) {
+  const candidates = [];
+  addCandidate(candidates, { path: file.path, filePath: file.filePath });
+  addCandidate(candidates, { path: file.oldPath, filePath: file.oldFilePath });
+  addCandidate(candidates, { path: file.previousPath, filePath: file.previousFilePath });
+  addCandidate(candidates, { path: file.fromPath, filePath: file.fromFilePath });
+  addCandidate(candidates, { path: file.toPath, filePath: file.toFilePath });
+  return candidates;
+}
+
+function addCandidate(candidates, candidate) {
+  if (!isNonEmptyString(candidate.path) && !isNonEmptyString(candidate.filePath)) return;
+  candidates.push(candidate);
+}
+
+function firstString(...values) {
+  return values.find(isNonEmptyString) || null;
+}
+
+function taskPrimaryRoot(task) {
+  return firstString(
+    task?.repos?.primary?.root,
+    task?.repos?.primary?.worktree,
+    task?.repos?.primary?.worktreePath,
+  );
 }
 
 function arrayOrEmpty(value) {
