@@ -24,6 +24,11 @@ import { registerRunSessionRoutes } from "./api/run-session.js";
 import { registerLayoutsRoutes } from "./api/layouts.js";
 import { registerProvidersRoutes } from "./api/providers.js";
 import { registerConflictRoutes } from "./api/conflicts.js";
+import {
+  providerEventsFromRuntimeEvents,
+  providerTimelineItemsFromRuntimeEvents,
+  registerDiffRoutes,
+} from "./api/diffs.js";
 import { JobRegistry } from "./jobs/registry.js";
 import { createDraftStore } from "./run-session/drafts.js";
 import { RunSessionService } from "./run-session/service.js";
@@ -601,6 +606,22 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     runtimeStore,
     validateRuntimeEvent,
     workspace
+  });
+  registerDiffRoutes(app, {
+    store,
+    projection: runtimeProjection,
+    getRuntimeEvents: async () => {
+      const jsonl = await readJsonlLines(runtimePaths.runtimeEvents);
+      return jsonl.events;
+    },
+    getProviderEvents: async () => {
+      const jsonl = await readJsonlLines(runtimePaths.runtimeEvents);
+      return providerEventsFromRuntimeEvents(jsonl.events);
+    },
+    getProviderTimelineItems: async () => {
+      const jsonl = await readJsonlLines(runtimePaths.runtimeEvents);
+      return providerTimelineItemsFromRuntimeEvents(jsonl.events);
+    }
   });
   const jobRegistry = new JobRegistry({
     runtimeStore,
