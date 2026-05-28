@@ -7,7 +7,10 @@
 import { randomUUID } from "node:crypto";
 
 import { isJobId, isRuntimeEventId, isSessionId } from "../runtime/ids.js";
-import { evaluateAllowedPathForRepoChange } from "../workspaces/allowed-paths.js";
+import {
+  evaluateAllowedPathForRepoChange,
+  repoRelativeChangedPath,
+} from "../workspaces/allowed-paths.js";
 
 /**
  * @typedef {"open" | "reviewed" | "changes_requested" | "approved" | "closed"} DiffReviewStatus
@@ -310,6 +313,78 @@ export function diffAllowedPathWarningsForFile(file, options = {}) {
 }
 
 /**
+ * Annotate on-demand diff file rows with active conflict evidence for row
+ * highlighting and a top-level banner. Conflict evidence remains computed
+ * presentation data, not durable DiffReviewRecord state.
+ *
+ * @param {Array<Record<string, unknown>>} files
+ * @param {unknown[]} conflicts
+ * @param {{ repoRoot?: string }} [options]
+ * @returns {{ files: Array<Record<string, unknown>>, conflictIds: string[], conflictDetails: object[] }}
+ */
+export function annotateDiffConflictWarnings(files = [], conflicts = [], options = {}) {
+  if (!Array.isArray(files)) {
+    throw new TypeError("annotateDiffConflictWarnings: files must be an array");
+  }
+
+  const activeConflicts = arrayOrEmpty(conflicts)
+    .filter(isActiveConflictWarning);
+  const conflictIds = [];
+  const conflictDetails = [];
+
+  const annotatedFiles = files.map((file) => {
+    const matches = diffConflictsForFile(file, activeConflicts, options);
+    if (matches.length === 0) return { ...file };
+    conflictIds.push(...matches.map((conflict) => conflict.id));
+    conflictDetails.push(...matches);
+    return {
+      ...file,
+      hasConflicts: true,
+      conflictIds: mergeStringLists(
+        file.conflictIds,
+        matches.map((conflict) => conflict.id),
+      ),
+      conflictDetails: mergeConflictDetails(file.conflictDetails, matches),
+    };
+  });
+
+  return {
+    files: annotatedFiles,
+    conflictIds: Array.from(new Set(conflictIds)),
+    conflictDetails: dedupeDetails(conflictDetails),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} file
+ * @param {unknown[]} conflicts
+ * @param {{ repoRoot?: string }} [options]
+ * @returns {object[]}
+ */
+export function diffConflictsForFile(file, conflicts = [], options = {}) {
+  if (!isPlainObject(file)) return [];
+  const filePaths = new Set(
+    diffFilePathCandidates(file)
+      .map((candidate) => normalizeDiffCandidatePath(candidate, options.repoRoot || file.repoRoot))
+      .filter(Boolean),
+  );
+  if (filePaths.size === 0) return [];
+
+  const out = [];
+  const seen = new Set();
+  const repoRoot = options.repoRoot || file.repoRoot;
+  for (const conflict of conflicts) {
+    if (!isActiveConflictWarning(conflict)) continue;
+    const normalized = normalizeConflictWarning(conflict, repoRoot);
+    if (!normalized || !conflictMatchesFilePaths(normalized, filePaths)) continue;
+    if (seen.has(normalized.id)) continue;
+    seen.add(normalized.id);
+    out.push(normalized);
+  }
+  return out;
+}
+
+/**
  * Validate a persisted DiffReviewRecord. Throws on the first violation.
  *
  * @param {unknown} record
@@ -406,6 +481,86 @@ function mergeStringLists(current, next) {
 
 function mergeWarningDetails(current, next) {
   return [...arrayOrEmpty(current).filter(isPlainObject), ...next];
+}
+
+function mergeConflictDetails(current, next) {
+  return dedupeDetails([...arrayOrEmpty(current).filter(isPlainObject), ...next]);
+}
+
+function dedupeDetails(details) {
+  const seen = new Set();
+  const out = [];
+  for (const detail of details) {
+    const id = firstString(detail?.id, detail?.conflictId);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(detail);
+  }
+  return out;
+}
+
+function normalizeConflictWarning(conflict, repoRoot) {
+  if (!isPlainObject(conflict)) return null;
+  const id = firstString(conflict.conflictId, conflict.id);
+  if (!id) return null;
+  const paths = conflictPaths(conflict, repoRoot);
+  return {
+    ...conflict,
+    id,
+    conflictId: id,
+    paths,
+    path: firstString(conflict.path, paths[0]),
+  };
+}
+
+function isActiveConflictWarning(conflict) {
+  if (!isPlainObject(conflict)) return false;
+  if (conflict.active === false || conflict.resolved === true || conflict.cleared === true) return false;
+  if (isNonEmptyString(conflict.resolvedAt) || isNonEmptyString(conflict.clearedAt)) return false;
+  const status = String(conflict.status || "").toLowerCase();
+  return !["resolved", "cleared", "closed", "inactive", "dismissed"].includes(status);
+}
+
+function conflictMatchesFilePaths(conflict, filePaths) {
+  for (const path of conflict.paths) {
+    if (filePaths.has(path)) return true;
+  }
+  return false;
+}
+
+function conflictPaths(conflict, repoRoot) {
+  return Array.from(
+    new Set([
+      ...arrayOrEmpty(conflict.paths).map((path) => normalizeConflictPath(path, repoRoot)),
+      normalizeConflictPath(conflict.path, repoRoot),
+      normalizeConflictPath(conflict.filePath, repoRoot),
+      normalizeConflictPath(conflict.oldPath, repoRoot),
+      normalizeConflictPath(conflict.oldFilePath, repoRoot),
+      normalizeConflictPath(conflict.previousPath, repoRoot),
+      normalizeConflictPath(conflict.previousFilePath, repoRoot),
+      normalizeConflictPath(conflict.fromPath, repoRoot),
+      normalizeConflictPath(conflict.fromFilePath, repoRoot),
+      normalizeConflictPath(conflict.toPath, repoRoot),
+      normalizeConflictPath(conflict.toFilePath, repoRoot),
+    ].filter(Boolean)),
+  );
+}
+
+function normalizeConflictPath(value, repoRoot) {
+  return normalizeComparablePath(repoRelativeChangedPath(repoRoot, value) || value);
+}
+
+function normalizeDiffCandidatePath(candidate, repoRoot) {
+  return normalizeComparablePath(
+    repoRelativeChangedPath(repoRoot, candidate.filePath || candidate.path),
+  );
+}
+
+function normalizeComparablePath(value) {
+  if (!isNonEmptyString(value)) return null;
+  const normalized = value.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
+  if (!normalized || normalized === "." || normalized === ".." || normalized.startsWith("../")) return null;
+  return normalized;
 }
 
 function diffFilePathCandidates(file) {
