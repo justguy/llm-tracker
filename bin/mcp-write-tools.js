@@ -26,7 +26,7 @@ function createPatchToolDefinition() {
   return {
     name: "tracker_patch",
     description:
-      "Submit a normal partial tracker patch through the running hub. The hub shallow-merges `task.context` per key: patches add or overwrite keys, they do not delete existing ones. To drop a key, send `context: { key: null }`. Direct file edits flow through the same merge, so removing a key by editing the JSON on disk will be undone on re-ingest — use this tool (with null values) or `PUT /api/projects/<slug>` for a true replace.",
+      "Submit a normal partial tracker patch through the running hub. The response includes `applied`, the accepted post-write values for fields named in the patch; use that instead of opening the JSON file to check whether the write landed. The hub shallow-merges `task.context` per key: patches add or overwrite keys, they do not delete existing ones. To drop a key, send `context: { key: null }`. Direct file edits flow through the same merge, so removing a key by editing the JSON on disk will be undone on re-ingest — use this tool (with null values) or `PUT /api/projects/<slug>` for a true replace.",
     inputSchema: {
       type: "object",
       properties: {

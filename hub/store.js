@@ -222,7 +222,8 @@ export class Store {
       slug,
       trackerPath: filePath,
       baseProject: normalized,
-      previousBaseProject
+      previousBaseProject,
+      migrateLegacyOverlay: true
     });
   }
 
@@ -321,6 +322,19 @@ export class Store {
         normalizationNotes,
         prev?.base || null
       );
+      if (loadedIncoming.legacyOverlayMigrated) {
+        const persisted = this._persistProject(
+          slug,
+          filePath,
+          loadedIncoming.base,
+          loadedIncoming.data,
+          false
+        );
+        loadedIncoming.base = persisted.base;
+        loadedIncoming.overlayEnabled = false;
+      } else if (loadedIncoming.legacyOverlayIgnored) {
+        clearRuntimeOverlay(this.workspace, slug);
+      }
       let incoming = normalizeProjectStatuses(loadedIncoming.data, normalizationNotes).data;
       const incomingBase = loadedIncoming.base;
       const overlayEnabled = loadedIncoming.overlayEnabled;

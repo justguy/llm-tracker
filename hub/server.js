@@ -230,6 +230,64 @@ function projectPayload(slug, entry) {
   };
 }
 
+function taskPatchesFromPatch(patch) {
+  if (!patch || typeof patch !== "object" || !patch.tasks) return [];
+  if (Array.isArray(patch.tasks)) {
+    return patch.tasks.filter((task) => task && typeof task === "object" && typeof task.id === "string");
+  }
+  if (typeof patch.tasks !== "object") return [];
+  return Object.entries(patch.tasks)
+    .filter(([, task]) => task && typeof task === "object")
+    .map(([id, task]) => ({ id, ...task }));
+}
+
+function selectedCurrentFields(current, requested) {
+  const out = {};
+  for (const key of Object.keys(requested || {})) {
+    if (key === "id") continue;
+    const wanted = requested[key];
+    const actual = current?.[key];
+    if (
+      wanted &&
+      typeof wanted === "object" &&
+      !Array.isArray(wanted) &&
+      actual &&
+      typeof actual === "object" &&
+      !Array.isArray(actual)
+    ) {
+      out[key] = {};
+      for (const nestedKey of Object.keys(wanted)) {
+        out[key][nestedKey] = actual[nestedKey];
+      }
+    } else {
+      out[key] = actual;
+    }
+  }
+  return out;
+}
+
+function patchAppliedPayload(patch, entry) {
+  const data = entry?.data;
+  const applied = {};
+  if (!data || !patch || typeof patch !== "object") return applied;
+
+  if (patch.meta && typeof patch.meta === "object" && !Array.isArray(patch.meta)) {
+    applied.meta = selectedCurrentFields(data.meta || {}, patch.meta);
+  }
+
+  const taskPatches = taskPatchesFromPatch(patch);
+  if (taskPatches.length > 0) {
+    const byId = new Map((data.tasks || []).map((task) => [task.id, task]));
+    applied.tasks = {};
+    for (const taskPatch of taskPatches) {
+      const current = byId.get(taskPatch.id);
+      if (current) applied.tasks[taskPatch.id] = selectedCurrentFields(current, taskPatch);
+    }
+  }
+
+  return applied;
+}
+
 function isLinkedTrackerPath(filePath) {
   if (!filePath) return false;
   try {
@@ -871,6 +929,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
       rev: r.rev ?? entry?.rev ?? null,
       updatedAt: entry?.data?.meta?.updatedAt ?? null,
       file: projectPayload(req.params.slug, entry).file,
+      applied: patchAppliedPayload(patch, entry),
       notes: r.notes,
       noop: r.noop === true
     });

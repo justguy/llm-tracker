@@ -1,7 +1,6 @@
 import {
   existsSync,
   lstatSync,
-  mkdirSync,
   realpathSync,
   readFileSync,
   renameSync,
@@ -20,27 +19,18 @@ function clone(value) {
 }
 
 function atomicWriteJson(file, data) {
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  let target = file;
+  try {
+    const l = lstatSync(file);
+    if (l.isSymbolicLink()) target = realpathSync(file);
+  } catch {}
+  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, JSON.stringify(data, null, 2));
-  renameSync(tmp, file);
+  renameSync(tmp, target);
 }
 
 function sameValue(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function ensureOverlayDir(workspace) {
-  const dir = join(runtimeDir(workspace), "overlays");
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function taskRuntimeState(task) {
-  const out = {};
-  for (const field of TASK_RUNTIME_FIELDS) {
-    if (field in task) out[field] = clone(task[field]);
-  }
-  return out;
 }
 
 export function runtimeOverlayPath(workspace, slug) {
@@ -119,47 +109,6 @@ export function applyRuntimeOverlay(baseProject, overlay) {
   return data;
 }
 
-function applyBaseRuntimeOverrides(baseProject, overlayAppliedProject, overlay) {
-  const data = clone(overlayAppliedProject);
-  if (!overlay || !data) return data;
-
-  if (data.meta && baseProject?.meta) {
-    for (const field of META_RUNTIME_FIELDS) {
-      const baseHas = field in baseProject.meta;
-      const overlayHas = !!overlay.meta && field in overlay.meta;
-      if (!overlayHas) continue;
-      if (baseHas && !sameValue(baseProject.meta[field], overlay.meta[field])) {
-        data.meta[field] = clone(baseProject.meta[field]);
-      } else if (!baseHas) {
-        delete data.meta[field];
-      }
-    }
-  }
-
-  if (Array.isArray(data.tasks) && Array.isArray(baseProject?.tasks)) {
-    const baseById = new Map(baseProject.tasks.map((task) => [task.id, task]));
-    data.tasks = data.tasks.map((task) => {
-      const baseTask = baseById.get(task.id);
-      const overlayTask = overlay.tasks?.[task.id];
-      if (!baseTask || !overlayTask) return task;
-      const next = { ...task };
-      for (const field of TASK_RUNTIME_FIELDS) {
-        const baseHas = field in baseTask;
-        const overlayHas = field in overlayTask;
-        if (!overlayHas) continue;
-        if (baseHas && !sameValue(baseTask[field], overlayTask[field])) {
-          next[field] = clone(baseTask[field]);
-        } else if (!baseHas) {
-          delete next[field];
-        }
-      }
-      return next;
-    });
-  }
-
-  return data;
-}
-
 function applyChangedBaseRuntimeFields(baseProject, overlayAppliedProject, previousBaseProject) {
   const data = clone(overlayAppliedProject);
   if (!previousBaseProject || !data) return data;
@@ -203,61 +152,35 @@ export function loadProjectWithRuntimeOverlay({
   slug,
   trackerPath,
   baseProject,
-  previousBaseProject = null
+  previousBaseProject = null,
+  migrateLegacyOverlay = false
 }) {
-  const overlayEnabled = isOverlayBackedTracker(trackerPath);
   const base = clone(baseProject);
-  if (!overlayEnabled) {
-    return { base, data: clone(baseProject), overlayEnabled };
+  const overlayBacked = isOverlayBackedTracker(trackerPath);
+  if (!overlayBacked || !migrateLegacyOverlay) {
+    return { base, data: clone(baseProject), overlayEnabled: false };
   }
   const overlay = readRuntimeOverlay(workspace, slug);
-  const preferBaseRuntime = overlayFileIsStaleComparedToTarget(workspace, slug, trackerPath);
+  if (!overlay) {
+    return { base, data: clone(baseProject), overlayEnabled: false };
+  }
+  if (overlayFileIsStaleComparedToTarget(workspace, slug, trackerPath)) {
+    return {
+      base,
+      data: clone(baseProject),
+      overlayEnabled: false,
+      legacyOverlayIgnored: true
+    };
+  }
   const overlaid = applyRuntimeOverlay(baseProject, overlay);
   return {
-    base,
+    base: clone(overlaid),
     data: previousBaseProject
       ? applyChangedBaseRuntimeFields(baseProject, overlaid, previousBaseProject)
-      : preferBaseRuntime
-        ? applyBaseRuntimeOverrides(baseProject, overlaid, overlay)
-        : overlaid,
-    overlayEnabled
+      : overlaid,
+    overlayEnabled: false,
+    legacyOverlayMigrated: true
   };
-}
-
-export function splitRuntimeOverlay(baseProject, effectiveProject) {
-  const previousBase = clone(baseProject) || clone(effectiveProject);
-  const base = clone(previousBase);
-  const overlay = { meta: {}, tasks: {} };
-
-  if (effectiveProject?.meta) {
-    base.meta = base.meta || {};
-    for (const [key, value] of Object.entries(effectiveProject.meta)) {
-      if (META_RUNTIME_FIELDS.includes(key)) {
-        overlay.meta[key] = clone(value);
-        continue;
-      }
-      base.meta[key] = clone(value);
-    }
-    for (const field of META_RUNTIME_FIELDS) {
-      if (previousBase?.meta && field in previousBase.meta) {
-        base.meta[field] = clone(previousBase.meta[field]);
-      }
-    }
-  }
-
-  const baseById = new Map((previousBase?.tasks || []).map((task) => [task.id, task]));
-  base.tasks = (effectiveProject?.tasks || []).map((task) => {
-    const previousTask = baseById.get(task.id);
-    const nextTask = clone(previousTask) || clone(task);
-    for (const [key, value] of Object.entries(task)) {
-      if (TASK_RUNTIME_FIELDS.includes(key)) continue;
-      nextTask[key] = clone(value);
-    }
-    overlay.tasks[task.id] = taskRuntimeState(task);
-    return nextTask;
-  });
-
-  return { base, overlay };
 }
 
 export function persistProjectWithRuntimeOverlay({
@@ -268,21 +191,10 @@ export function persistProjectWithRuntimeOverlay({
   effectiveProject,
   overlayEnabled
 }) {
-  if (!overlayEnabled) {
-    atomicWriteJson(trackerPath, effectiveProject);
-    clearRuntimeOverlay(workspace, slug);
-    return {
-      base: clone(effectiveProject),
-      overlayEnabled: false
-    };
-  }
-
-  const { base, overlay } = splitRuntimeOverlay(baseProject, effectiveProject);
-  atomicWriteJson(durableWritePath(trackerPath, true), base);
-  ensureOverlayDir(workspace);
-  atomicWriteJson(runtimeOverlayPath(workspace, slug), overlay);
+  atomicWriteJson(durableWritePath(trackerPath, overlayEnabled), effectiveProject);
+  clearRuntimeOverlay(workspace, slug);
   return {
-    base,
-    overlayEnabled: true
+    base: clone(effectiveProject),
+    overlayEnabled: false
   };
 }

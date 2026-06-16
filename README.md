@@ -159,13 +159,13 @@ If you keep a tracker file in a repo and link it into the shared workspace:
 - patch files belong in the shared workspace, not in the repo-local `.llm-tracker/` folder
 - the repo-local tracker JSON is a linked durable target of the shared hub, not branch-local scratch state or a merge artifact
 - durable tracker writes still land on the linked repo-local tracker file itself; that is sync, not relocation
-- if that linked tracker JSON is versioned inside the repo, expect successful patch writes that change durable fields to update the repo-visible JSON file in place
-- linked trackers now split high-churn runtime state into the shared workspace overlay at `.runtime/overlays/<slug>.json`
-- for linked trackers, runtime churn such as task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer needs to dirty the repo-visible JSON
+- if that linked tracker JSON is versioned inside the repo, expect successful patch writes that change durable fields, including task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev`, to update the repo-visible JSON file in place
+- successful patch responses include an `applied` block with the accepted post-write values for fields named in the patch; use that response plus focused tracker reads instead of opening the JSON projection to see whether a write landed
+- legacy linked-tracker overlays in `.runtime/overlays/<slug>.json` are migration artifacts, not project truth; the hub folds them into the linked target and clears them on ingest/write
 - durable tracker edits still update the linked repo-local JSON in place, and `GET /api/projects/<slug>` / successful patch responses expose that durable path as `file`
 - never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
-**Landing gate.** For linked repo-local trackers, patch the tracker **before** you commit or push the matching code, and include the tracker JSON diff in the same commit. Patching after a commit/push leaves the working tree dirty; patching after a squash-merge dirties `main`. Pure runtime fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON — those are safe to touch anytime. See the agent contract at `/help` for the full rule.
+**Landing gate.** For linked repo-local trackers, patch the tracker **before** you commit or push the matching code, and include the tracker JSON diff in the same commit. Patching after a commit/push leaves the working tree dirty; patching after a squash-merge dirties `main`. See the agent contract at `/help` for the full rule.
 
 > Before push or merge, prove `.llm-tracker/trackers/hoplon.json` on the branch contains the live tracker truth for the touched tasks. Compare `tracker_brief` against the repo file and against `origin/main`. Do not restore, stash, or discard tracker diffs. If merging would regress tracker truth, stop and make a tracker-sync commit/PR first.
 
@@ -350,7 +350,7 @@ curl -X POST http://localhost:4400/api/projects/<slug>/redo
 curl -X POST http://localhost:4400/api/projects/<slug>/reload
 ```
 
-Successful `POST /api/projects/<slug>/patch` responses are authoritative immediately. They now return the accepted post-write `rev`, `updatedAt`, `noop`, and `file` (the effective tracker JSON path the hub wrote, which is the repo-local target for linked projects). When `file` points at a repo-local tracker, durable patch writes are expected to update that visible JSON file right away.
+Successful `POST /api/projects/<slug>/patch` responses are authoritative immediately. They return the accepted post-write `rev`, `updatedAt`, `noop`, `file` (the effective tracker JSON path the hub wrote), and `applied` (the accepted post-write values for fields named in the patch). Agents should use that response, or a focused tracker read such as `tracker_brief`, instead of opening the JSON projection just to confirm a write landed.
 
 Patch payloads stay small. Typical shape:
 

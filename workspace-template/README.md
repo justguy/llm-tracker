@@ -51,22 +51,22 @@ If a project keeps its tracker JSON in a repo and the hub registers it via **§7
 - HTTP calls should still target the shared daemon
 - the repo-local tracker JSON is a linked durable target of the shared hub, not branch-local scratch state or a merge artifact
 - durable tracker writes still update the linked repo-local tracker file in place; that is sync, not relocation
-- if that repo-local tracker JSON is versioned in the project, expect successful patch writes that change durable fields to update that repo-visible JSON file in place
-- linked trackers store runtime churn in `<shared-workspace>/.runtime/overlays/<slug>.json`
-- for linked trackers, task `status`, `assignee`, `blocker_reason`, plus `meta.scratchpad`, `updatedAt`, and `rev` no longer need to dirty the repo-visible JSON
-- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or `GET /api/projects/<slug>`, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
+- if that repo-local tracker JSON is versioned in the project, expect successful patch writes that change durable fields, including `status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, and `rev`, to update that repo-visible JSON file in place
+- successful patch responses include an `applied` block with the accepted post-write values for fields named in the patch; use that response plus focused tracker reads (`tracker_brief`, `tracker_project_status`, `tracker_changed`, or `GET /api/projects/<slug>`) instead of opening the JSON projection to see whether a write landed
+- legacy linked-tracker overlays in `<shared-workspace>/.runtime/overlays/<slug>.json` are migration artifacts, not project truth; the hub folds them into the linked target and clears them on ingest/write
+- never use `git restore`, `git checkout`, `git stash`, or merge-conflict cleanup as a tracker update mechanism; verify with `/help` or tracker read/write responses, then use `tracker_patch`, `tracker_pick`, `tracker_reload`, or the equivalent HTTP endpoints
 
 ### Landing gate — order tracker writes before the commit
 
-When the tracker file lives inside a repo, durable tracker writes (anything other than pure runtime churn — see above) update the repo-visible JSON in place. Writing to the tracker **after** you have already committed or pushed leaves an unexpected uncommitted diff on the branch, which the human then has to reconcile. Avoid that:
+When the tracker file lives inside a repo, tracker writes update the repo-visible JSON in place. Writing to the tracker **after** you have already committed or pushed leaves an unexpected uncommitted diff on the branch, which the human then has to reconcile. Avoid that:
 
 - **Update the tracker first.** Land status transitions, new tasks, `goal` / `context.*` / reference edits, and any structural changes via `tracker_patch` (or `POST /api/projects/<slug>/patch`) **before** you stage or commit the corresponding code changes.
 - **Include the tracker diff in the same commit.** For linked repo-local tracker files, `git status` will show the tracker JSON alongside your code after the patch lands. Stage and commit them together; do not push and then patch.
 - **Never patch post-merge.** Writing "merged PR #N" metadata into the tracker after a squash-merge to `main` will dirty `main`. If you need that history, put it in the PR body, a commit message, or `.history/<slug>.jsonl` (hub-owned, append-only), not in durable tracker fields.
-- **Verify with `tracker_brief` (or `/brief`) before committing.** The brief pack reflects the final post-patch state the hub will persist — if it looks wrong, fix it before you stage anything.
-- **Safe no-op writes.** Runtime-only fields (`status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, `rev`) already route through the runtime overlay and do not dirty the repo JSON; feel free to patch them at any time.
+- **Verify from tracker responses before committing.** First trust the successful patch response's `applied` block; use `tracker_brief`, `tracker_project_status`, or `tracker_changed` for a focused read if you need more context. Do not open the tracker JSON just to check whether a write landed.
+- **Expect status diffs.** `status`, `assignee`, `blocker_reason`, `meta.scratchpad`, `updatedAt`, and `rev` are durable tracker fields. If the linked tracker JSON is versioned, these writes dirty that repo file and should be committed with the corresponding work.
 
-> Before push or merge, prove `.llm-tracker/trackers/hoplon.json` on the branch contains the live tracker truth for the touched tasks. Compare `tracker_brief` against the repo file and against `origin/main`. Do not restore, stash, or discard tracker diffs. If merging would regress tracker truth, stop and make a tracker-sync commit/PR first.
+> Before push or merge, prove the branch contains the live tracker truth for the touched tasks using tracker responses plus git status/diff metadata. Do not manually parse the JSON projection as the verification mechanism, and do not restore, stash, or discard tracker diffs. If merging would regress tracker truth, stop and make a tracker-sync commit/PR first.
 
 ---
 
@@ -806,7 +806,7 @@ curl -X POST http://localhost:<PORT>/api/projects/<slug>/patch \
 
 **On failure:** rerun with `curl -i` to capture the response. The hub returns structured JSON: `{error, type, hint}`.
 
-On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, and `noop`. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly. If that target lives in the repo, durable patch writes are expected to update that visible JSON file immediately.
+On success, the response is authoritative immediately and includes the accepted post-write `rev`, `updatedAt`, `file`, `applied`, and `noop`. `applied` contains the accepted post-write values for fields named in the patch; use it instead of opening the tracker JSON just to confirm a write landed. `file` is the effective tracker JSON path the hub wrote, so linked projects expose their repo-local target directly. If that target lives in the repo, patch writes are expected to update that visible JSON file immediately.
 
 ### Merge semantics (both modes)
 

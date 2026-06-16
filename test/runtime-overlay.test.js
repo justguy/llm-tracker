@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -26,7 +25,7 @@ function setupWorkspace() {
   return ws;
 }
 
-test("linked tracker runtime fields persist through the workspace overlay without rewriting the target file", async () => {
+test("linked tracker runtime fields write through to the target file", async () => {
   const workspace = setupWorkspace();
   const repo = mkdtempSync(join(tmpdir(), "llm-tracker-overlay-repo-"));
   const slug = "linked";
@@ -57,24 +56,19 @@ test("linked tracker runtime fields persist through the workspace overlay withou
     assert.equal(entry.data.tasks.find((task) => task.id === "t1").assignee, "codex");
 
     const onDiskTarget = JSON.parse(readFileSync(targetPath, "utf-8"));
-    assert.equal(onDiskTarget.meta.scratchpad, "");
-    assert.equal(onDiskTarget.tasks.find((task) => task.id === "t1").status, "not_started");
-    assert.equal(onDiskTarget.tasks.find((task) => task.id === "t1").assignee, null);
+    assert.equal(onDiskTarget.meta.scratchpad, "runtime banner");
+    assert.equal(onDiskTarget.tasks.find((task) => task.id === "t1").status, "complete");
+    assert.equal(onDiskTarget.tasks.find((task) => task.id === "t1").assignee, "codex");
 
     const overlayFile = runtimeOverlayPath(workspace, slug);
-    assert.equal(existsSync(overlayFile), true);
-    const overlay = JSON.parse(readFileSync(overlayFile, "utf-8"));
-    assert.equal(overlay.meta.scratchpad, "runtime banner");
-    assert.equal(overlay.tasks.t1.status, "complete");
-    assert.equal(overlay.tasks.t1.assignee, "codex");
-    assert.equal(lstatSync(linkPath).isSymbolicLink(), true);
+    assert.equal(existsSync(overlayFile), false);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
 });
 
-test("project-loader reapplies the linked tracker runtime overlay on fresh reads", async () => {
+test("store ingest migrates legacy linked tracker overlays into the target file", async () => {
   const workspace = setupWorkspace();
   const repo = mkdtempSync(join(tmpdir(), "llm-tracker-overlay-loader-"));
   const slug = "linked";
@@ -87,13 +81,29 @@ test("project-loader reapplies the linked tracker runtime overlay on fresh reads
   symlinkSync(targetPath, trackerPath(workspace, slug));
 
   try {
-    const store = new Store(workspace);
     const linkPath = trackerPath(workspace, slug);
+    const overlayFile = runtimeOverlayPath(workspace, slug);
+    mkdirSync(join(workspace, ".runtime", "overlays"), { recursive: true });
+    writeFileSync(
+      overlayFile,
+      JSON.stringify(
+        {
+          meta: { scratchpad: "runtime banner", rev: 12, updatedAt: "2026-06-16T00:00:00.000Z" },
+          tasks: { t1: { status: "complete", assignee: "codex" } }
+        },
+        null,
+        2
+      )
+    );
+
+    const store = new Store(workspace);
     store.ingest(linkPath, readFileSync(linkPath, "utf-8"));
-    await store.applyPatch(slug, {
-      meta: { scratchpad: "runtime banner" },
-      tasks: { t1: { status: "complete", assignee: "codex" } }
-    });
+
+    const onDiskTarget = JSON.parse(readFileSync(targetPath, "utf-8"));
+    assert.equal(onDiskTarget.meta.scratchpad, "runtime banner");
+    assert.equal(onDiskTarget.tasks.find((task) => task.id === "t1").status, "complete");
+    assert.equal(onDiskTarget.tasks.find((task) => task.id === "t1").assignee, "codex");
+    assert.equal(existsSync(overlayFile), false);
 
     const loaded = loadProjectEntry(workspace, slug);
     assert.equal(loaded.ok, true);
