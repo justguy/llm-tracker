@@ -18,6 +18,10 @@ import { RuntimeProjection } from "../hub/runtime/projection.js";
 import { makeRuntimeId } from "../hub/runtime/ids.js";
 import { validateRuntimeEvent } from "../hub/runtime/events.js";
 import { createDraftStore } from "../hub/run-session/drafts.js";
+import { ProviderRegistry } from "../hub/providers/registry.js";
+import { ProviderBroker } from "../hub/providers/broker.js";
+import { createCodexAppServerProvider } from "../hub/providers/codex-app-server.js";
+import { loadVendoredCodexSchema } from "../hub/providers/codex-schema/index.js";
 
 function makeStoreStub(projects = {}) {
   const map = new Map(Object.entries(projects));
@@ -45,7 +49,7 @@ function task(overrides = {}) {
   };
 }
 
-async function makeHarness({ projects = {}, contextPackService } = {}) {
+async function makeHarness({ projects = {}, contextPackService, providerBroker } = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "lt-run-session-"));
   const projection = new RuntimeProjection();
   const appendedEvents = [];
@@ -75,6 +79,7 @@ async function makeHarness({ projects = {}, contextPackService } = {}) {
     validateRuntimeEvent,
     workspace: workspaceRoot,
     ...(contextPackService ? { contextPackService } : {}),
+    ...(providerBroker ? { providerBroker } : {}),
   });
   return {
     service,
@@ -91,6 +96,38 @@ async function makeHarness({ projects = {}, contextPackService } = {}) {
 
 function makeDraft(h, input) {
   return h.draftStore.create(input);
+}
+
+function createFakeTransport() {
+  const messageListeners = [];
+  return {
+    sent: [],
+    send(payload) {
+      this.sent.push(JSON.parse(payload));
+    },
+    onMessage(listener) {
+      messageListeners.push(listener);
+      return () => {};
+    },
+    onClose() {
+      return () => {};
+    },
+    emitMessage(message) {
+      for (const listener of messageListeners) listener(JSON.stringify(message));
+    },
+  };
+}
+
+function flushMicrotasks() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function waitForSent(transport, index = 0) {
+  for (let i = 0; i < 200; i += 1) {
+    await flushMicrotasks();
+    if (transport.sent.length > index) return transport.sent[index];
+  }
+  throw new Error("timed out waiting for fake Codex RPC request");
 }
 
 // --- constructor ------------------------------------------------------------
@@ -251,6 +288,134 @@ test("task_backed + free task: returns mode=created with sessionId, jobId, verif
     assert.equal(jobEvents[0].source, "http");
     assert.ok(h.projection.sessions.get(r.sessionId));
     assert.ok(h.projection.jobs.get(r.jobId));
+  } finally {
+    h.close();
+  }
+});
+
+test("task_backed codex_app_server launch starts provider and records provider thread", async () => {
+  const starts = [];
+  const providerBroker = {
+    async start(providerId, request) {
+      starts.push({ providerId, request });
+      return {
+        providerId: "codex_app_server",
+        transport: "stdio",
+        threadId: "thread-1",
+        providerSessionId: "codex-session-1",
+        cwd: request.cwd,
+        model: request.model,
+        schemaVersion: "0.135.0",
+      };
+    },
+    capabilities(providerId) {
+      assert.equal(providerId, "codex_app_server");
+      return { structuredThread: true, providerReview: true };
+    },
+  };
+  const h = await makeHarness({
+    projects: { proj: { data: { tasks: [task({ id: "t-1" })] }, rev: 0 } },
+    providerBroker,
+  });
+  try {
+    const draft = makeDraft(h, {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t-1",
+      projectSlug: "proj",
+      runtime: "codex_app_server",
+      providerId: "codex_app_server",
+      cwd: "/tmp/demo",
+      model: "gpt-5.4",
+      sandbox: "workspace-write",
+    });
+    const r = await h.service.launch({ draftId: draft.id });
+
+    assert.equal(r.ok, true);
+    assert.equal(starts.length, 1);
+    assert.equal(starts[0].providerId, "codex_app_server");
+    assert.equal(starts[0].request.cwd, "/tmp/demo");
+    assert.equal(starts[0].request.model, "gpt-5.4");
+    assert.equal(starts[0].request.sandbox, "workspace-write");
+    assert.equal(starts[0].request.metadata.sessionId, r.sessionId);
+    assert.equal(starts[0].request.metadata.taskId, "t-1");
+
+    const sessionEvent = h.appendedEvents.find((e) => e.type === "session.started");
+    assert.equal(sessionEvent.session.providerId, "codex_app_server");
+    assert.deepEqual(sessionEvent.session.providerThread, {
+      providerId: "codex_app_server",
+      transport: "stdio",
+      threadId: "thread-1",
+      providerSessionId: "codex-session-1",
+      cwd: "/tmp/demo",
+      model: "gpt-5.4",
+      schemaVersion: "0.135.0",
+    });
+    assert.deepEqual(sessionEvent.session.providerCapabilities, {
+      structuredThread: true,
+      providerReview: true,
+    });
+    assert.deepEqual(h.projection.sessions.get(r.sessionId).providerThread, sessionEvent.session.providerThread);
+  } finally {
+    h.close();
+  }
+});
+
+test("task_backed codex_app_server launch flows through real broker and schema RPC provider", async () => {
+  const transport = createFakeTransport();
+  const registry = new ProviderRegistry();
+  registry.register(createCodexAppServerProvider({
+    loadSchema: loadVendoredCodexSchema,
+    runCommand: async (args) => ({
+      exitCode: 0,
+      stdout: args[0] === "--version" ? "codex 0.135.0" : "structured_thread thread_resume provider_review",
+      stderr: "",
+    }),
+    transportFactory: () => transport,
+  }));
+  const h = await makeHarness({
+    projects: { proj: { data: { tasks: [task({ id: "t-1" })] }, rev: 0 } },
+    providerBroker: new ProviderBroker({ registry }),
+  });
+  try {
+    const draft = makeDraft(h, {
+      source: "task_card",
+      mode: "task_backed",
+      taskId: "t-1",
+      projectSlug: "proj",
+      runtime: "codex_app_server",
+      providerId: "codex_app_server",
+      cwd: "/tmp/demo",
+      model: "gpt-5.4",
+      sandbox: "workspace-write",
+    });
+
+    const pending = h.service.launch({ draftId: draft.id });
+    const init = await waitForSent(transport);
+    assert.equal(init.method, "initialize");
+    transport.emitMessage({ jsonrpc: "2.0", id: init.id, result: { serverInfo: { name: "codex", version: "0.135.0" } } });
+    const sent = await waitForSent(transport, 1);
+    assert.equal(sent.method, "thread/start");
+    assert.equal(sent.params.cwd, "/tmp/demo");
+    assert.equal(sent.params.model, "gpt-5.4");
+    transport.emitMessage({
+      jsonrpc: "2.0",
+      id: sent.id,
+      result: {
+        thread: {
+          id: "thread-real-1",
+          sessionId: "codex-session-real-1",
+          cwd: "/tmp/demo",
+        },
+      },
+    });
+
+    const result = await pending;
+    assert.equal(result.ok, true);
+    const projected = h.projection.sessions.get(result.sessionId);
+    assert.equal(projected.providerId, "codex_app_server");
+    assert.equal(projected.providerThread.threadId, "thread-real-1");
+    assert.equal(projected.providerCapabilities.providerReview, true);
   } finally {
     h.close();
   }

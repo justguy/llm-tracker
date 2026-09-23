@@ -56,7 +56,14 @@ For this repo specifically:
 - Subagents should receive narrow task briefs and return compact findings: relevant files, key facts, risks, and recommended next actions.
 - Avoid pasting large raw outputs into the main thread.
 - For trivial, local, or single-command tasks, skip subagents when the overhead would exceed the benefit.
-- Always be mindful of token usage.
+- Never let subagent management block the main execution path. Spawn subagents only for disjoint sidecar work, wait at most once with a bounded timeout when their result is immediately needed, and then continue locally or switch to another unblocked task.
+- Treat stale, hung, or over-limit subagents as non-blocking. Do not spend critical-path time closing old agent handles or repeatedly polling them; ignore them unless they are actively editing a file needed for the current task.
+- Keep the primary agent continuously productive. While subagents run, the main thread must keep implementing, verifying, or updating tracker state on non-overlapping work instead of waiting for agent cleanup.
+- Keep active subagent count small, normally one or two. If spawning fails because of a thread limit or unavailable tool, do the work locally instead of retrying or waiting for capacity.
+- Retry subagent spawning at most once when the failure looks transient. A thread-limit or unavailable-tool failure is not a reason to keep probing, poll old handles, or expand the main-thread transcript.
+- Do not use failed subagent attempts as a justification for broad re-verification. If targeted acceptance is already green, prefer tracker summaries, existing evidence, and a focused final check over rerunning large suites.
+- Keep closeouts concise: report the changed tracker state, the highest-signal verification evidence, and any real blockers or residual risks. Avoid dumping large status lists unless the human asks for them.
+- Always be mindful of token usage; token discipline is part of completing the task, not a secondary concern.
 
 ## Guardrail MCP for Git and Local Operations
 
@@ -104,6 +111,7 @@ or more tracker tracks autonomously.
 - Treat subagent output as advisory evidence, not as authority to skip local verification.
 - Fix valid high- and medium-severity review findings before closing a task, or record a tracker comment explaining why the finding is intentionally deferred.
 - Do not mark a task complete solely because a subagent says it is complete; verify against `tracker_verify` and the task's definition of done.
+- During autonomous execution, subagents are sidecars only. Never wait indefinitely, never block on stale-agent close calls, and never retry agent spawning after a thread-limit failure; continue with local implementation or another ready task.
 
 ### Execution loop
 

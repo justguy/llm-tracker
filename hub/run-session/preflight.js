@@ -23,6 +23,7 @@ const ACTIVE_SESSION_STATUSES = new Set([
   "not_responding",
   "blocked",
 ]);
+const DEFAULT_WORKTREE_NAMING_PATTERN = "{projectSlug}/{taskId}-{shortTitle}";
 
 function isRecord(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -30,6 +31,10 @@ function isRecord(value) {
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
+}
+
+function textOrNull(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function nonNegativeNumber(value) {
@@ -163,6 +168,65 @@ function contextBudgetOverflow(contextBudget) {
   };
 }
 
+function sessionHubConfig(input) {
+  return isRecord(input.workspaceConfig?.sessionHub)
+    ? input.workspaceConfig.sessionHub
+    : isRecord(input.sessionHubConfig)
+      ? input.sessionHubConfig
+      : {};
+}
+
+function repoRefs(task) {
+  const repos = isRecord(task?.repos) ? task.repos : null;
+  if (!repos) return [];
+  const refs = [];
+  if (isRecord(repos.primary)) refs.push(repos.primary);
+  if (Array.isArray(repos.secondary)) {
+    for (const ref of repos.secondary) {
+      if (isRecord(ref)) refs.push(ref);
+    }
+  }
+  return refs;
+}
+
+function repoMetadataForTask(task) {
+  return repoRefs(task).find((ref) => nonEmptyString(ref.root) || nonEmptyString(ref.worktree)) || null;
+}
+
+function activeSessionIdsSharingWorktree(worktreePath, sessions = []) {
+  if (!nonEmptyString(worktreePath)) return [];
+  const ids = [];
+  for (const session of Array.isArray(sessions) ? sessions : []) {
+    if (!isRecord(session)) continue;
+    if (session.status != null && !ACTIVE_SESSION_STATUSES.has(session.status)) continue;
+    const sessionWorktree = session.worktreePath ?? session.worktree;
+    if (sessionWorktree !== worktreePath) continue;
+    if (nonEmptyString(session.id)) ids.push(session.id);
+  }
+  return ids;
+}
+
+function slugPart(value, fallback) {
+  const base = textOrNull(value) || fallback;
+  return base
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || fallback;
+}
+
+function applyWorktreeNamingPattern(pattern, { projectSlug, taskId, title }) {
+  const replacements = {
+    projectSlug: slugPart(projectSlug, "project"),
+    taskId: slugPart(taskId, "task"),
+    shortTitle: slugPart(title, "worktree"),
+  };
+  return String(pattern || DEFAULT_WORKTREE_NAMING_PATTERN).replace(
+    /\{(projectSlug|taskId|shortTitle)\}/g,
+    (_match, key) => replacements[key],
+  );
+}
+
 /**
  * Build advisory warnings for a RunSessionDraft preflight.
  *
@@ -181,6 +245,7 @@ export function buildRunSessionPreflightWarnings(input = {}) {
   if (!isRecord(input)) throw new TypeError("buildRunSessionPreflightWarnings: input must be an object");
   const draft = isRecord(input.draft) ? input.draft : {};
   const warnings = [];
+  const config = sessionHubConfig(input);
 
   const providerId = draft.providerId;
   const provider = getProvider(input.providerRegistry, providerId);
@@ -229,6 +294,30 @@ export function buildRunSessionPreflightWarnings(input = {}) {
     ? contextBudgetOverflow(input.contextBudget)
     : null;
   if (overflow) warnings.push(overflow);
+
+  const task = isRecord(input.task) ? input.task : null;
+  const repo = repoMetadataForTask(task);
+  const worktreeConfig = isRecord(config.worktrees) ? config.worktrees : {};
+  if (worktreeConfig.recommendOnTaskSessionStart === true && repo) {
+    const worktreePath = textOrNull(repo.worktree) || textOrNull(draft.worktreePath);
+    const sessionIds = activeSessionIdsSharingWorktree(worktreePath, input.sessions);
+    if (worktreePath && sessionIds.length > 0) {
+      const namingPattern = textOrNull(worktreeConfig.defaultNamingPattern) || DEFAULT_WORKTREE_NAMING_PATTERN;
+      warnings.push({
+        kind: "shared_worktree",
+        worktreePath,
+        sessionIds,
+        severity: "medium",
+        recommendedAction: "create_dedicated_worktree",
+        recommendedWorktreePath: applyWorktreeNamingPattern(namingPattern, {
+          projectSlug: draft.projectSlug,
+          taskId: targetTaskId(draft),
+          title: task.title,
+        }),
+        defaultNamingPattern: namingPattern,
+      });
+    }
+  }
 
   return warnings;
 }

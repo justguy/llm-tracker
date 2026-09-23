@@ -1,5 +1,10 @@
 import { html } from "htm/preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
+import {
+  NewTaskForm,
+  buildNewTaskFormDraft,
+  newTaskFormReady,
+} from "./NewTaskForm.js";
 
 const DEFAULT_RUNTIME = "codex_app_server";
 const DEFAULT_PROFILE = "code-implementer";
@@ -178,6 +183,7 @@ export function launchDisabledReasonFor({ draft, warnings = [], loading = false,
   if (loading) return "Loading draft";
   if (saving) return "Launch in progress";
   if (!draft?.id) return "Create a draft before launch";
+  if (draft?.newTaskFormDraft) return "Finish adding task";
   if (hasUnresolvedHighWarnings(warnings)) return "Resolve high severity preflight warnings";
   return null;
 }
@@ -244,6 +250,18 @@ export async function copyRunSessionPrompt({ draftId, fetcher = globalThis.fetch
   return payload;
 }
 
+export async function promoteNewTaskFromLauncher({ draftId, fetcher = globalThis.fetch } = {}) {
+  if (!nonEmpty(draftId)) throw new Error("draftId is required");
+  const response = await fetcher(`/api/run-session/drafts/${encodeURIComponent(draftId)}/new-task`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
 function warningSummary(warning) {
   if (!warning || typeof warning !== "object") return "unknown warning";
   switch (warning.kind) {
@@ -291,6 +309,54 @@ function sortedWarnings(warnings) {
     : [];
 }
 
+function dedicatedWorktreeWarning(draft) {
+  const warnings = Array.isArray(draft?.warnings) ? draft.warnings : [];
+  return warnings.find(
+    (warning) =>
+      warning?.kind === "shared_worktree" &&
+      warning.recommendedAction === "create_dedicated_worktree" &&
+      nonEmpty(warning.recommendedWorktreePath),
+  ) || null;
+}
+
+function dedicatedWorktreeSelected(draft) {
+  if (draft?.createDedicatedWorktree === false) return false;
+  if (draft?.createDedicatedWorktree === true) return true;
+  return Boolean(dedicatedWorktreeWarning(draft));
+}
+
+function dedicatedWorktreePath(draft) {
+  return nonEmpty(draft?.worktreePath) || nonEmpty(draft?.dedicatedWorktreePath) || nonEmpty(dedicatedWorktreeWarning(draft)?.recommendedWorktreePath) || "";
+}
+
+export function worktreeAutoCreateAllowed({ trustedLocalMode = {}, worktrees = {} } = {}) {
+  return trustedLocalMode?.allowWorktreeCreationFromUI === true &&
+    worktrees?.allowTrustedAutoCreateOnLaunch === true;
+}
+
+export function dedicatedWorktreeConfirmationRequired({ draft, trustedLocalMode = {}, worktrees = {} } = {}) {
+  return dedicatedWorktreeSelected(draft) && !worktreeAutoCreateAllowed({ trustedLocalMode, worktrees });
+}
+
+export function materializeDedicatedWorktreeIntent({ draft, trustedLocalMode = {}, worktrees = {} } = {}) {
+  if (
+    !dedicatedWorktreeSelected(draft) &&
+    !dedicatedWorktreeWarning(draft) &&
+    draft?.createDedicatedWorktree == null
+  ) {
+    return draft || {};
+  }
+  const selected = dedicatedWorktreeSelected(draft);
+  const path = dedicatedWorktreePath(draft);
+  return {
+    ...draft,
+    createDedicatedWorktree: selected,
+    dedicatedWorktreePath: selected ? path : null,
+    worktreePath: selected ? path : draft?.worktreePath,
+    worktreeAutoCreateOnLaunch: selected && worktreeAutoCreateAllowed({ trustedLocalMode, worktrees }),
+  };
+}
+
 export function RunSessionWizardView({
   draft = {},
   candidates = [],
@@ -298,6 +364,8 @@ export function RunSessionWizardView({
   saving = false,
   error = null,
   launchResult = null,
+  trustedLocalMode = {},
+  worktrees = {},
   onSelectCandidate,
   onDraftChange,
   onSaveDraft,
@@ -306,11 +374,31 @@ export function RunSessionWizardView({
 } = {}) {
   const warnings = Array.isArray(draft.warnings) ? draft.warnings : [];
   const highWarnings = hasUnresolvedHighWarnings(warnings);
-  const launchDisabledReason = launchDisabledReasonFor({ draft, warnings, loading, saving });
+  const needsWorktreeConfirmation = dedicatedWorktreeConfirmationRequired({ draft, trustedLocalMode, worktrees }) &&
+    draft.worktreeCreateConfirmed !== true;
+  const launchDisabledReason = needsWorktreeConfirmation
+    ? "Confirm dedicated worktree creation"
+    : launchDisabledReasonFor({ draft, warnings, loading, saving });
   const taskId = selectedTaskId(draft);
   const options = sortedCandidates(candidates);
   const orderedWarnings = sortedWarnings(warnings);
   const cliCommand = buildRunSessionCliCommand(draft);
+  const hasWorktreeRecommendation = Boolean(dedicatedWorktreeWarning(draft));
+  const createDedicatedWorktree = dedicatedWorktreeSelected(draft);
+  const worktreePath = dedicatedWorktreePath(draft);
+  const autoCreateWorktree = createDedicatedWorktree && worktreeAutoCreateAllowed({ trustedLocalMode, worktrees });
+  const newTaskFormDraft = draft.newTaskFormDraft || null;
+  const openNewTaskForm = () => onDraftChange?.({
+    mode: "untasked",
+    taskId: null,
+    taskLocked: false,
+    newTaskFormDraft: buildNewTaskFormDraft({
+      title: "",
+      projectSlug: draft.projectSlug || "",
+      lane: draft.laneId || "",
+      priority: draft.priorityId || "",
+    }),
+  });
 
   return html`
     <section class="run-session-wizard" aria-label="Run session">
@@ -342,8 +430,22 @@ export function RunSessionWizardView({
           <div class="run-session-wizard__panel-head">
             <h3>Task</h3>
             ${draft.taskLocked ? html`<span class="run-session-wizard__badge">locked</span>` : null}
+            ${draft.taskLocked ? null : html`
+              <button class="icon-btn" type="button" disabled=${saving} onClick=${openNewTaskForm}>
+                [+ ADD TASK]
+              </button>
+            `}
           </div>
-          ${draft.taskLocked
+          ${newTaskFormDraft
+            ? html`
+                <${NewTaskForm}
+                  form=${newTaskFormDraft}
+                  disabled=${saving}
+                  onChange=${(form) => onDraftChange?.({ newTaskFormDraft: form })}
+                  onCancel=${() => onDraftChange?.({ newTaskFormDraft: null })}
+                />
+              `
+            : draft.taskLocked
             ? html`<div class="run-session-wizard__locked-task">${taskId || "No task"}</div>`
             : html`
                 <div class="run-session-wizard__candidate-list" role="list">
@@ -449,6 +551,53 @@ export function RunSessionWizardView({
         </section>
       </div>
 
+      ${hasWorktreeRecommendation ? html`
+        <section class="run-session-wizard__panel run-session-wizard__panel--worktree">
+          <div class="run-session-wizard__panel-head">
+            <h3>Worktree</h3>
+            <span class="run-session-wizard__badge">${autoCreateWorktree ? "one-click" : "confirm"}</span>
+          </div>
+          <label class="run-session-wizard__check">
+            <input
+              type="checkbox"
+              checked=${createDedicatedWorktree}
+              onChange=${(event) => onDraftChange?.({
+                createDedicatedWorktree: event.currentTarget.checked,
+                dedicatedWorktreePath: event.currentTarget.checked ? worktreePath : null,
+                worktreePath: event.currentTarget.checked ? worktreePath : draft.worktreePath,
+                worktreeCreateConfirmed: false,
+              })}
+            />
+            <span>Create dedicated worktree</span>
+          </label>
+          ${createDedicatedWorktree ? html`
+            <label>
+              <span>Path</span>
+              <input
+                class="text-input"
+                value=${worktreePath}
+                onInput=${(event) => onDraftChange?.({
+                  createDedicatedWorktree: true,
+                  dedicatedWorktreePath: event.currentTarget.value,
+                  worktreePath: event.currentTarget.value,
+                  worktreeCreateConfirmed: false,
+                })}
+              />
+            </label>
+            ${autoCreateWorktree ? null : html`
+              <label class="run-session-wizard__check">
+                <input
+                  type="checkbox"
+                  checked=${draft.worktreeCreateConfirmed === true}
+                  onChange=${(event) => onDraftChange?.({ worktreeCreateConfirmed: event.currentTarget.checked })}
+                />
+                <span>Confirm worktree creation on launch</span>
+              </label>
+            `}
+          ` : null}
+        </section>
+      ` : null}
+
       <section class="run-session-wizard__panel run-session-wizard__panel--launch-brief">
         <div class="run-session-wizard__panel-head">
           <h3>Launch brief</h3>
@@ -492,8 +641,11 @@ export function RunSessionWizard({
   laneId = "",
   taskId = "",
   source = "task_card",
+  mode = null,
   taskLocked = Boolean(taskId),
   initialDraft = null,
+  trustedLocalMode = {},
+  worktrees = {},
   fetcher = globalThis.fetch,
   onLaunch,
   onDraft,
@@ -505,9 +657,10 @@ export function RunSessionWizard({
       laneId,
       taskId,
       source,
+      mode,
       taskLocked,
     }),
-    [initialDraft, laneId, projectSlug, source, taskId, taskLocked],
+    [initialDraft, laneId, mode, projectSlug, source, taskId, taskLocked],
   );
   const [draft, setDraft] = useState(baseDraft);
   const [candidates, setCandidates] = useState([]);
@@ -524,7 +677,7 @@ export function RunSessionWizard({
 
   useEffect(() => {
     let cancelled = false;
-    if (!nonEmpty(projectSlug) || taskLocked) {
+    if (!nonEmpty(projectSlug) || taskLocked || baseDraft.mode !== "task_backed") {
       setCandidates([]);
       return () => {
         cancelled = true;
@@ -549,15 +702,29 @@ export function RunSessionWizard({
     return () => {
       cancelled = true;
     };
-  }, [fetcher, laneId, projectSlug, taskLocked]);
+  }, [baseDraft.mode, fetcher, laneId, projectSlug, taskLocked]);
 
   const saveDraft = async () => {
+    if (draft.newTaskFormDraft && !newTaskFormReady(draft.newTaskFormDraft)) {
+      setError("Complete new task title and project");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const nextDraft = draft.id
+      let nextDraft = draft.id
         ? await patchRunSessionDraft({ draftId: draft.id, patch: buildRunSessionDraftPatch(draft), fetcher })
         : await createRunSessionDraft({ draft, fetcher });
+      if (nextDraft.newTaskFormDraft) {
+        const promoted = await promoteNewTaskFromLauncher({ draftId: nextDraft.id, fetcher });
+        nextDraft = promoted.draft;
+        setLaunchResult({
+          mode: "task_created",
+          taskId: promoted.taskId,
+          rev: promoted.rev,
+          eventId: promoted.eventId,
+        });
+      }
       setDraft(nextDraft);
       onDraft?.(nextDraft);
     } catch (err) {
@@ -567,7 +734,11 @@ export function RunSessionWizard({
   };
 
   const launch = async () => {
-    const reason = launchDisabledReasonFor({ draft, warnings: draft.warnings, loading, saving });
+    const needsWorktreeConfirmation = dedicatedWorktreeConfirmationRequired({ draft, trustedLocalMode, worktrees }) &&
+      draft.worktreeCreateConfirmed !== true;
+    const reason = needsWorktreeConfirmation
+      ? "Confirm dedicated worktree creation"
+      : launchDisabledReasonFor({ draft, warnings: draft.warnings, loading, saving });
     if (reason) {
       setError(reason);
       return;
@@ -575,7 +746,17 @@ export function RunSessionWizard({
     setSaving(true);
     setError(null);
     try {
-      const result = await launchRunSessionDraft({ draft, fetcher });
+      let launchDraft = materializeDedicatedWorktreeIntent({ draft, trustedLocalMode, worktrees });
+      if (launchDraft.id && JSON.stringify(buildRunSessionDraftPatch(launchDraft)) !== JSON.stringify(buildRunSessionDraftPatch(draft))) {
+        launchDraft = await patchRunSessionDraft({
+          draftId: launchDraft.id,
+          patch: buildRunSessionDraftPatch(launchDraft),
+          fetcher,
+        });
+        setDraft(launchDraft);
+        onDraft?.(launchDraft);
+      }
+      const result = await launchRunSessionDraft({ draft: launchDraft, fetcher });
       setLaunchResult(result);
       onLaunch?.(result);
     } catch (err) {
@@ -609,6 +790,8 @@ export function RunSessionWizard({
       saving=${saving}
       error=${error}
       launchResult=${launchResult}
+      trustedLocalMode=${trustedLocalMode}
+      worktrees=${worktrees}
       onSelectCandidate=${(candidate) => {
         setDraft((prev) => buildInitialRunSessionDraft({ ...prev, candidate, source: "hub_run", taskLocked: false }));
       }}

@@ -90,13 +90,21 @@
   padding: 12px;
 }
 
-.run-session-wizard__panel--settings label {
+.run-session-wizard__panel--settings label,
+.run-session-new-task label {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
-.run-session-wizard__panel--settings label span {
+.run-session-wizard__panel--worktree label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.run-session-wizard__panel--settings label span,
+.run-session-new-task label > span {
   color: var(--muted, #8a8f98);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 10px;
@@ -104,8 +112,27 @@
   text-transform: uppercase;
 }
 
+.run-session-wizard__panel--worktree label > span {
+  color: var(--muted, #8a8f98);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.run-session-wizard__panel--worktree .run-session-wizard__check {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.run-session-wizard__panel--worktree .run-session-wizard__check input {
+  flex: 0 0 auto;
+}
+
 .run-session-wizard__panel select,
-.run-session-wizard__panel input {
+.run-session-wizard__panel input,
+.run-session-wizard__panel textarea {
   min-width: 0;
 }
 
@@ -161,6 +188,22 @@
 
 .run-session-wizard__candidate--selected {
   border-color: var(--cyan, #06b6d4);
+}
+
+.run-session-new-task {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-session-new-task__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.run-session-new-task textarea {
+  resize: vertical;
 }
 
 .run-session-wizard__warnings {
@@ -245,6 +288,10 @@
   }
 
   .run-session-wizard__panel--launch-brief {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .run-session-new-task__row {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -29,6 +29,7 @@ export function TreeTaskCard({
   onOpenTask,
   onCloseTask,
   onOpenTaskModal,
+  onRunSession,
 }) {
   return html`
     <div class="tree-task" style=${`--tree-depth: ${depth}`}>
@@ -46,6 +47,7 @@ export function TreeTaskCard({
         onSaveComment=${onSaveComment}
         onToggleExpand=${(selected) => onOpenTask && onOpenTask(selected, "brief")}
         onOpenTaskModal=${onOpenTaskModal}
+        onRunSession=${onRunSession}
       />
       ${activeTask?.id === task.id
         ? html`<${TaskInlineDrawer}
@@ -145,6 +147,7 @@ export function TreeView({
   onOpenTask,
   onCloseTask,
   onOpenTaskModal,
+  onRunSession,
 }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const model = useMemo(() => buildTreeModel(project), [project]);
@@ -180,6 +183,7 @@ export function TreeView({
       onOpenTask=${onOpenTask}
       onCloseTask=${onCloseTask}
       onOpenTaskModal=${onOpenTaskModal}
+      onRunSession=${onRunSession}
     />
   `;
 

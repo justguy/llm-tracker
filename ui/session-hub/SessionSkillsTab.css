@@ -1,0 +1,50 @@
+.session-skills-tab {
+  display: grid;
+  gap: 10px;
+}
+
+.session-skills-tab__header,
+.session-skills-tab__main,
+.session-skills-tab__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.session-skills-tab__header {
+  justify-content: space-between;
+}
+
+.session-skills-tab__items {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.session-skills-tab__item {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid #d7dde8;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.session-skills-tab__status,
+.session-skills-tab__meta span,
+.session-skills-tab__evidence {
+  color: #475569;
+  font-size: 12px;
+}
+
+.session-skills-tab__status {
+  font-weight: 700;
+}
+
+.session-skills-tab__evidence--empty,
+.session-skills-tab__empty {
+  color: #64748b;
+}

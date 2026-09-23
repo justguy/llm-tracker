@@ -475,6 +475,41 @@ export function createSessionTools(workspace, portFlag) {
           jsonRpcErrorOnFailure: true
         };
       }
+    }),
+    createSessionTool({
+      name: "tracker_session_interrupt",
+      description: "Interrupt a running provider-backed session turn through the running hub.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: sessionIdProperty(),
+          sessionToken: mcpSessionTokenProperty,
+          reason: optionalStringProperty("Optional interrupt reason"),
+          idempotencyKey: optionalStringProperty("Optional retry idempotency key")
+        },
+        required: ["sessionId", "sessionToken"]
+      },
+      prepareRequest(args = {}) {
+        const id = requireSessionId(args, "tracker_session_interrupt");
+        if (id.error) return id;
+        const token = requireMcpSessionToken(args, "tracker_session_interrupt");
+        if (token.error) return token;
+        const reason = nonEmptyString(args.reason);
+        const idempotencyKey = nonEmptyString(args.idempotencyKey);
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: `/api/sessions/${id.sessionId}/interrupt`,
+          label: "tracker_session_interrupt",
+          body: {
+            ...(reason ? { reason } : {}),
+            ...(idempotencyKey ? { idempotencyKey } : {})
+          },
+          headers: mcpSessionTokenHeaders(token.sessionToken),
+          jsonRpcErrorOnFailure: true
+        };
+      }
     })
   ];
 }

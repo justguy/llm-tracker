@@ -13,6 +13,7 @@ const JOB_KINDS = new Set(["code", "prd", "review", "planning", "closeout", "cus
 const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "handoff"]);
 const UI_COMPLETE_MODES = new Set(["block_required_missing", "allow_optional_missing"]);
 const VERIFY_RESOLVE_STATUSES = new Set(["satisfied", "failed"]);
+const COMPLETE_OVERRIDE_REASON_MAX_LEN = 2000;
 
 function optionalStringProperty(description) {
   return { type: "string", description };
@@ -73,6 +74,16 @@ function prepareJobMutation(args, toolName, bodyFields) {
     body,
     headers: mcpSessionTokenHeaders(token.sessionToken)
   };
+}
+
+function requireCompleteOverrideReason(args) {
+  if (typeof args.reason !== "string" || args.reason.length === 0) {
+    return { error: "tracker_job_complete_override requires reason." };
+  }
+  if (args.reason.length > COMPLETE_OVERRIDE_REASON_MAX_LEN) {
+    return { error: "tracker_job_complete_override requires reason to be 2000 characters or fewer." };
+  }
+  return { reason: args.reason };
 }
 
 export function createJobTools(workspace, portFlag) {
@@ -222,6 +233,39 @@ export function createJobTools(workspace, portFlag) {
           method: "POST",
           path: `/api/jobs/${prepared.jobId}/complete`,
           label: "tracker_job_complete",
+          body: prepared.body,
+          headers: prepared.headers,
+          jsonRpcErrorOnFailure: true
+        };
+      }
+    }),
+    createJobTool({
+      name: "tracker_job_complete_override",
+      description: "Complete a gate-blocked job through the human override endpoint. Requires a non-empty reason and emits the hub HumanOverrideEvent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          jobId: { type: "string", description: "Runtime job id" },
+          sessionToken: mcpSessionTokenProperty,
+          reason: { type: "string", maxLength: COMPLETE_OVERRIDE_REASON_MAX_LEN, description: "Required override reason" },
+          summary: optionalStringProperty("Optional completion summary"),
+          user: optionalStringProperty("Optional overriding user"),
+          idempotencyKey: optionalStringProperty("Optional idempotency key")
+        },
+        required: ["jobId", "sessionToken", "reason"]
+      },
+      prepareRequest(args = {}) {
+        const prepared = prepareJobMutation(args, "tracker_job_complete_override", ["summary", "user", "idempotencyKey"]);
+        if (prepared.error) return prepared;
+        const reason = requireCompleteOverrideReason(args);
+        if (reason.error) return reason;
+        prepared.body.reason = reason.reason;
+        return {
+          workspace,
+          portFlag,
+          method: "POST",
+          path: `/api/jobs/${prepared.jobId}/complete-override`,
+          label: "tracker_job_complete_override",
           body: prepared.body,
           headers: prepared.headers,
           jsonRpcErrorOnFailure: true

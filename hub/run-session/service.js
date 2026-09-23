@@ -118,6 +118,7 @@ function jobKindForProfile(profileId) {
  * @property {string} workspace
  * @property {() => string} [now]
  * @property {{ build(kind: string, input: object): Promise<object> }} [contextPackService]
+ * @property {{ start(providerId: string, request: object): Promise<object>, capabilities?(providerId: string): object }} [providerBroker]
  */
 
 /**
@@ -161,6 +162,7 @@ export class RunSessionService {
       validateRuntimeEvent,
       workspace,
       contextPackService,
+      providerBroker,
       now,
     } = deps || {};
     if (!store || typeof store.get !== "function") {
@@ -197,6 +199,7 @@ export class RunSessionService {
     this.validateRuntimeEvent = validateRuntimeEvent;
     this.workspace = workspace;
     this.contextPackService = contextPackService || null;
+    this.providerBroker = providerBroker || null;
     this.now = typeof now === "function" ? now : () => new Date().toISOString();
   }
 
@@ -254,17 +257,25 @@ export class RunSessionService {
    * @param {{ withTaskId: boolean }} options
    * @returns {{ sessionId: string; eventForAppend: object; eventForValidation: object }}
    */
-  #buildSessionStartedEvent(draft, { withTaskId }) {
+  async #buildSessionStartedEvent(draft, { withTaskId }) {
     const sessionId = this.makeRuntimeId("ses");
+    const providerStart = await this.#startProviderForDraft(draft, { sessionId, withTaskId });
     const sessionPayload = {
       id: sessionId,
       name: nameFromDraft(draft),
       tier: tierFromDraft(draft),
       ...(isNonEmptyString(draft.projectSlug) ? { projectSlug: draft.projectSlug } : {}),
       ...(withTaskId && isNonEmptyString(draft.taskId) ? { taskId: draft.taskId } : {}),
+      ...(isNonEmptyString(draft.providerId) ? { providerId: draft.providerId, provider: draft.providerId } : {}),
+      ...(isNonEmptyString(draft.model) ? { model: draft.model } : {}),
+      ...(isNonEmptyString(draft.sandbox) ? { sandbox: draft.sandbox } : {}),
       ...(isNonEmptyString(draft.repoRoot) ? { repoRoot: draft.repoRoot } : {}),
       ...(isNonEmptyString(draft.cwd) ? { cwd: draft.cwd } : {}),
+      ...(isNonEmptyString(draft.worktreePath) ? { worktreePath: draft.worktreePath } : {}),
       ...(isNonEmptyString(draft.branch) ? { branch: draft.branch } : {}),
+      ...(providerStart?.providerThread ? { providerThread: providerStart.providerThread } : {}),
+      ...(providerStart?.providerCapabilities ? { providerCapabilities: providerStart.providerCapabilities } : {}),
+      ...(providerStart?.providerFallback ? { providerFallback: providerStart.providerFallback } : {}),
     };
     const eventForValidation = {
       schemaVersion: 1,
@@ -277,7 +288,7 @@ export class RunSessionService {
     };
     this.validateRuntimeEvent(eventForValidation);
     const { id: _evtId, ...eventForAppend } = eventForValidation;
-    return { sessionId, eventForAppend, eventForValidation };
+    return { sessionId, eventForAppend, eventForValidation, providerWarnings: providerStart?.warnings || [] };
   }
 
   /**
@@ -364,7 +375,7 @@ export class RunSessionService {
     const jobVerifyPack = usableVerifyPack(verifyPack);
 
     // Create session.
-    const { sessionId, eventForAppend } = this.#buildSessionStartedEvent(draft, { withTaskId: true });
+    const { sessionId, eventForAppend, providerWarnings } = await this.#buildSessionStartedEvent(draft, { withTaskId: true });
     await this.runtimeStore.append(eventForAppend);
 
     // Force is a pre-emption: the old active job is terminated first, then the
@@ -415,6 +426,7 @@ export class RunSessionService {
       taskClaimed: resultMode === "created",
       verifyPack: persistedPack,
       contextPackRef,
+      ...(providerWarnings.length ? { warnings: providerWarnings } : {}),
     });
   }
 
@@ -424,7 +436,7 @@ export class RunSessionService {
    * wiring deferred to a follow-up.
    */
   async #launchUntasked({ draft }) {
-    const { sessionId, eventForAppend } = this.#buildSessionStartedEvent(draft, { withTaskId: false });
+    const { sessionId, eventForAppend, providerWarnings } = await this.#buildSessionStartedEvent(draft, { withTaskId: false });
     await this.runtimeStore.append(eventForAppend);
     return freezeResult({
       ok: true,
@@ -432,7 +444,7 @@ export class RunSessionService {
       sessionId,
       jobId: null,
       taskClaimed: false,
-      warnings: ["unbound_session"],
+      warnings: ["unbound_session", ...providerWarnings],
     });
   }
 
@@ -609,4 +621,96 @@ export class RunSessionService {
       return null;
     }
   }
+
+  async #startProviderForDraft(draft, { sessionId, withTaskId }) {
+    if (!this.providerBroker || typeof this.providerBroker.start !== "function") return null;
+    const providerId = isNonEmptyString(draft.providerId)
+      ? draft.providerId
+      : isNonEmptyString(draft.runtime) && draft.runtime !== "manual"
+        ? draft.runtime
+        : null;
+    if (!providerId || providerId === "manual") return null;
+    const handle = await this.providerBroker.start(providerId, providerStartRequestForDraft(draft, {
+      sessionId,
+      withTaskId,
+    }));
+    const providerThread = providerThreadRefFromHandle(handle, providerId);
+    const providerCapabilities = providerCapabilitiesForHandle(this.providerBroker, providerThread.providerId);
+    return {
+      providerThread,
+      ...(providerCapabilities ? { providerCapabilities } : {}),
+      ...(handle?.fallback && typeof handle.fallback === "object" ? { providerFallback: { ...handle.fallback } } : {}),
+      warnings: providerWarningsFromHandle(handle),
+    };
+  }
+}
+
+function providerStartRequestForDraft(draft, { sessionId, withTaskId }) {
+  const request = {
+    serviceName: "llm-tracker",
+    ephemeral: false,
+    sessionStartSource: "startup",
+    threadSource: "user",
+    ...(isNonEmptyString(draft.cwd) ? { cwd: draft.cwd } : {}),
+    ...(isNonEmptyString(draft.model) ? { model: draft.model } : {}),
+    ...(isNonEmptyString(draft.sandbox) ? { sandbox: draft.sandbox } : {}),
+    ...(isNonEmptyString(draft.repoRoot) ? { repoRoot: draft.repoRoot } : {}),
+    ...(isNonEmptyString(draft.worktreePath) ? { worktreePath: draft.worktreePath } : {}),
+    ...(isNonEmptyString(draft.branch) ? { branch: draft.branch } : {}),
+    metadata: {
+      sessionId,
+      mode: draft.mode,
+      source: draft.source,
+      ...(isNonEmptyString(draft.projectSlug) ? { projectSlug: draft.projectSlug } : {}),
+      ...(withTaskId && isNonEmptyString(draft.taskId) ? { taskId: draft.taskId } : {}),
+    },
+  };
+  return request;
+}
+
+function providerThreadRefFromHandle(handle, requestedProviderId) {
+  const providerId = isNonEmptyString(handle?.providerId) ? handle.providerId : requestedProviderId;
+  const threadId = isNonEmptyString(handle?.threadId)
+    ? handle.threadId
+    : isNonEmptyString(handle?.id)
+      ? handle.id
+      : null;
+  if (!threadId) {
+    throw new TypeError("RunSessionService: provider start did not return threadId");
+  }
+  const transport = isNonEmptyString(handle?.transport) ? handle.transport : "stdio";
+  return {
+    providerId,
+    transport,
+    threadId,
+    ...(isNonEmptyString(handle?.providerSessionId) ? { providerSessionId: handle.providerSessionId } : {}),
+    ...(isNonEmptyString(handle?.cwd) ? { cwd: handle.cwd } : {}),
+    ...(isNonEmptyString(handle?.repoRoot) ? { repoRoot: handle.repoRoot } : {}),
+    ...(isNonEmptyString(handle?.worktreePath) ? { worktreePath: handle.worktreePath } : {}),
+    ...(isNonEmptyString(handle?.branch) ? { branch: handle.branch } : {}),
+    ...(isNonEmptyString(handle?.model) ? { model: handle.model } : {}),
+    ...(isNonEmptyString(handle?.schemaVersion) ? { schemaVersion: handle.schemaVersion } : {}),
+    ...(isNonEmptyString(handle?.processHandleId) ? { processHandleId: handle.processHandleId } : {}),
+  };
+}
+
+function providerCapabilitiesForHandle(providerBroker, providerId) {
+  if (!providerBroker || typeof providerBroker.capabilities !== "function") return null;
+  try {
+    const caps = providerBroker.capabilities(providerId);
+    return caps && typeof caps === "object" && !Array.isArray(caps) ? { ...caps } : null;
+  } catch {
+    return null;
+  }
+}
+
+function providerWarningsFromHandle(handle) {
+  if (!Array.isArray(handle?.warnings) || handle.warnings.length === 0) return [];
+  return handle.warnings.map((warning) => {
+    if (typeof warning === "string" && warning.length > 0) return warning;
+    if (warning && typeof warning === "object") {
+      return warning.code || warning.kind || "provider_warning";
+    }
+    return "provider_warning";
+  });
 }

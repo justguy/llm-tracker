@@ -50,6 +50,17 @@ function findRuntimeSessionForTask(task, { projectSlug, runtimeSessions = [] } =
   ) || null;
 }
 
+function findRuntimeSessionForJob(job, { runtimeSessions = [] } = {}) {
+  const sessionId = firstString(job?.sessionId);
+  const jobId = firstString(job?.id, job?.jobId);
+  if (!Array.isArray(runtimeSessions)) return null;
+  return runtimeSessions.find((session) => {
+    if (!session) return false;
+    if (sessionId && firstString(session.id, session.sessionId) === sessionId) return true;
+    return jobId && firstString(session.activeJobId) === jobId;
+  }) || null;
+}
+
 function hasAuthoritativeRuntime(runtime = {}) {
   return Array.isArray(runtime.runtimeJobs) || Array.isArray(runtime.runtimeSessions);
 }
@@ -63,6 +74,18 @@ export function resolveTaskRunSessionAction(task, blockedBy = [], runtime = {}) 
 
   const runtimeJob = findRuntimeJobForTask(task, runtime);
   if (runtimeJob) {
+    const runtimeSession = findRuntimeSessionForJob(runtimeJob, runtime);
+    const sessionId = firstString(runtimeJob.sessionId, runtimeSession?.id, runtimeSession?.sessionId);
+    if (sessionId) {
+      return {
+        visible: true,
+        disabled: false,
+        reason: null,
+        kind: "active_session",
+        sessionId,
+        jobId: firstString(runtimeJob.id, runtimeJob.jobId),
+      };
+    }
     return {
       visible: true,
       disabled: true,
@@ -76,11 +99,11 @@ export function resolveTaskRunSessionAction(task, blockedBy = [], runtime = {}) 
     const activeJobId = firstString(runtimeSession.activeJobId);
     return {
       visible: true,
-      disabled: true,
-      reason: activeJobId
-        ? `Task already has active job ${activeJobId}`
-        : `Task already has active session ${runtimeSession.id}`,
-      kind: activeJobId ? "active_job" : "active_session",
+      disabled: false,
+      reason: null,
+      kind: "active_session",
+      sessionId: firstString(runtimeSession.id, runtimeSession.sessionId),
+      jobId: activeJobId,
     };
   }
 
@@ -132,9 +155,10 @@ export function resolveTaskRunSessionAction(task, blockedBy = [], runtime = {}) 
   if (activeSessionId) {
     return {
       visible: true,
-      disabled: true,
-      reason: `Task already has active session ${activeSessionId}`,
+      disabled: false,
+      reason: null,
       kind: "active_session",
+      sessionId: activeSessionId,
     };
   }
 
@@ -188,6 +212,7 @@ export function Card({
       : [];
   const summary = task.goal || ctx.notes || "";
   const canDrag = typeof onDragStart === "function";
+  const runSessionLabel = runSessionAction.kind === "active_session" ? "OPEN SESSION" : "+ RUN SESSION";
   const classes = [
     "card",
     `status-${task.status}`,
@@ -299,22 +324,26 @@ export function Card({
         ${runSessionAction.visible
           ? html`
             <${Bracket}
-              label="+ RUN SESSION"
+              label=${runSessionLabel}
               tone=${runSessionAction.disabled ? "warn" : "ok"}
               disabled=${runSessionAction.disabled}
               title=${runSessionAction.disabled
                 ? runSessionAction.reason
-                : `Run session for ${task.id}`}
+                : runSessionAction.kind === "active_session"
+                  ? `Open session for ${task.id}`
+                  : `Run session for ${task.id}`}
               ariaLabel=${runSessionAction.disabled
                 ? `Run session unavailable for ${task.id}: ${runSessionAction.reason}`
-                : `Run session for ${task.id}`}
+                : runSessionAction.kind === "active_session"
+                  ? `Open session for ${task.id}`
+                  : `Run session for ${task.id}`}
               onClick=${(e) => {
                 e.stopPropagation();
                 e.preventDefault();
                 if (runSessionAction.disabled) return;
                 if (onRunSession) {
                   onRunSession(task, runSessionAction);
-                } else {
+                } else if (runSessionAction.kind === "ready") {
                   onOpenTaskModal && onOpenTaskModal(task, "execute");
                 }
               }}

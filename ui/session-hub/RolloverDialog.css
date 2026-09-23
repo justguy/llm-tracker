@@ -1,0 +1,90 @@
+.rollover-dialog {
+  max-width: 760px;
+  width: min(760px, calc(100vw - 32px));
+}
+
+.rollover-dialog__body {
+  display: grid;
+  gap: 12px;
+}
+
+.rollover-dialog__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.rollover-dialog__summary span {
+  color: var(--muted, #64748b);
+}
+
+.rollover-dialog__preview {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border, #d7dde8);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--panel-subtle, #f8fafc);
+}
+
+.rollover-dialog__section {
+  display: grid;
+  gap: 4px;
+}
+
+.rollover-dialog__section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.rollover-dialog__section-value,
+.rollover-dialog__textarea {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.rollover-dialog__field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rollover-dialog__textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 180px;
+  border: 1px solid var(--border, #d7dde8);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+}
+
+.rollover-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rollover-dialog__status {
+  color: var(--success, #047857);
+  font-size: 12px;
+}
+
+.rollover-dialog__error {
+  color: var(--danger, #b91c1c);
+  font-size: 12px;
+}
+
+.rollover-dialog__empty {
+  color: var(--muted, #64748b);
+  font-size: 12px;
+}

@@ -1,0 +1,41 @@
+.global-new-session-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  border: 1px solid #c7d1dc;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(23, 32, 42, 0.14);
+  padding: 6px;
+}
+
+.global-new-session-picker__option {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #fff;
+  color: #17202a;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.global-new-session-picker__option--active {
+  border-color: #8fb8dc;
+  background: #eef6ff;
+}
+
+.global-new-session-picker__shortcut {
+  border-radius: 999px;
+  background: #e7edf3;
+  color: #536575;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 2px 0;
+  text-align: center;
+}

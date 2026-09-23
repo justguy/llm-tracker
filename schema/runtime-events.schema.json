@@ -76,6 +76,7 @@
         "human.override",
         "session.sandbox_changed",
         "session.model_changed",
+        "session.repo_bound",
         "session.task_attached",
         "session.task_unbound",
         "job.queued",
@@ -300,6 +301,30 @@
           },
           "additionalProperties": true
         }
+      },
+      "additionalProperties": true
+    },
+
+    "SessionRepoBoundEvent": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "ts", "type", "source", "workspace", "sessionId"],
+      "anyOf": [
+        { "required": ["repoRoot"] },
+        { "required": ["worktreePath"] }
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/definitions/runtimeEventId" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": { "const": "session.repo_bound" },
+        "source": { "$ref": "#/definitions/runtimeSource" },
+        "workspace": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "repoRoot": { "type": "string", "minLength": 1 },
+        "worktreePath": { "type": "string", "minLength": 1 },
+        "previousRepoRoot": { "type": "string", "minLength": 1 },
+        "previousWorktreePath": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": true
     },
@@ -601,6 +626,7 @@
     { "$ref": "#/definitions/SessionOutputEvent" },
     { "$ref": "#/definitions/SessionStoppedEvent" },
     { "$ref": "#/definitions/SessionStdioCaptureChangedEvent" },
+    { "$ref": "#/definitions/SessionRepoBoundEvent" },
     { "$ref": "#/definitions/JobStartedEvent" },
     { "$ref": "#/definitions/JobQueuedEvent" },
     { "$ref": "#/definitions/JobCheckpointEvent" },

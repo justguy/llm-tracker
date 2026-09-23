@@ -64,6 +64,7 @@ const UNBLOCK_ALLOWED_FIELDS = new Set(["reason", "previousReason", "idempotency
 const SKILL_RUN_START_ALLOWED_FIELDS = new Set(["skillId", "sessionId", "summary", "source", "evidence"]);
 const SKILL_RUN_PATCH_ALLOWED_FIELDS = new Set(["status", "skillId", "sessionId", "summary", "source", "evidence"]);
 const SKILL_RUN_OVERRIDE_ALLOWED_FIELDS = new Set(["reason", "skillId", "sessionId", "summary", "source", "evidence", "user"]);
+const COMPLETE_OVERRIDE_REASON_MAX_LEN = 2000;
 
 const CONTEXT_PACK_KINDS = new Set(["start", "resume", "rollover", "verify", "handoff"]);
 const SKILL_RUN_FINISH_STATUSES = new Set(["succeeded", "failed", "skipped", "overridden"]);
@@ -546,6 +547,11 @@ export function registerJobsRoutes(app, deps) {
     if (unknown) return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
     if (typeof bodyOrErr.reason !== "string" || bodyOrErr.reason.length === 0) {
       return sendError(res, 400, "INVALID_BODY", "`reason` is required for completion override");
+    }
+    if (bodyOrErr.reason.length > COMPLETE_OVERRIDE_REASON_MAX_LEN) {
+      return sendError(res, 400, "INVALID_BODY", "`reason` must be 2000 characters or fewer", {
+        max: COMPLETE_OVERRIDE_REASON_MAX_LEN,
+      });
     }
     if (bodyOrErr.user !== undefined && (typeof bodyOrErr.user !== "string" || bodyOrErr.user.length === 0)) {
       return sendError(res, 400, "INVALID_BODY", "`user` must be a non-empty string when present");

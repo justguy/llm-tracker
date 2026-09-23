@@ -45,6 +45,7 @@ function removeJobId(values, jobId) {
 }
 
 export const TASK_DROP_MIME = "application/x-llm-tracker-task";
+const STDIO_RING_LIMIT = 500;
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -170,6 +171,33 @@ export async function requestSessionTaskUnbind({
   if (force) body.force = true;
   if (cascadeQueued) body.cascadeQueued = true;
   const response = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/unbind-task`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await parseJsonBody(response);
+  if (!response.ok) throw new Error(parseApiError(payload, response));
+  return payload;
+}
+
+export async function requestSessionRepoWorktreeUpdate({
+  fetcher = globalThis.fetch,
+  sessionId,
+  repoRoot,
+  worktreePath,
+  idempotencyKey,
+} = {}) {
+  const targetSessionId = nonEmptyString(sessionId);
+  if (!targetSessionId) throw new Error("sessionId is required");
+  const body = {};
+  const nextRepoRoot = nonEmptyString(repoRoot);
+  const nextWorktreePath = nonEmptyString(worktreePath);
+  if (nextRepoRoot) body.repoRoot = nextRepoRoot;
+  if (nextWorktreePath) body.worktreePath = nextWorktreePath;
+  if (!body.repoRoot && !body.worktreePath) throw new Error("repoRoot or worktreePath is required");
+  const key = nonEmptyString(idempotencyKey);
+  if (key) body.idempotencyKey = key;
+  const response = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/repo-worktree`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -364,6 +392,25 @@ function clearBoundTask(session, event) {
   return next;
 }
 
+function appendRawStdioEntry(session, event) {
+  if (event.stream !== "stdout" && event.stream !== "stderr") return session;
+  const entry = {
+    id: nonEmptyString(event.id) || `stdio:${event.sessionId}:${event.ts || Date.now()}`,
+    type: "session.output",
+    sessionId: event.sessionId,
+    stream: event.stream,
+    text: typeof event.text === "string" ? event.text : typeof event.chunk === "string" ? event.chunk : "",
+    ts: event.ts,
+  };
+  const existing = Array.isArray(session.stdioEntries) ? session.stdioEntries : [];
+  const stdioEntries = existing.concat(entry).slice(-STDIO_RING_LIMIT);
+  return {
+    ...session,
+    stdioAvailable: true,
+    stdioEntries,
+  };
+}
+
 export function applyRuntimeSessionEvent(sessions, event) {
   if (!isRecord(event)) return normalizeSessionList(sessions);
 
@@ -413,12 +460,27 @@ export function applyRuntimeSessionEvent(sessions, event) {
         lastActivityAt: event.ts,
       }));
     case "session.output":
-      return upsertSession(sessions, sessionId, (session) => ({
-        ...session,
-        lastActivityAt: event.ts,
-        ...(event.stream === "stdout" || event.stream === "stderr" ? { lastOutputAt: event.ts } : {}),
-        ...(event.stream === "structured" ? { lastStructuredEventAt: event.ts } : {}),
-      }));
+      return upsertSession(sessions, sessionId, (session) => {
+        const nextSession = {
+          ...session,
+          lastActivityAt: event.ts,
+          ...(event.stream === "stdout" || event.stream === "stderr" ? { lastOutputAt: event.ts } : {}),
+          ...(event.stream === "structured" ? { lastStructuredEventAt: event.ts } : {}),
+        };
+        if (event.stream === "structured") {
+          nextSession.structuredEvents = (Array.isArray(session.structuredEvents) ? session.structuredEvents : []).concat({ ...event });
+          if (event.kind === "message") {
+            nextSession.messages = (Array.isArray(session.messages) ? session.messages : []).concat({
+              id: event.id,
+              eventId: event.id,
+              role: event.role || "message",
+              text: event.text || event.message || event.preview || "",
+              ts: event.ts,
+            });
+          }
+        }
+        return appendRawStdioEntry(nextSession, event);
+      });
     case "session.warning":
       if (!isRecord(event.warning)) return normalizeSessionList(sessions);
       return upsertSession(sessions, sessionId, (session) => ({
@@ -431,6 +493,13 @@ export function applyRuntimeSessionEvent(sessions, event) {
         warnings: Array.isArray(session.warnings)
           ? session.warnings.filter((warning) => warning?.kind !== event.warningKind)
           : [],
+      }));
+    case "session.repo_bound":
+      return upsertSession(sessions, sessionId, (session) => ({
+        ...session,
+        ...(typeof event.repoRoot === "string" && event.repoRoot.length > 0 ? { repoRoot: event.repoRoot } : {}),
+        ...(typeof event.worktreePath === "string" && event.worktreePath.length > 0 ? { worktreePath: event.worktreePath } : {}),
+        lastActivityAt: event.ts,
       }));
     case "session.task_attached":
       return upsertSession(sessions, sessionId, (session) => {
@@ -558,8 +627,10 @@ export function SessionGroupView({
   connected = false,
   error = null,
   projectSlug = "",
+  selectedSessionId = "",
   dropPreflight = null,
   completionPanels = {},
+  onSelectSession,
   onSizeChange,
   onAttach,
   onUnbindTask,
@@ -570,6 +641,7 @@ export function SessionGroupView({
   onSpawnReviewer,
   onOverrideComplete,
   onCompletionPanelValidationError,
+  onSetRepoWorktree,
   onTaskDropPreflight,
   onDismissDropPreflight,
 } = {}) {
@@ -586,6 +658,15 @@ export function SessionGroupView({
     event.preventDefault();
     event.stopPropagation();
     if (typeof onTaskDropPreflight === "function") onTaskDropPreflight(intent);
+  };
+  const handleSelectSession = (event, session) => {
+    if (event?.target?.closest?.("button,a,input,textarea,select")) return;
+    if (typeof onSelectSession === "function") onSelectSession(session);
+  };
+  const handleSelectSessionKey = (event, session) => {
+    if (event?.key !== "Enter" && event?.key !== " ") return;
+    event.preventDefault();
+    if (typeof onSelectSession === "function") onSelectSession(session);
   };
 
   return html`
@@ -634,8 +715,12 @@ export function SessionGroupView({
                 <div
                   key=${session.id}
                   role="listitem"
-                  class="session-group__card-drop-target"
+                  class=${`session-group__card-drop-target ${session.id === selectedSessionId ? "session-group__card-drop-target--selected" : ""}`}
+                  tabindex="0"
+                  aria-selected=${session.id === selectedSessionId ? "true" : "false"}
                   data-session-id=${session.id}
+                  onClick=${(event) => handleSelectSession(event, session)}
+                  onKeyDown=${(event) => handleSelectSessionKey(event, session)}
                   onDragOver=${handleTaskDragOver}
                   onDrop=${(event) => handleTaskDrop(event, session)}
                 >
@@ -651,6 +736,7 @@ export function SessionGroupView({
                     onSpawnReviewer=${onSpawnReviewer}
                     onOverrideComplete=${onOverrideComplete}
                     onCompletionPanelValidationError=${onCompletionPanelValidationError}
+                    onSetRepoWorktree=${onSetRepoWorktree}
                   />
                 </div>
               `)}
@@ -705,6 +791,7 @@ export function SessionGroup({
   fetcher = globalThis.fetch,
   onAttach,
   onUnbindTask = null,
+  onSetRepoWorktree = null,
   projectSlug,
   dropPreflight,
   onTaskDropPreflight,
@@ -723,6 +810,20 @@ export function SessionGroup({
         : (payload) => requestSessionTaskUnbind({ fetcher, ...payload })
     ),
     [fetcher, onUnbindTask],
+  );
+  const handleSetRepoWorktree = useMemo(
+    () => (
+      typeof onSetRepoWorktree === "function"
+        ? onSetRepoWorktree
+        : async (payload) => {
+            const result = await requestSessionRepoWorktreeUpdate({ fetcher, ...payload });
+            if (result?.session) {
+              setSessions((prev) => upsertSession(prev, result.session.id, () => result.session));
+            }
+            return result;
+          }
+    ),
+    [fetcher, onSetRepoWorktree],
   );
   const setCompletionPanel = useMemo(
     () => (jobId, patch) => {
@@ -898,6 +999,7 @@ export function SessionGroup({
       onSpawnReviewer=${handleSpawnReviewer}
       onOverrideComplete=${handleOverrideComplete}
       onCompletionPanelValidationError=${handleCompletionPanelValidationError}
+      onSetRepoWorktree=${handleSetRepoWorktree}
       onTaskDropPreflight=${onTaskDropPreflight}
       onDismissDropPreflight=${onDismissDropPreflight}
     />

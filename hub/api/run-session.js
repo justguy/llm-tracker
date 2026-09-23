@@ -32,6 +32,7 @@ const LAUNCH_ALLOWED_FIELDS = new Set([
   "forceReason",
   "forceUser",
 ]);
+const NEW_TASK_ALLOWED_FIELDS = new Set(["idempotencyKey"]);
 const LAUNCH_CLAIM_MODES = new Set(["fail_if_active", "join", "force"]);
 
 function nonEmpty(value) {
@@ -64,6 +65,60 @@ function taskFromDraft(store, draft) {
     entry,
     task: tasks.find((task) => task?.id === taskId) || null,
   };
+}
+
+function slugSegment(value) {
+  const s = nonEmpty(value)?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return s || "task";
+}
+
+function uniqueTaskId(title, tasks = []) {
+  const existing = new Set(tasks.map((task) => task?.id).filter(Boolean));
+  const base = `task-${slugSegment(title).slice(0, 48)}`;
+  let candidate = base;
+  let n = 2;
+  while (existing.has(candidate)) {
+    candidate = `${base}-${n}`;
+    n += 1;
+  }
+  return candidate;
+}
+
+function resolveMetaId(items, requested) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  const value = nonEmpty(requested);
+  if (value) {
+    const exact = items.find((item) => item?.id === value);
+    if (exact) return exact.id;
+    const byLabel = items.find((item) => typeof item?.label === "string" && item.label.toLowerCase() === value.toLowerCase());
+    if (byLabel) return byLabel.id;
+  }
+  return items[0]?.id || null;
+}
+
+function buildTaskFromLauncherForm(project, form) {
+  const tasks = Array.isArray(project?.tasks) ? project.tasks : [];
+  const title = nonEmpty(form?.title);
+  const projectSlug = nonEmpty(form?.projectSlug);
+  if (!title) throw new Error("newTaskFormDraft.title is required");
+  if (!projectSlug) throw new Error("newTaskFormDraft.projectSlug is required");
+  const swimlaneId = resolveMetaId(project?.meta?.swimlanes, form?.lane);
+  const priorityId = resolveMetaId(project?.meta?.priorities, form?.priority);
+  if (!swimlaneId) throw new Error("project has no swimlane for new task");
+  if (!priorityId) throw new Error("project has no priority for new task");
+
+  const task = {
+    id: uniqueTaskId(title, tasks),
+    title,
+    status: "not_started",
+    placement: { swimlaneId, priorityId },
+    dependencies: [],
+  };
+  const dod = Array.isArray(form?.dod)
+    ? form.dod.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
+    : [];
+  if (dod.length > 0) task.definition_of_done = dod;
+  return task;
 }
 
 export function buildRunSessionCliCommand(draft = {}) {
@@ -144,7 +199,7 @@ export function registerRunSessionRoutes(app, deps) {
   if (!app || typeof app.get !== "function" || typeof app.post !== "function") {
     throw new Error("registerRunSessionRoutes: express app required");
   }
-  const { store, draftStore, projection, runSessionService, jobRegistry } = deps || {};
+  const { store, draftStore, projection, runSessionService, jobRegistry, runtimeStore, workspace } = deps || {};
   if (!store || typeof store.get !== "function") {
     throw new Error("registerRunSessionRoutes: store (with get) required");
   }
@@ -306,6 +361,113 @@ export function registerRunSessionRoutes(app, deps) {
       taskId: draft.taskId ?? null,
       cli,
       prompt,
+    });
+  });
+
+  // --- POST /api/run-session/drafts/:draftId/new-task ------------------------
+  // Promote a transient NewTaskFormDraft into durable tracker truth first, then
+  // bind the returned taskId back onto the existing launch draft.
+  app.post("/api/run-session/drafts/:draftId/new-task", async (req, res) => {
+    const { draftId } = req.params;
+    if (!isRunSessionDraftId(draftId)) {
+      return sendError(res, 400, "INVALID_DRAFT_ID", `not a valid draft_ id: ${draftId}`);
+    }
+    const body = req.body ?? {};
+    if (body !== undefined && body !== null && (typeof body !== "object" || Array.isArray(body))) {
+      return sendError(res, 400, "INVALID_BODY", "request body must be a JSON object when present");
+    }
+    const unknown = [];
+    for (const key of Object.keys(body)) {
+      if (!NEW_TASK_ALLOWED_FIELDS.has(key)) unknown.push(key);
+    }
+    if (unknown.length > 0) {
+      return sendError(res, 400, "UNKNOWN_FIELDS", `unknown body field(s): ${unknown.join(", ")}`, { unknown });
+    }
+
+    const draft = draftStore.get(draftId);
+    if (!draft) {
+      return sendError(res, 404, "UNKNOWN_DRAFT", `draft not found or expired: ${draftId}`);
+    }
+    if (!draft.newTaskFormDraft) {
+      return sendError(res, 400, "INVALID_BODY", "draft has no NewTaskFormDraft to promote");
+    }
+    if (!store || typeof store.applyPatch !== "function") {
+      return sendError(res, 500, "TRACKER_WRITE_UNAVAILABLE", "tracker Store.applyPatch is required for new task promotion");
+    }
+
+    const projectSlug = nonEmpty(draft.newTaskFormDraft.projectSlug);
+    const entry = projectSlug ? store.get(projectSlug) : null;
+    if (!projectSlug || !entry?.data) {
+      return sendError(res, 404, "UNKNOWN_PROJECT", `project not found: ${projectSlug || "missing"}`);
+    }
+
+    let task;
+    try {
+      task = buildTaskFromLauncherForm(entry.data, draft.newTaskFormDraft);
+    } catch (err) {
+      return sendError(res, 400, "INVALID_BODY", err.message || "invalid new task form");
+    }
+
+    let patchResult;
+    try {
+      patchResult = await store.applyPatch(projectSlug, {
+        tasks: {
+          [task.id]: task,
+        },
+      });
+    } catch (err) {
+      return sendError(res, 500, "TRACKER_WRITE_FAILED", err.message || "tracker patch failed");
+    }
+    if (!patchResult?.ok) {
+      return sendError(res, patchResult?.status || 400, "TRACKER_WRITE_FAILED", patchResult?.message || "tracker patch failed", {
+        type: patchResult?.type || null,
+        hint: patchResult?.hint || null,
+      });
+    }
+
+    let eventId = null;
+    if (runtimeStore && typeof runtimeStore.append === "function") {
+      try {
+        const appendResult = await runtimeStore.append({
+          schemaVersion: 1,
+          ts: new Date().toISOString(),
+          type: "task.new_from_launcher",
+          source: "http",
+          workspace: workspace || "",
+          projectSlug,
+          draftId,
+          taskId: task.id,
+          rev: patchResult.rev ?? null,
+          launcherSource: "run_session_wizard",
+          title: task.title,
+          ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+        });
+        eventId = appendResult.eventId;
+      } catch (err) {
+        return sendError(res, 500, "RUNTIME_EVENT_FAILED", err.message || "task.new_from_launcher append failed");
+      }
+    }
+
+    let promoted;
+    try {
+      promoted = draftStore.update(draftId, {
+        projectSlug,
+        mode: "task_backed",
+        taskId: task.id,
+        taskLocked: false,
+        newTaskFormDraft: null,
+        expectedTrackerRev: patchResult.rev ?? entry.rev ?? null,
+      });
+    } catch (err) {
+      return sendError(res, 500, "DRAFT_PROMOTION_FAILED", err.message || "draft promotion failed");
+    }
+
+    res.status(201).json({
+      draft: promoted,
+      projectSlug,
+      taskId: task.id,
+      rev: patchResult.rev ?? null,
+      eventId,
     });
   });
 

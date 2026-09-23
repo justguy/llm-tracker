@@ -123,13 +123,22 @@ function addMultipleSessionsSameWorktreeConflicts(out, input) {
       sessionIds,
       activeSessionIds: sessionIds,
       message: `Multiple active sessions share worktree ${item.worktreePath}.`,
-      recommendedActions: [
-        { id: "create_worktree", kind: "create_worktree", label: "Create worktree", enabled: true },
-        { id: "open_conflicts", kind: "open_conflicts", label: "Open conflicts", enabled: true },
-        { id: "acknowledge", kind: "acknowledge", label: "Acknowledge", enabled: true },
-      ],
+      recommendedActions: sameWorktreeRecommendedActions(),
     });
   }
+}
+
+export function sameWorktreeRecommendedActions() {
+  return [
+    {
+      id: "create_worktree_for_job",
+      kind: "create_worktree",
+      label: "Create worktree for this job",
+      enabled: true,
+    },
+    { id: "acknowledge", kind: "acknowledge", label: "Acknowledge", enabled: true },
+    { id: "open_conflicts", kind: "view_conflict", label: "Open conflicts", enabled: true },
+  ];
 }
 
 function addOutsideAllowedPathsConflicts(out, input) {

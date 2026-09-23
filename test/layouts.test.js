@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
+import { setTimeout as delay } from "node:timers/promises";
 import express from "express";
 
 import {
@@ -49,10 +50,10 @@ async function findFreePort() {
   });
 }
 
-async function startMiniApp(workspaceRoot) {
+async function startMiniApp(workspaceRoot, routeOptions = {}) {
   const app = express();
   app.use(express.json());
-  registerLayoutsRoutes(app, { workspaceRoot });
+  registerLayoutsRoutes(app, { workspaceRoot, ...routeOptions });
   const port = await findFreePort();
   const server = createServer(app);
   await new Promise((resolve, reject) => {
@@ -380,6 +381,42 @@ test("PUT /api/layouts/session-hub accepts a valid layout and GET returns it", a
   }
 });
 
+test("TDD layout aliases support GET, PUT, and RESET", async () => {
+  const ws = await makeWorkspace();
+  const { base, close } = await startMiniApp(ws);
+  try {
+    const getDefault = await fetch(`${base}/api/session-layouts/default`);
+    assert.equal(getDefault.status, 200);
+    const getDefaultBody = await getDefault.json();
+    assert.deepEqual(getDefaultBody.layout, JSON.parse(JSON.stringify(DEFAULT_LAYOUT)));
+
+    const layout = {
+      version: 1,
+      global: { cardSizeDefault: "compact" },
+      views: { hub: { groupBy: "provider" } },
+    };
+    const put = await fetch(`${base}/api/session-layouts/default`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(layout),
+    });
+    assert.equal(put.status, 200);
+    const putBody = await put.json();
+    assert.deepEqual(putBody.layout, layout);
+
+    const reset = await fetch(`${base}/api/session-layouts/default/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    assert.equal(reset.status, 200);
+    const resetBody = await reset.json();
+    assert.deepEqual(resetBody.layout, JSON.parse(JSON.stringify(DEFAULT_LAYOUT)));
+  } finally {
+    await close();
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
 test("PUT /api/layouts/session-hub returns 400 LAYOUT_INVALID on bad layout", async () => {
   const ws = await makeWorkspace();
   const { base, close } = await startMiniApp(ws);
@@ -393,6 +430,47 @@ test("PUT /api/layouts/session-hub returns 400 LAYOUT_INVALID on bad layout", as
     const body = await res.json();
     assert.equal(body.error.code, "LAYOUT_INVALID");
     assert.match(body.error.message, /version/);
+  } finally {
+    await close();
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
+test("layout.updated callback debounces rapid writes to the latest layout", async () => {
+  const ws = await makeWorkspace();
+  const updates = [];
+  const { base, close } = await startMiniApp(ws, {
+    debounceMs: 100,
+    onLayoutUpdated: (layout) => updates.push(layout),
+  });
+  try {
+    const first = {
+      version: 1,
+      global: { cardSizeDefault: "compact" },
+      views: { hub: { groupBy: "project" } },
+    };
+    const second = {
+      version: 1,
+      global: { cardSizeDefault: "large" },
+      views: { hub: { groupBy: "urgency" } },
+    };
+    const putFirst = await fetch(`${base}/api/session-layouts/default`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(first),
+    });
+    assert.equal(putFirst.status, 200);
+    const putSecond = await fetch(`${base}/api/session-layouts/default`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(second),
+    });
+    assert.equal(putSecond.status, 200);
+    assert.deepEqual(updates, []);
+
+    await delay(150);
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0], second);
   } finally {
     await close();
     await rm(ws, { recursive: true, force: true });

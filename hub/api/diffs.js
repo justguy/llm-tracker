@@ -39,6 +39,7 @@ export function registerDiffRoutes(app, deps) {
     getRuntimeEvents = () => [],
     getProviderEvents = () => [],
     getProviderTimelineItems = () => [],
+    providerBroker,
     runGit,
   } = deps || {};
   if (!store || typeof store.get !== "function") {
@@ -143,12 +144,24 @@ export function registerDiffRoutes(app, deps) {
       conflictAnnotated.files,
       "allowedPathWarningDetails",
     );
+    const providerId = providerIdForDiff(session, job);
+    const providerThreadId = providerThreadIdForDiff(session, job);
+    const providerCapabilities = providerCapabilitiesForDiff(session, job, providerBroker, providerId);
+    const providerReviewAvailable = providerCapabilities.providerReview === true && !!providerThreadId;
     const diffReview = {
       id: diffReviewId(sessionId, baseRev),
       projectSlug,
       ...(taskId ? { taskId } : {}),
       ...(job?.id ? { jobId: job.id } : {}),
       sessionId,
+      ...(providerId ? { providerId } : {}),
+      ...(providerThreadId ? { providerThreadId } : {}),
+      providerCapabilities,
+      providerReview: {
+        available: providerReviewAvailable,
+        capability: "providerReview",
+        ...(providerReviewAvailable ? { endpoint: `/api/sessions/${encodeURIComponent(sessionId)}/provider/review` } : {}),
+      },
       baseRev,
       baseTrackerRev: baseRev,
       currentRev: changedSince.currentRev,
@@ -260,6 +273,52 @@ function findTask(data, taskId) {
   return data.tasks.find((task) => task?.id === taskId) || null;
 }
 
+function providerIdForDiff(session, job) {
+  return firstString(
+    session?.providerId,
+    session?.provider,
+    session?.providerThread?.providerId,
+    session?.threadRef?.providerId,
+    job?.providerId,
+    job?.provider,
+    job?.providerThread?.providerId,
+    job?.threadRef?.providerId,
+  );
+}
+
+function providerThreadIdForDiff(session, job) {
+  return firstString(
+    session?.providerThreadId,
+    session?.threadId,
+    session?.threadRef?.threadId,
+    session?.threadRef?.id,
+    session?.providerThread?.threadId,
+    session?.providerThread?.id,
+    job?.providerThreadId,
+    job?.threadId,
+    job?.threadRef?.threadId,
+    job?.threadRef?.id,
+    job?.providerThread?.threadId,
+    job?.providerThread?.id,
+  );
+}
+
+function providerCapabilitiesForDiff(session, job, providerBroker, providerId) {
+  const sessionCapabilities = recordOrNull(session?.providerCapabilities);
+  if (sessionCapabilities) return sessionCapabilities;
+  const jobCapabilities = recordOrNull(job?.providerCapabilities);
+  if (jobCapabilities) return jobCapabilities;
+  if (providerId && providerBroker && typeof providerBroker.capabilities === "function") {
+    try {
+      const capabilities = providerBroker.capabilities(providerId);
+      return recordOrNull(capabilities) || {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 function projectHistory(store, slug) {
   if (!store || typeof store.history !== "function") return [];
   const result = store.history(slug, { fromRev: 0, limit: 10000 });
@@ -365,6 +424,10 @@ function firstString(...values) {
 
 function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function recordOrNull(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 
 function isNonEmptyString(value) {

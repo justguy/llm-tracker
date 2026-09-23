@@ -1641,6 +1641,46 @@ body {
 .drawer-project-pin:hover { color: var(--amber); border-color: var(--amber-dim); }
 .drawer-project-pin.active { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
 
+.workspace-mode-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.workspace-mode-tab {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--type-bracket-tracking);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.workspace-mode-tab span {
+  margin-left: 8px;
+  color: var(--ink-3);
+}
+
+.workspace-mode-tab:hover,
+.workspace-mode-tab:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+}
+
+.workspace-mode-tab--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 /* ─────── Matrix grid ─────── */
 .matrix-wrap {
   flex: 1;
@@ -2716,6 +2756,13 @@ body {
   animation: pulse 1s ease-in-out infinite;
 }
 
+@media (max-width: 640px) {
+  .connection-pip,
+  .app-shell.drawer-pinned .connection-pip {
+    display: none;
+  }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.3; }
@@ -3314,6 +3361,7 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .top-bar__cluster-label {
@@ -3371,6 +3419,45 @@ html.theme-light .connection-pip.down .dot { box-shadow: 0 0 4px var(--red); }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 760px) {
+  .app-header {
+    padding: 12px;
+  }
+
+  .top-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .top-bar__identity {
+    flex: 1 1 100%;
+  }
+
+  .top-bar__project-name {
+    max-width: calc(100vw - 120px);
+    font-size: 18px;
+  }
+
+  .top-bar__spacer,
+  .top-bar__divider,
+  .top-bar__cluster-label {
+    display: none;
+  }
+
+  .top-bar__cluster {
+    display: grid;
+    flex: 1 1 100%;
+    grid-template-columns: repeat(3, max-content);
+    width: 100%;
+  }
+
+  .top-bar__palette {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+  }
 }
 
 .top-bar__palette:focus-visible,

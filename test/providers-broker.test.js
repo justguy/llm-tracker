@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import { ProviderRegistry, assertValidProvider } from "../hub/providers/registry.js";
 import { ProviderBroker, BROKER_ERROR_CODES } from "../hub/providers/broker.js";
+import { registerConfiguredStructuredProviders } from "../hub/server.js";
 
 // -- fake provider helpers --------------------------------------------------
 
@@ -128,12 +129,36 @@ test("ProviderBroker.start: missing providerId → INVALID_ARGUMENT", async () =
   );
 });
 
+test("ProviderBroker.start: codex_app_server uses native start when probe and method support are healthy", async () => {
+  const reg = new ProviderRegistry();
+  const calls = [];
+  reg.register(fakeProvider({
+    id: "codex_app_server",
+    probe: async () => ({ ok: true }),
+    capabilities: () => ({ structuredThread: true, threadResume: true }),
+    start: async (req) => {
+      calls.push(req);
+      return { providerId: "codex_app_server", transport: "stdio", threadId: "thread-1" };
+    },
+  }));
+  reg.register(fakeProvider({
+    id: "codex_cli",
+    start: async () => ({ providerId: "codex_cli", threadId: "fallback" }),
+  }));
+  const broker = new ProviderBroker({ registry: reg });
+
+  const handle = await broker.start("codex_app_server", { cwd: "/tmp/demo" });
+
+  assert.deepEqual(calls, [{ cwd: "/tmp/demo" }]);
+  assert.deepEqual(handle, { providerId: "codex_app_server", transport: "stdio", threadId: "thread-1" });
+});
+
 test("ProviderBroker: optional methods raise NOT_SUPPORTED when provider doesn't expose them", async () => {
   const reg = new ProviderRegistry();
   reg.register(fakeProvider({ id: "minimal" }));
   const broker = new ProviderBroker({ registry: reg });
 
-  for (const op of ["attach", "resume", "fork", "send", "steer", "interrupt", "approve", "deny", "stop", "listModels", "listSkills"]) {
+  for (const op of ["attach", "resume", "fork", "send", "steer", "interrupt", "review", "approve", "deny", "stop", "listModels", "listSkills"]) {
     await assert.rejects(
       broker[op]("minimal", {}, {}),
       (err) => err.code === BROKER_ERROR_CODES.NOT_SUPPORTED && err.details.method === op,
@@ -155,6 +180,7 @@ test("ProviderBroker: every optional method routes when the provider supports it
     send: async (r, i) => { calls.push(["send", r, i]); },
     steer: async (r, i) => { calls.push(["steer", r, i]); },
     interrupt: async (r) => { calls.push(["interrupt", r]); },
+    review: async (r, q) => { calls.push(["review", r, q]); return { reviewId: "rv" }; },
     approve: async (d) => { calls.push(["approve", d]); },
     deny: async (d) => { calls.push(["deny", d]); },
     stop: async (r) => { calls.push(["stop", r]); },
@@ -169,14 +195,16 @@ test("ProviderBroker: every optional method routes when the provider supports it
   await broker.send("full", { threadId: "z" }, { text: "go" });
   await broker.steer("full", { threadId: "z" }, { hint: "stop" });
   await broker.interrupt("full", { threadId: "z" });
+  await broker.review("full", { threadId: "z" }, { prompt: "review" });
   await broker.approve("full", { decisionId: "d1" });
   await broker.deny("full", { decisionId: "d2" });
   await broker.stop("full", { threadId: "z" });
 
-  assert.equal(calls.length, 11);
+  assert.equal(calls.length, 12);
   assert.equal(calls[0], "listModels");
   assert.deepEqual(calls[1], ["listSkills", { cwd: "/tmp" }]);
   assert.deepEqual(calls[4], ["fork", { threadId: "z" }, { prompt: "hi" }]);
+  assert.deepEqual(calls[8], ["review", { threadId: "z" }, { prompt: "review" }]);
 });
 
 test("ProviderBroker.streamEvents: returns the provider's AsyncIterable", async () => {
@@ -208,4 +236,18 @@ test("ProviderBroker.probe / capabilities / listProviderIds", async () => {
   assert.deepEqual(broker.capabilities("a"), { rawStdio: true });
   const probe = await broker.probe("b");
   assert.deepEqual(probe, { ok: false, reason: "absent" });
+});
+
+test("registerConfiguredStructuredProviders registers configured codex_app_server provider", () => {
+  const reg = new ProviderRegistry();
+  registerConfiguredStructuredProviders(reg, {
+    codex_app_server: {
+      kind: "structured_provider",
+      command: ["codex", "app-server", "--listen", "stdio://"],
+      transportPreference: ["stdio", "unix"],
+    },
+  });
+
+  assert.deepEqual(reg.list().map((provider) => provider.id), ["codex_app_server"]);
+  assert.equal(reg.get("codex_app_server").label, "Codex App Server");
 });

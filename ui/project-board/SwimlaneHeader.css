@@ -1,0 +1,39 @@
+@import "./SwimlaneRunNextButton.css";
+
+.swimlane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.swimlane-header__main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.swimlane-header__title {
+  overflow: hidden;
+  color: var(--ink, #e5e7eb);
+  font-size: 13px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swimlane-header__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--ink-3, #94a3b8);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .swimlane-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

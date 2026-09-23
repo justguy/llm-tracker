@@ -1,0 +1,14 @@
+.run-session-button {
+  border: 1px solid #1d4d7a;
+  border-radius: 6px;
+  background: #1d4d7a;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.run-session-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

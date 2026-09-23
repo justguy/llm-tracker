@@ -17,6 +17,7 @@ import {
   requestOverrideJobComplete,
   requestResolveHumanApproval,
   requestRunMissingGates,
+  requestSessionRepoWorktreeUpdate,
   requestSpawnReviewerDraft,
   requestSessionTaskLedger,
   previewSessionTaskDrop,
@@ -371,6 +372,26 @@ test("requestSessionTaskUnbind posts force payload to unbind endpoint", async ()
   assert.deepEqual(JSON.parse(calls[0][1].body), { reason: "change task", force: true });
 });
 
+test("requestSessionRepoWorktreeUpdate posts repo and worktree binding", async () => {
+  const calls = [];
+  const result = await requestSessionRepoWorktreeUpdate({
+    sessionId: "ses_target",
+    repoRoot: " /repo ",
+    worktreePath: "/repo-wt",
+    fetcher: async (url, options) => {
+      calls.push([url, options]);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, mode: "repo_worktree_bound" }),
+      };
+    },
+  });
+  assert.equal(result.mode, "repo_worktree_bound");
+  assert.equal(calls[0][0], "/api/sessions/ses_target/repo-worktree");
+  assert.equal(calls[0][1].method, "POST");
+  assert.deepEqual(JSON.parse(calls[0][1].body), { repoRoot: "/repo", worktreePath: "/repo-wt" });
+});
+
 test("requestSessionTaskLedger reads derived ledger rows", async () => {
   const calls = [];
   const taskLedger = await requestSessionTaskLedger({
@@ -543,6 +564,56 @@ test("applyRuntimeSessionsMessage applies runtime.event session updates without 
     },
   });
   assert.equal(sessions[0].warnings.length, 0);
+  sessions = applyRuntimeSessionsMessage(sessions, {
+    type: "runtime.event",
+    event: {
+      id: "evt_repo",
+      type: "session.repo_bound",
+      source: "http",
+      ts: "2026-05-25T15:03:00.000Z",
+      sessionId: "ses_a",
+      repoRoot: "/repo",
+      worktreePath: "/repo-wt",
+    },
+  });
+  assert.equal(sessions[0].repoRoot, "/repo");
+  assert.equal(sessions[0].worktreePath, "/repo-wt");
+  assert.equal(sessions[0].lastActivityAt, "2026-05-25T15:03:00.000Z");
+});
+
+test("applyRuntimeSessionsMessage buffers raw stdio and ignores structured output for the raw tab", () => {
+  let sessions = [{ id: "ses_stdio", tier: "dumb_terminal", status: "running" }];
+  sessions = applyRuntimeSessionsMessage(sessions, {
+    type: "runtime.event",
+    event: {
+      id: "evt_stdout",
+      type: "session.output",
+      source: "runtime",
+      ts: "2026-05-25T15:04:00.000Z",
+      sessionId: "ses_stdio",
+      stream: "stdout",
+      text: "ready\n",
+    },
+  });
+  sessions = applyRuntimeSessionsMessage(sessions, {
+    type: "runtime.event",
+    event: {
+      id: "evt_structured",
+      type: "session.output",
+      source: "runtime",
+      ts: "2026-05-25T15:05:00.000Z",
+      sessionId: "ses_stdio",
+      stream: "structured",
+      text: "{\"semantic\":\"state\"}",
+    },
+  });
+
+  assert.equal(sessions[0].stdioAvailable, true);
+  assert.equal(sessions[0].lastOutputAt, "2026-05-25T15:04:00.000Z");
+  assert.equal(sessions[0].lastStructuredEventAt, "2026-05-25T15:05:00.000Z");
+  assert.deepEqual(sessions[0].stdioEntries.map((entry) => [entry.id, entry.stream, entry.text]), [
+    ["evt_stdout", "stdout", "ready\n"],
+  ]);
 });
 
 test("applyRuntimeSessionsMessage projects session.task_attached onto the card model", () => {

@@ -39,6 +39,7 @@ export function Cell({
   onOpenTask,
   onCloseTask,
   onOpenTaskModal,
+  onRunSession,
 }) {
   const ref = useRef(null);
   const [over, setOver] = useState(false);
@@ -125,6 +126,7 @@ export function Cell({
               onSaveComment=${onSaveComment}
               onToggleExpand=${(selectedTask) => onOpenTask && onOpenTask(selectedTask, "brief")}
               onOpenTaskModal=${onOpenTaskModal}
+              onRunSession=${onRunSession}
             />
             ${activeTask?.id === task.id
               ? html`<${TaskInlineDrawer}
@@ -162,6 +164,7 @@ export function Matrix({
   onOpenTask,
   onCloseTask,
   onOpenTaskModal,
+  onRunSession,
 }) {
   const [dragState, setDragState] = useState({ taskId: null });
   const swimlanes = project.data.meta.swimlanes;
@@ -351,6 +354,7 @@ export function Matrix({
             onOpenTask=${onOpenTask}
             onCloseTask=${onCloseTask}
             onOpenTaskModal=${onOpenTaskModal}
+            onRunSession=${onRunSession}
           />
         `
       )}

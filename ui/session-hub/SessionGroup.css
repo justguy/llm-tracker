@@ -1,5 +1,15 @@
 @import "./SessionCard.css";
 
+.session-hub-operator-shell {
+  display: grid;
+  gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  background: var(--paper, #0f172a);
+}
+
 .session-group-row {
   flex-shrink: 0;
   padding: 8px 24px;
@@ -10,6 +20,7 @@
 .session-group {
   display: grid;
   gap: 10px;
+  padding: 8px 24px;
   color: var(--ink, #e5e7eb);
 }
 
@@ -99,11 +110,93 @@
 
 .session-group__card-drop-target {
   min-width: 0;
+  outline: none;
 }
 
 .session-group__card-drop-target:hover,
 .session-group__drop-zone:hover {
   border-color: var(--accent, #60a5fa);
+}
+
+.session-group__card-drop-target--selected {
+  box-shadow: 0 0 0 2px var(--accent, #60a5fa);
+}
+
+.session-hub-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8px minmax(280px, var(--session-tools-width, 360px));
+  min-height: 320px;
+  border-top: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+}
+
+.session-hub-workspace__main,
+.session-hub-workspace__tools {
+  min-width: 0;
+}
+
+.session-hub-workspace__main {
+  display: grid;
+  min-height: 0;
+}
+
+.session-hub-workspace__resize {
+  width: 8px;
+  min-width: 8px;
+  border: 0;
+  border-left: 1px solid var(--rule-soft, rgba(148, 163, 184, 0.18));
+  border-right: 1px solid var(--rule-soft, rgba(148, 163, 184, 0.18));
+  background: var(--paper, #0f172a);
+  cursor: col-resize;
+}
+
+.session-hub-workspace__resize:hover,
+.session-hub-workspace__resize:focus-visible {
+  background: var(--accent, #60a5fa);
+  outline: none;
+}
+
+.session-hub-workspace__tools {
+  border-left: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  background: var(--panel, #111827);
+}
+
+.session-hub-workspace__empty {
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  min-height: 280px;
+  padding: 24px;
+  color: var(--ink-3, #94a3b8);
+  text-align: center;
+}
+
+.session-hub-workspace__empty strong {
+  color: var(--ink, #e5e7eb);
+}
+
+.session-hub-workspace__empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.session-hub-workspace__empty-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  border-radius: 4px;
+  background: var(--panel-elev, #1f2937);
+  color: var(--ink, #e5e7eb);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.session-hub-workspace__empty-actions button:hover {
+  border-color: var(--accent, #38bdf8);
+  color: var(--accent, #38bdf8);
 }
 
 .session-group__drop-preflight {
@@ -200,6 +293,28 @@
 }
 
 @media (max-width: 760px) {
+  .session-group {
+    padding: 8px 12px;
+  }
+
+  .session-hub-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .session-hub-workspace__main {
+    display: block;
+    min-height: auto;
+  }
+
+  .session-hub-workspace__resize {
+    display: none;
+  }
+
+  .session-hub-workspace__tools {
+    border-left: 0;
+    border-top: 1px solid var(--rule, rgba(148, 163, 184, 0.28));
+  }
+
   .session-group__header {
     align-items: stretch;
     flex-direction: column;

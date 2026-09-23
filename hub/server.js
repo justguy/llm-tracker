@@ -21,8 +21,10 @@ import { createTimelineAppendBatcher, registerTimelineRoutes } from "./api/timel
 import { registerSessionsRoutes } from "./api/sessions.js";
 import { registerJobsRoutes } from "./api/jobs.js";
 import { registerRunSessionRoutes } from "./api/run-session.js";
+import { registerWorktreeRoutes } from "./api/worktrees.js";
 import { registerLayoutsRoutes } from "./api/layouts.js";
 import { registerProvidersRoutes } from "./api/providers.js";
+import { registerProviderActionRoutes } from "./api/provider-actions.js";
 import { registerConflictRoutes } from "./api/conflicts.js";
 import {
   providerEventsFromRuntimeEvents,
@@ -37,6 +39,7 @@ import { registerWorkspaceConfigRoutes } from "./api/workspace-config.js";
 import { AttentionEngine } from "./attention/engine.js";
 import { registerAllRules } from "./attention/rules/index.js";
 import { ProviderBroker } from "./providers/broker.js";
+import { createCodexAppServerProvider } from "./providers/codex-app-server.js";
 import { createGenericPtyProvider } from "./providers/generic-pty.js";
 import { createManualProvider } from "./providers/manual.js";
 import { ProviderRegistry } from "./providers/registry.js";
@@ -54,6 +57,7 @@ import { clearSearchCachesForSlug, primeSemanticIndex } from "./search.js";
 import { ActivityMonitor } from "./sessions/activity.js";
 import { SessionTokenStore } from "./sessions/auth/tokens.js";
 import { Store, slugFromFile } from "./store.js";
+import { createWorktreeService } from "./worktrees/worktree-service.js";
 
 // Watcher tuning: ignore obviously-irrelevant paths anywhere in the tree. The
 // main trackers/ watcher uses native events and is already depth:0, but these
@@ -201,6 +205,129 @@ function registerConfiguredGenericPtyProviders(registry, providerConfigs, proces
   }
 }
 
+export function registerConfiguredStructuredProviders(registry, providerConfigs) {
+  if (!providerConfigs || typeof providerConfigs !== "object") return;
+  for (const [providerId, cfg] of Object.entries(providerConfigs)) {
+    if (!cfg || typeof cfg !== "object") continue;
+    if (cfg.kind !== "structured_provider") continue;
+    if (providerId !== "codex_app_server") continue;
+    const appServerCommand = Array.isArray(cfg.command) && cfg.command.length > 0
+      ? cfg.command
+      : ["codex", "app-server"];
+    registry.register(createCodexAppServerProvider({
+      command: [appServerCommand[0]],
+      appServerCommand,
+      availableTransports: Array.isArray(cfg.transportPreference) ? cfg.transportPreference : undefined,
+      websocketEnabled: Array.isArray(cfg.transportPreference) && cfg.transportPreference.includes("websocket"),
+    }));
+  }
+}
+
+function createProviderActions(providerBroker) {
+  return {
+    approve({ session, approvalId, decision, body }) {
+      return providerBroker.approve(requireProviderIdForAction(session), {
+        approvalId,
+        decision,
+        ...(stringOrNull(body?.threadId) ? { threadId: stringOrNull(body.threadId) } : {}),
+        ...(recordOrNull(body?.scope) ? { scope: recordOrNull(body.scope) } : {}),
+        ...(recordOrNull(body?.sandboxScope) ? { sandboxScope: recordOrNull(body.sandboxScope) } : {}),
+        ...(stringOrNull(body?.reason) ? { reason: stringOrNull(body.reason) } : {}),
+        ...(stringOrNull(body?.idempotencyKey) ? { idempotencyKey: stringOrNull(body.idempotencyKey) } : {}),
+      });
+    },
+    deny({ session, approvalId, decision, body }) {
+      return providerBroker.deny(requireProviderIdForAction(session), {
+        approvalId,
+        decision,
+        ...(stringOrNull(body?.threadId) ? { threadId: stringOrNull(body.threadId) } : {}),
+        ...(stringOrNull(body?.reason) ? { reason: stringOrNull(body.reason) } : {}),
+        ...(stringOrNull(body?.idempotencyKey) ? { idempotencyKey: stringOrNull(body.idempotencyKey) } : {}),
+      });
+    },
+    interrupt({ session, body }) {
+      return providerBroker.interrupt(
+        requireProviderIdForAction(session),
+        providerThreadRefForAction(session, body),
+      );
+    },
+    steer({ session, body }) {
+      return providerBroker.steer(
+        requireProviderIdForAction(session),
+        providerThreadRefForAction(session, body),
+        {
+          ...(stringOrNull(body?.message) ? { message: stringOrNull(body.message) } : {}),
+          ...(stringOrNull(body?.prompt) ? { prompt: stringOrNull(body.prompt) } : {}),
+          ...(stringOrNull(body?.idempotencyKey) ? { idempotencyKey: stringOrNull(body.idempotencyKey) } : {}),
+        },
+      );
+    },
+    fork({ session, body }) {
+      return providerBroker.fork(
+        requireProviderIdForAction(session),
+        providerThreadRefForAction(session, body),
+        {
+          ...(stringOrNull(body?.reason) ? { reason: stringOrNull(body.reason) } : {}),
+          ...(stringOrNull(body?.idempotencyKey) ? { idempotencyKey: stringOrNull(body.idempotencyKey) } : {}),
+        },
+      );
+    },
+    review({ session, body }) {
+      const prompt = stringOrNull(body?.prompt);
+      if (!prompt) throw invalidProviderAction("prompt required", { field: "prompt" });
+      return providerBroker.review(
+        requireProviderIdForAction(session),
+        providerThreadRefForAction(session, body),
+        {
+          prompt,
+          ...(recordOrNull(body?.scope) ? { scope: recordOrNull(body.scope) } : {}),
+          ...(stringOrNull(body?.idempotencyKey) ? { idempotencyKey: stringOrNull(body.idempotencyKey) } : {}),
+        },
+      );
+    },
+  };
+}
+
+function requireProviderIdForAction(session) {
+  const providerId = stringOrNull(session?.providerId) ||
+    stringOrNull(session?.provider) ||
+    stringOrNull(session?.threadRef?.providerId) ||
+    stringOrNull(session?.providerThread?.providerId) ||
+    stringOrNull(session?.tier);
+  if (!providerId) throw invalidProviderAction("providerId required", { field: "providerId" });
+  return providerId;
+}
+
+function providerThreadRefForAction(session, body = {}) {
+  const rawRef = recordOrNull(session?.threadRef) || recordOrNull(session?.providerThread) || {};
+  const threadId = stringOrNull(body?.threadId) ||
+    stringOrNull(rawRef.threadId) ||
+    stringOrNull(rawRef.id) ||
+    stringOrNull(session?.threadId) ||
+    stringOrNull(session?.providerThreadId);
+  if (!threadId) throw invalidProviderAction("threadId required", { field: "threadId" });
+  return {
+    ...rawRef,
+    threadId,
+    providerId: requireProviderIdForAction(session),
+  };
+}
+
+function invalidProviderAction(message, details) {
+  const err = new Error(message);
+  err.code = "INVALID_PROVIDER_ACTION";
+  if (details !== undefined) err.details = details;
+  return err;
+}
+
+function recordOrNull(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function stringOrNull(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -336,7 +463,12 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     workspaceConfig.resolved.sessionHub.providers,
     workspaceConfig.resolved.sessionHub.processLifecycle
   );
+  registerConfiguredStructuredProviders(
+    providerRegistry,
+    workspaceConfig.resolved.sessionHub.providers
+  );
   const providerBroker = new ProviderBroker({ registry: providerRegistry });
+  const worktreeService = createWorktreeService();
   let lastRuntimeEventId = null;
 
   const runtimeSnapshot = () => ({
@@ -345,6 +477,19 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     rev: runtimeProjection.rev,
     startup: runtimeStartup
   });
+
+  const broadcastRuntimeMessage = (message) => {
+    const wire = JSON.stringify(message);
+    for (const entry of runtimeBroadcaster.clients) {
+      const ws = entry.ws;
+      if (ws.readyState !== 1) continue;
+      try {
+        ws.send(wire);
+      } catch {
+        // RuntimeBroadcaster owns client cleanup through its error/close hooks.
+      }
+    }
+  };
 
   const recomputeAttention = () => {
     const snapshots = runtimeProjection.toSnapshots();
@@ -651,9 +796,22 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   });
   registerIntelligenceRoutes(app, { workspace, store });
   registerWorkspaceConfigRoutes(app, { workspace });
-  registerLayoutsRoutes(app, { workspaceRoot: workspace });
+  registerLayoutsRoutes(app, {
+    workspaceRoot: workspace,
+    onLayoutUpdated: (layout) => broadcastRuntimeMessage({ type: "layout.updated", layout }),
+    debounceMs: 100
+  });
   registerProvidersRoutes(app, { broker: providerBroker });
+  registerProviderActionRoutes(app, {
+    projection: runtimeProjection,
+    broker: providerBroker,
+    providerActions: createProviderActions(providerBroker),
+  });
   registerAttentionRoutes(app, { runtimeStore, attentionEngine, workspace });
+  registerWorktreeRoutes(app, {
+    worktreeService,
+    config: workspaceConfig.resolved.sessionHub,
+  });
   registerConflictRoutes(app, {
     store,
     projection: runtimeProjection,
@@ -668,6 +826,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
   registerDiffRoutes(app, {
     store,
     projection: runtimeProjection,
+    providerBroker,
     getRuntimeEvents: async () => {
       const jsonl = await readJsonlLines(runtimePaths.runtimeEvents);
       return jsonl.events;
@@ -698,7 +857,8 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     jobRegistry,
     store,
     activityThresholds: workspaceConfig.resolved.sessionHub.activity,
-    attach: workspaceConfig.resolved.sessionHub.attach
+    attach: workspaceConfig.resolved.sessionHub.attach,
+    providerBroker
   });
   registerTimelineRoutes(app, {
     projection: runtimeProjection,
@@ -713,7 +873,8 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     runtimeStore,
     makeRuntimeId,
     validateRuntimeEvent,
-    workspace
+    workspace,
+    providerBroker
   });
   const runSessionDraftStore = createDraftStore();
   const runSessionDraftSweepTimer = setInterval(() => {
@@ -730,14 +891,17 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     runtimeStore,
     makeRuntimeId,
     validateRuntimeEvent,
-    workspace
+    workspace,
+    providerBroker
   });
   registerRunSessionRoutes(app, {
     store,
     draftStore: runSessionDraftStore,
     projection: runtimeProjection,
     runSessionService,
-    jobRegistry
+    jobRegistry,
+    runtimeStore,
+    workspace
   });
 
   app.put("/api/projects/:slug", rejectOversizedMutableFields, async (req, res) => {
@@ -1549,6 +1713,7 @@ export async function startHub({ workspace, port, uiDir, host, token, configFlag
     runtimeProjection,
     runtimeBroadcaster,
     attentionEngine,
+    worktreeService,
     jobRegistry,
     timelineAppendBatcher,
     close: () => closeHub({ exit: false })

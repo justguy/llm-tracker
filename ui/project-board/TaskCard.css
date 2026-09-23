@@ -1,0 +1,44 @@
+.project-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202a;
+  padding: 10px;
+}
+
+.project-task-card__header,
+.project-task-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-task-card__header {
+  justify-content: space-between;
+}
+
+.project-task-card__title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-task-card__actions {
+  flex-wrap: wrap;
+}
+
+.project-task-card__action {
+  border: 1px solid #9bacbd;
+  border-radius: 6px;
+  background: #fff;
+  color: #17202a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 8px;
+}

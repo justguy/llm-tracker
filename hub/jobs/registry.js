@@ -94,6 +94,8 @@ const COMPLETION_EVENT_STATUS = Object.freeze([
   "rolled_over",
 ]);
 
+const WORKTREE_METADATA_FIELDS = Object.freeze(["worktreePath", "branch"]);
+
 /**
  * Build a registry-shaped Error. The `code` field is the stable contract for
  * HTTP/CLI/WS layers; the message is for humans.
@@ -129,10 +131,35 @@ function assertNonEmptyString(value, field, context) {
   return value;
 }
 
+function assertOptionalWorktreeMetadata(input, context) {
+  for (const field of WORKTREE_METADATA_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(input, field)) {
+      const value = input[field];
+      if (value === undefined) continue;
+      if (typeof value !== "string" || value.length === 0) {
+        throw makeError(
+          `${context}: ${field} must be a non-empty string when present`,
+          "INVALID_INPUT",
+          { field },
+        );
+      }
+    }
+  }
+}
+
+function pickWorktreeMetadata(input) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const field of WORKTREE_METADATA_FIELDS) {
+    if (typeof input[field] === "string" && input[field].length > 0) out[field] = input[field];
+  }
+  return out;
+}
+
 /**
  * @typedef {object} JobRegistryDeps
  * @property {{ append: (event: object) => Promise<{ ok: true; eventId: string; rev: number }> }} runtimeStore
- * @property {{ jobs: Map<string, object>; toSnapshots(): { jobs: object[] } }} projection
+ * @property {{ jobs: Map<string, object>; sessions?: Map<string, object>; toSnapshots(): { jobs: object[] } }} projection
  * @property {(prefix: string) => string} makeRuntimeId
  * @property {(event: object) => true} validateRuntimeEvent
  * @property {string} workspace
@@ -248,6 +275,8 @@ export class JobRegistry {
    * @param {string} input.profileId
    * @param {JobKind} input.kind
    * @param {string} [input.predecessorJobId]
+   * @param {string} [input.worktreePath]
+   * @param {string} [input.branch]
    * @param {object} [input.verifyPack]      Immutable VerifyPack from SH-5-04.
    * @param {string} [input.source]
    * @param {string} [input.idempotencyKey]
@@ -264,6 +293,8 @@ export class JobRegistry {
       profileId,
       kind,
       predecessorJobId,
+      worktreePath,
+      branch,
       verifyPack,
       source = "system",
       idempotencyKey,
@@ -295,6 +326,7 @@ export class JobRegistry {
         );
       }
     }
+    assertOptionalWorktreeMetadata({ worktreePath, branch }, "create");
     if (verifyPack !== undefined) {
       if (
         !verifyPack ||
@@ -329,6 +361,7 @@ export class JobRegistry {
       profileId,
       kind,
       ...(queued ? { predecessorJobId } : {}),
+      ...pickWorktreeMetadata({ worktreePath, branch }),
       ...(verifyPack !== undefined ? { verifyPack } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     };
@@ -418,7 +451,7 @@ export class JobRegistry {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw makeError("complete: input must be an object", "INVALID_INPUT");
     }
-    const { status, summary, source = "system", idempotencyKey } = input;
+    const { status, summary, source = "system", idempotencyKey, mode } = input;
     if (typeof status !== "string" || !COMPLETION_EVENT_STATUS.includes(/** @type {any} */ (status))) {
       throw makeError(
         `complete: status '${status}' not in ${COMPLETION_EVENT_STATUS.join("|")}`,
@@ -429,6 +462,9 @@ export class JobRegistry {
     if (summary !== undefined && (typeof summary !== "string" || summary.length === 0)) {
       throw makeError("complete: summary must be a non-empty string when present", "INVALID_INPUT", { field: "summary" });
     }
+    if (mode !== undefined && (typeof mode !== "string" || mode.length === 0)) {
+      throw makeError("complete: mode must be a non-empty string when present", "INVALID_INPUT", { field: "mode" });
+    }
 
     const result = await this.#appendEvent({
       type: "job.completed",
@@ -437,6 +473,7 @@ export class JobRegistry {
       sessionId: existing.sessionId,
       status,
       ...(summary ? { summary } : {}),
+      ...(mode ? { mode } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
     this.#notifyJobCompleted({
@@ -522,6 +559,7 @@ export class JobRegistry {
     const completeResult = await this.complete(jobId, {
       status: "completed",
       ...(summary ? { summary } : {}),
+      mode: "completed_via_override",
       source,
     });
     return {
@@ -571,6 +609,93 @@ export class JobRegistry {
       ...(reason ? { reason } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
+  }
+
+  /**
+   * Record a rollover request and terminally mark the predecessor job as
+   * `rolled_over`. When a successor id is supplied it must already point back
+   * through `predecessorJobId`, so read-side successor links remain derived
+   * from the same invariant as `create({ predecessorJobId })`.
+   *
+   * @param {string} jobId
+   * @param {{ successorJobId?: string; reason?: string; summary?: string; source?: string; idempotencyKey?: string }} [input]
+   * @returns {Promise<{ rev: number; eventId: string; rolloverEventId: string; rolloverRev: number; job: object | null; successorJob: object | null }>}
+   */
+  async rollOverToSuccessor(jobId, input = {}) {
+    const existing = this.#assertActive(jobId, "rollOverToSuccessor");
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw makeError("rollOverToSuccessor: input must be an object", "INVALID_INPUT");
+    }
+    const { successorJobId, reason, summary, source = "system", idempotencyKey } = input;
+    if (successorJobId !== undefined) {
+      if (typeof successorJobId !== "string" || !isJobId(successorJobId)) {
+        throw makeError("rollOverToSuccessor: successorJobId must be a job_ id", "INVALID_SUCCESSOR_ID", { value: successorJobId });
+      }
+      if (successorJobId === jobId) {
+        throw makeError("rollOverToSuccessor: successorJobId must differ from jobId", "INVALID_SUCCESSOR_ID", { value: successorJobId });
+      }
+      const successor = this.projection.jobs.get(successorJobId);
+      if (!successor) {
+        throw makeError(
+          `rollOverToSuccessor: successor '${successorJobId}' not found`,
+          "UNKNOWN_SUCCESSOR",
+          { successorJobId },
+        );
+      }
+      if (successor.predecessorJobId !== jobId) {
+        throw makeError(
+          `rollOverToSuccessor: successor '${successorJobId}' does not point to predecessor '${jobId}'`,
+          "SUCCESSOR_PREDECESSOR_MISMATCH",
+          { jobId, successorJobId, predecessorJobId: successor.predecessorJobId },
+        );
+      }
+    }
+    if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+      throw makeError("rollOverToSuccessor: reason must be a non-empty string when present", "INVALID_INPUT", { field: "reason" });
+    }
+    if (summary !== undefined && (typeof summary !== "string" || summary.length === 0)) {
+      throw makeError("rollOverToSuccessor: summary must be a non-empty string when present", "INVALID_INPUT", { field: "summary" });
+    }
+
+    const rolloverPayload = {
+      type: "job.rollover_requested",
+      source,
+      jobId,
+      sessionId: existing.sessionId,
+      ...(reason ? { reason } : {}),
+      ...(successorJobId ? { successorJobId } : {}),
+      ...(idempotencyKey ? { idempotencyKey: `${idempotencyKey}:requested` } : {}),
+    };
+    const completedPayload = {
+      type: "job.completed",
+      source,
+      jobId,
+      sessionId: existing.sessionId,
+      status: "rolled_over",
+      ...(summary ? { summary } : {}),
+      ...(successorJobId ? { successorJobId } : {}),
+      ...(idempotencyKey ? { idempotencyKey: `${idempotencyKey}:completed` } : {}),
+    };
+    this.#validateAppendPayload(rolloverPayload);
+    this.#validateAppendPayload(completedPayload);
+
+    const rolloverResult = await this.#appendEvent(rolloverPayload);
+    const completeResult = await this.#appendEvent(completedPayload);
+    this.#notifyJobCompleted({
+      jobId,
+      sessionId: existing.sessionId,
+      previousStatus: existing.status,
+      status: "rolled_over",
+      result: completeResult,
+    });
+    return {
+      rev: completeResult.rev,
+      eventId: completeResult.eventId,
+      rolloverEventId: rolloverResult.eventId,
+      rolloverRev: rolloverResult.rev,
+      job: this.get(jobId),
+      successorJob: successorJobId ? this.get(successorJobId) : null,
+    };
   }
 
   /**
@@ -707,7 +832,19 @@ export class JobRegistry {
    */
   #enrich(job, successorByPredecessor) {
     const successorJobId = successorByPredecessor.get(job.id);
-    return successorJobId ? { ...job, successorJobId } : { ...job };
+    const session =
+      typeof job.sessionId === "string" && this.projection.sessions instanceof Map
+        ? this.projection.sessions.get(job.sessionId)
+        : null;
+    const metadata = {};
+    for (const field of WORKTREE_METADATA_FIELDS) {
+      if (typeof job[field] === "string" && job[field].length > 0) {
+        metadata[field] = job[field];
+      } else if (session && typeof session[field] === "string" && session[field].length > 0) {
+        metadata[field] = session[field];
+      }
+    }
+    return successorJobId ? { ...job, ...metadata, successorJobId } : { ...job, ...metadata };
   }
 
   /**
@@ -781,6 +918,16 @@ export class JobRegistry {
     const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
     const result = await this.runtimeStore.append(eventForAppend);
     return { rev: result.rev, eventId: result.eventId, job: this.get(payload.jobId) };
+  }
+
+  #validateAppendPayload(payload) {
+    this.validateRuntimeEvent({
+      schemaVersion: 1,
+      id: this.makeRuntimeId("evt"),
+      ts: this.now(),
+      workspace: this.workspace,
+      ...payload,
+    });
   }
 
   #notifyJobCompleted(payload) {

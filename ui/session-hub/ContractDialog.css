@@ -1,0 +1,26 @@
+.contract-dialog {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.contract-dialog__body {
+  display: grid;
+  gap: 12px;
+}
+
+.contract-dialog__text {
+  margin: 0;
+  padding: 12px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.contract-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+}

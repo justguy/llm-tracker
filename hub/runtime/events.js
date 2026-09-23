@@ -128,6 +128,7 @@ export const RUNTIME_EVENT_TYPES = Object.freeze([
   "human.override",
   "session.sandbox_changed",
   "session.model_changed",
+  "session.repo_bound",
   "session.task_attached",
   "session.task_unbound",
   "job.queued",
@@ -437,6 +438,192 @@ export function createSessionStdioCaptureChangedEvent(input) {
   return event;
 }
 
+/**
+ * Build a `session.model_changed` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {string} input.model
+ * @param {string} input.workspace
+ * @param {string} [input.previousModel]
+ * @param {string} [input.reason]
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object}
+ */
+export function createSessionModelChangedEvent(input) {
+  return createSessionAttributeChangedEvent({
+    ...input,
+    type: "session.model_changed",
+    valueField: "model",
+    previousValueField: "previousModel",
+  });
+}
+
+/**
+ * Build a `session.sandbox_changed` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {string} input.sandbox
+ * @param {string} input.workspace
+ * @param {string} [input.previousSandbox]
+ * @param {string} [input.reason]
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object}
+ */
+export function createSessionSandboxChangedEvent(input) {
+  return createSessionAttributeChangedEvent({
+    ...input,
+    type: "session.sandbox_changed",
+    valueField: "sandbox",
+    previousValueField: "previousSandbox",
+  });
+}
+
+/**
+ * Build a `session.repo_bound` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {string} [input.repoRoot]
+ * @param {string} [input.worktreePath]
+ * @param {string} input.workspace
+ * @param {string} [input.previousRepoRoot]
+ * @param {string} [input.previousWorktreePath]
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object}
+ */
+export function createSessionRepoBoundEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionRepoBoundEvent: input must be an object");
+  }
+  const {
+    sessionId,
+    repoRoot,
+    worktreePath,
+    workspace,
+    previousRepoRoot,
+    previousWorktreePath,
+    source = "http",
+    ts,
+    id,
+    idempotencyKey,
+  } = input;
+  if (!isSessionId(sessionId)) {
+    throw new Error("createSessionRepoBoundEvent: sessionId required (ses_<26 Crockford>)");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionRepoBoundEvent: workspace required (non-empty string)");
+  }
+  if (repoRoot !== undefined && (typeof repoRoot !== "string" || repoRoot.length === 0)) {
+    throw new Error("createSessionRepoBoundEvent: repoRoot must be a non-empty string when present");
+  }
+  if (worktreePath !== undefined && (typeof worktreePath !== "string" || worktreePath.length === 0)) {
+    throw new Error("createSessionRepoBoundEvent: worktreePath must be a non-empty string when present");
+  }
+  if (repoRoot === undefined && worktreePath === undefined) {
+    throw new Error("createSessionRepoBoundEvent: repoRoot or worktreePath required");
+  }
+  if (previousRepoRoot !== undefined && (typeof previousRepoRoot !== "string" || previousRepoRoot.length === 0)) {
+    throw new Error("createSessionRepoBoundEvent: previousRepoRoot must be a non-empty string when present");
+  }
+  if (
+    previousWorktreePath !== undefined &&
+    (typeof previousWorktreePath !== "string" || previousWorktreePath.length === 0)
+  ) {
+    throw new Error("createSessionRepoBoundEvent: previousWorktreePath must be a non-empty string when present");
+  }
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.repo_bound",
+    source,
+    workspace,
+    sessionId,
+  };
+  if (repoRoot !== undefined) event.repoRoot = repoRoot;
+  if (worktreePath !== undefined) event.worktreePath = worktreePath;
+  if (previousRepoRoot !== undefined) event.previousRepoRoot = previousRepoRoot;
+  if (previousWorktreePath !== undefined) event.previousWorktreePath = previousWorktreePath;
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
+function createSessionAttributeChangedEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionAttributeChangedEvent: input must be an object");
+  }
+  const {
+    sessionId,
+    workspace,
+    reason,
+    source = "http",
+    ts,
+    id,
+    idempotencyKey,
+    type,
+    valueField,
+    previousValueField,
+  } = input;
+  const value = input[valueField];
+  const previousValue = input[previousValueField];
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error(`${type}: sessionId required (non-empty string)`);
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${type}: ${valueField} required (non-empty string)`);
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error(`${type}: workspace required (non-empty string)`);
+  }
+  if (previousValue !== undefined && (typeof previousValue !== "string" || previousValue.length === 0)) {
+    throw new Error(`${type}: ${previousValueField} must be a non-empty string when present`);
+  }
+  if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+    throw new Error(`${type}: reason must be a non-empty string when present`);
+  }
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type,
+    source,
+    workspace,
+    sessionId,
+    [valueField]: value,
+  };
+  if (previousValue !== undefined) event[previousValueField] = previousValue;
+  if (reason !== undefined) event.reason = reason;
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
 // --- SH-6-10: Cross-session ask event -------------------------------------
 //
 // `session.ask` is currently a GenericRuntimeEvent in the JSON schema, so this
@@ -498,6 +685,69 @@ export function createSessionAskEvent(input) {
     to: targetSessionId,
     prompt: normalizedPrompt,
   };
+  if (typeof id === "string") event.id = id;
+  if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
+
+  if (event.id === undefined) {
+    validateRuntimeEvent({ ...event, id: "evt_00000000000000000000000000" });
+  } else {
+    validateRuntimeEvent(event);
+  }
+  return event;
+}
+
+/**
+ * Build a `session.interrupt` runtime event.
+ *
+ * @param {object} input
+ * @param {string} input.sessionId
+ * @param {string} input.workspace
+ * @param {string} [input.byUser="operator"]
+ * @param {string} [input.reason]
+ * @param {string} [input.source="http"]
+ * @param {string} [input.ts]
+ * @param {string} [input.id]
+ * @param {string} [input.idempotencyKey]
+ * @returns {object} the validated runtime event
+ */
+export function createSessionInterruptEvent(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("createSessionInterruptEvent: input must be an object");
+  }
+  const {
+    sessionId,
+    workspace,
+    byUser = "operator",
+    reason,
+    source = "http",
+    ts,
+    id,
+    idempotencyKey,
+  } = input;
+  if (!isSessionId(sessionId)) {
+    throw new Error("createSessionInterruptEvent: sessionId required (ses_<26 Crockford>)");
+  }
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new Error("createSessionInterruptEvent: workspace required (non-empty string)");
+  }
+  if (typeof byUser !== "string" || byUser.length === 0) {
+    throw new Error("createSessionInterruptEvent: byUser must be a non-empty string");
+  }
+  if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+    throw new Error("createSessionInterruptEvent: reason must be a non-empty string when present");
+  }
+
+  /** @type {Record<string, unknown>} */
+  const event = {
+    schemaVersion: 1,
+    ts: typeof ts === "string" ? ts : new Date().toISOString(),
+    type: "session.interrupt",
+    source,
+    workspace,
+    sessionId,
+    byUser,
+  };
+  if (reason !== undefined) event.reason = reason;
   if (typeof id === "string") event.id = id;
   if (typeof idempotencyKey === "string") event.idempotencyKey = idempotencyKey;
 

@@ -109,6 +109,7 @@ const HANDLERS = Object.freeze({
   "session.stopped": handleSessionStopped,
   "session.stdio_capture_changed": handleSessionStdioCaptureChanged,
   "session.ask": handleSessionAsk,
+  "session.repo_bound": handleSessionRepoBound,
   "session.task_attached": handleSessionTaskAttached,
   "session.task_unbound": handleSessionTaskUnbound,
   "job.started": handleJobStarted,
@@ -141,12 +142,17 @@ function handleSessionStarted(p, e) {
     ...(session.projectSlug !== undefined ? { projectSlug: session.projectSlug } : {}),
     ...(session.taskId !== undefined ? { taskId: session.taskId } : {}),
     ...(session.agent !== undefined ? { agent: session.agent } : {}),
+    ...(session.providerId !== undefined ? { providerId: session.providerId } : {}),
     ...(session.provider !== undefined ? { provider: session.provider } : {}),
     ...(session.model !== undefined ? { model: session.model } : {}),
+    ...(session.sandbox !== undefined ? { sandbox: session.sandbox } : {}),
     ...(session.cwd !== undefined ? { cwd: session.cwd } : {}),
     ...(session.repoRoot !== undefined ? { repoRoot: session.repoRoot } : {}),
     ...(session.worktreePath !== undefined ? { worktreePath: session.worktreePath } : {}),
     ...(session.branch !== undefined ? { branch: session.branch } : {}),
+    ...(session.providerThread !== undefined ? { providerThread: session.providerThread } : {}),
+    ...(session.providerCapabilities !== undefined ? { providerCapabilities: session.providerCapabilities } : {}),
+    ...(session.providerFallback !== undefined ? { providerFallback: session.providerFallback } : {}),
     status: "starting",
     statusSource: { kind: e.source, eventId: e.id, eventType: e.type },
     startedAt: e.ts,
@@ -209,6 +215,16 @@ function handleSessionOutput(p, e) {
   }
   if (e.stream === "structured") {
     next.lastStructuredEventAt = e.ts;
+    next.structuredEvents = (Array.isArray(existing.structuredEvents) ? existing.structuredEvents : []).concat({ ...e });
+    if (e.kind === "message") {
+      next.messages = (Array.isArray(existing.messages) ? existing.messages : []).concat({
+        id: e.id,
+        eventId: e.id,
+        role: e.role || "message",
+        text: e.text || e.message || e.preview || "",
+        ts: e.ts,
+      });
+    }
   }
   p.sessions.set(id, next);
 }
@@ -256,6 +272,19 @@ function handleSessionAsk(p, e) {
     ts: e.ts,
   });
   p.sessions.set(targetId, { ...existing, asks });
+}
+
+function handleSessionRepoBound(p, e) {
+  const id = e.sessionId;
+  if (!isSessionId(id)) return;
+  const existing = p.sessions.get(id);
+  if (!existing) return;
+  p.sessions.set(id, {
+    ...existing,
+    ...(typeof e.repoRoot === "string" && e.repoRoot.length > 0 ? { repoRoot: e.repoRoot } : {}),
+    ...(typeof e.worktreePath === "string" && e.worktreePath.length > 0 ? { worktreePath: e.worktreePath } : {}),
+    lastActivityAt: e.ts,
+  });
 }
 
 function handleSessionTaskAttached(p, e) {

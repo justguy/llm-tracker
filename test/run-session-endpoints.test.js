@@ -35,6 +35,21 @@ function makeStoreStub(projects) {
     get(slug) {
       return map.get(slug) ?? null;
     },
+    async applyPatch(slug, patch) {
+      const entry = map.get(slug);
+      if (!entry) return { ok: false, status: 404, message: "project not found" };
+      if (!entry.data) entry.data = { tasks: [] };
+      if (!Array.isArray(entry.data.tasks)) entry.data.tasks = [];
+      if (patch?.tasks && typeof patch.tasks === "object" && !Array.isArray(patch.tasks)) {
+        for (const [id, taskPatch] of Object.entries(patch.tasks)) {
+          const existing = entry.data.tasks.find((task) => task.id === id);
+          if (existing) Object.assign(existing, taskPatch);
+          else entry.data.tasks.push({ id, ...taskPatch });
+        }
+      }
+      entry.rev = (Number.isInteger(entry.rev) ? entry.rev : 0) + 1;
+      return { ok: true, rev: entry.rev, noop: false, notes: { ignored: [], warnings: [], appended: [], updated: [] } };
+    },
   };
 }
 
@@ -80,7 +95,15 @@ async function startMiniApp({ projects = {}, draftStoreOptions = {} } = {}) {
   });
   const app = express();
   app.use(express.json());
-  registerRunSessionRoutes(app, { store, draftStore, projection, runSessionService, jobRegistry });
+  registerRunSessionRoutes(app, {
+    store,
+    draftStore,
+    projection,
+    runSessionService,
+    jobRegistry,
+    runtimeStore,
+    workspace: workspaceRoot,
+  });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve, reject) => {
     server.once("listening", resolve);
@@ -557,6 +580,68 @@ test("PATCH /api/run-session/drafts/:id rejects malformed ids", async () => {
     const r = await patchJson(app.base, "/api/run-session/drafts/abc", { runtime: "manual" });
     assert.equal(r.status, 400);
     assert.equal(r.body.error.code, "INVALID_DRAFT_ID");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/run-session/drafts/:id/new-task writes tracker task, emits provenance, and promotes draft", async () => {
+  const app = await startMiniApp({
+    projects: {
+      proj: {
+        data: {
+          meta: {
+            name: "proj",
+            slug: "proj",
+            swimlanes: [{ id: "lane-a", label: "Lane A" }],
+            priorities: [{ id: "p1", label: "P1" }],
+          },
+          tasks: [],
+        },
+        rev: 41,
+      },
+    },
+  });
+  try {
+    const created = await postJson(app.base, "/api/run-session/draft", {
+      source: "global_new_session",
+      mode: "untasked",
+      projectSlug: "proj",
+      newTaskFormDraft: {
+        title: "Launcher task",
+        projectSlug: "proj",
+        lane: "lane-a",
+        priority: "p1",
+        dod: ["verified"],
+      },
+    });
+    assert.equal(created.status, 201);
+
+    const r = await postJson(app.base, `/api/run-session/drafts/${created.body.draft.id}/new-task`, {});
+    assert.equal(r.status, 201);
+    assert.equal(r.body.projectSlug, "proj");
+    assert.equal(r.body.taskId, "task-launcher-task");
+    assert.equal(r.body.rev, 42);
+    assert.match(r.body.eventId, /^evt_/);
+    assert.equal(r.body.draft.mode, "task_backed");
+    assert.equal(r.body.draft.taskId, "task-launcher-task");
+    assert.equal(r.body.draft.newTaskFormDraft, null);
+    assert.equal(r.body.draft.expectedTrackerRev, 42);
+
+    const storedTask = app.store.get("proj").data.tasks.find((task) => task.id === "task-launcher-task");
+    assert.deepEqual(storedTask, {
+      id: "task-launcher-task",
+      title: "Launcher task",
+      status: "not_started",
+      placement: { swimlaneId: "lane-a", priorityId: "p1" },
+      dependencies: [],
+      definition_of_done: ["verified"],
+    });
+    const event = app.appendedEvents.find((item) => item.type === "task.new_from_launcher");
+    assert.equal(event.launcherSource, "run_session_wizard");
+    assert.equal(event.draftId, created.body.draft.id);
+    assert.equal(event.taskId, "task-launcher-task");
+    assert.equal(event.rev, 42);
   } finally {
     await app.close();
   }

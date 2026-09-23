@@ -1,6 +1,7 @@
 import { html } from "htm/preact";
 import { DependencyGraphView } from "./dependency-graph-view.js";
 import { Matrix } from "./matrix-view.js";
+import { ProjectSessionStrip } from "./project-board/ProjectSessionStrip.js";
 import { TreeView } from "./tree-view.js";
 
 export function ProjectPane({
@@ -27,6 +28,9 @@ export function ProjectPane({
   openTaskMode,
   onCloseTask,
   onOpenTaskModal,
+  onRunSession,
+  onRunProjectSession,
+  onSelectSession,
   runtimeSessions,
   runtimeJobs,
   scratchpadExpanded,
@@ -78,6 +82,14 @@ export function ProjectPane({
         ? html`<div class="error-banner"><b>${project.error.kind} error</b> — last valid state shown; ${project.error.message}</div>`
         : null}
       ${data
+        ? html`<${ProjectSessionStrip}
+            projectSlug=${slug}
+            sessions=${runtimeSessions}
+            onRun=${onRunProjectSession}
+            onSelectSession=${onSelectSession}
+          />`
+        : null}
+      ${data
         ? boardView === "graph"
           ? html`<${DependencyGraphView}
               project=${project}
@@ -96,6 +108,7 @@ export function ProjectPane({
               onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
               onCloseTask=${onCloseTask}
               onOpenTaskModal=${onOpenTaskModal}
+              onRunSession=${(task, action) => onRunSession && onRunSession(slug, task, action)}
             />`
           : boardView === "tree"
             ? html`<${TreeView}
@@ -115,6 +128,7 @@ export function ProjectPane({
               onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
               onCloseTask=${onCloseTask}
               onOpenTaskModal=${onOpenTaskModal}
+              onRunSession=${(task, action) => onRunSession && onRunSession(slug, task, action)}
             />`
             : html`<${Matrix}
               project=${project}
@@ -136,6 +150,7 @@ export function ProjectPane({
               onOpenTask=${(task, mode) => onOpenTask && onOpenTask(slug, task, mode)}
               onCloseTask=${onCloseTask}
               onOpenTaskModal=${onOpenTaskModal}
+              onRunSession=${(task, action) => onRunSession && onRunSession(slug, task, action)}
             />`
         : html`<div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>`}
     </section>

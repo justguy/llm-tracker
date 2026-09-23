@@ -1,0 +1,130 @@
+.run-candidate-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 320px;
+  max-width: 720px;
+  color: #17202a;
+}
+
+.run-candidate-picker__header,
+.run-candidate-picker__footer,
+.run-candidate-picker__candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.run-candidate-picker__eyebrow {
+  display: block;
+  color: #5f6f7e;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.run-candidate-picker__title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.run-candidate-picker__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.run-candidate-picker__chip {
+  border: 1px solid #c7d1dc;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #f4f7fa;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.run-candidate-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-candidate-picker__row {
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.run-candidate-picker__candidate {
+  padding: 10px 12px;
+}
+
+.run-candidate-picker__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.run-candidate-picker__task {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-candidate-picker__reason {
+  color: #536575;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.run-candidate-picker__score {
+  min-width: 42px;
+  border-radius: 6px;
+  background: #e9f2ff;
+  color: #17406f;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.run-candidate-picker__close,
+.run-candidate-picker__launch {
+  border: 1px solid #9bacbd;
+  border-radius: 6px;
+  background: #fff;
+  color: #17202a;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.run-candidate-picker__launch {
+  background: #1d4d7a;
+  border-color: #1d4d7a;
+  color: #fff;
+}
+
+.run-candidate-picker__launch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.run-candidate-picker__summary,
+.run-candidate-picker__loading,
+.run-candidate-picker__error {
+  color: #536575;
+  font-size: 13px;
+}
+
+.run-candidate-picker__error {
+  color: #a12626;
+}

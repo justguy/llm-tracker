@@ -30,6 +30,12 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+      - name: Guard single session funnel
+        run: |
+          if grep -RE "StartSessionWizard|function Stepper|Skill plan', 'Confirm" hub_design/variants/session-hub-modals.jsx docs/session-hub; then
+            echo "Deprecated multi-step session launcher detected. Route launches through the single Run Session funnel."
+            exit 1
+          fi
       - run: npm ci
       - run: npm test
       - run: npm pack --dry-run

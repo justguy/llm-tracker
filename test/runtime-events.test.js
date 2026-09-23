@@ -36,6 +36,20 @@ function baseValidSessionStarted(overrides = {}) {
   };
 }
 
+function baseValidSessionRepoBound(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    id: makeRuntimeId("evt"),
+    ts: "2026-05-23T12:00:00Z",
+    type: "session.repo_bound",
+    source: "http",
+    workspace: "/Users/adil/.llm-tracker",
+    sessionId: makeRuntimeId("ses"),
+    repoRoot: "/repo",
+    ...overrides,
+  };
+}
+
 test("valid session.started event passes", () => {
   const evt = baseValidSessionStarted();
   assert.equal(validateRuntimeEvent(evt), true);
@@ -159,6 +173,21 @@ test("empty idempotencyKey is rejected", () => {
 test("non-empty idempotencyKey is accepted", () => {
   const evt = baseValidSessionStarted({ idempotencyKey: "dedupe-key-123" });
   assert.equal(validateRuntimeEvent(evt), true);
+});
+
+test("session.repo_bound requires sessionId and repo or worktree path", () => {
+  assert.equal(validateRuntimeEvent(baseValidSessionRepoBound()), true);
+  const worktreeOnly = baseValidSessionRepoBound({ worktreePath: "/repo-wt" });
+  delete worktreeOnly.repoRoot;
+  assert.equal(validateRuntimeEvent(worktreeOnly), true);
+
+  const missingSessionId = baseValidSessionRepoBound();
+  delete missingSessionId.sessionId;
+  assert.throws(() => validateRuntimeEvent(missingSessionId), /sessionId|required/i);
+
+  const missingBinding = baseValidSessionRepoBound();
+  delete missingBinding.repoRoot;
+  assert.throws(() => validateRuntimeEvent(missingBinding), /anyOf|required|repoRoot|worktreePath/i);
 });
 
 test("createVerifyHumanApprovalRequestedEvent builds a valid generic runtime event", () => {

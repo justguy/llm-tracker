@@ -466,6 +466,27 @@ test("POST /api/jobs/:id/complete-override — reason required", async () => {
   }
 });
 
+test("POST /api/jobs/:id/complete-override — rejects overlong reason", async () => {
+  const app = await startApp();
+  try {
+    const created = await app.jobRegistry.create(validJobInput());
+    const record = app.projection.jobs.get(created.jobId);
+    record.completionGates = [
+      { id: "g-required", kind: "verify_pack", required: true, status: "pending" },
+    ];
+
+    const r = await postJson(app.base, `/api/jobs/${created.jobId}/complete-override`, {
+      reason: "x".repeat(2001),
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error.code, "INVALID_BODY");
+    assert.equal(app.appendedEvents.filter((e) => e.type === "human.override").length, 0);
+    assert.equal(app.appendedEvents.filter((e) => e.type === "job.completed").length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
 test("POST /api/jobs/:id/complete-override — records HumanOverrideEvent, binds gates, completes", async () => {
   const app = await startApp();
   try {
@@ -511,6 +532,7 @@ test("POST /api/jobs/:id/complete-override — records HumanOverrideEvent, binds
     const completedEvents = app.appendedEvents.filter((e) => e.type === "job.completed");
     assert.equal(completedEvents.length, 1);
     assert.equal(completedEvents[0].status, "completed");
+    assert.equal(completedEvents[0].mode, "completed_via_override");
 
     const job = app.jobRegistry.get(created.jobId);
     assert.equal(job.status, "completed");

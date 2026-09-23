@@ -39,6 +39,15 @@ const ITEM = Object.freeze({
   jobId: "job_01h00000000000000000000000",
 });
 
+const WORKTREE_ITEM = Object.freeze({
+  ...ITEM,
+  id: "att_01h00000000000000000000001",
+  kind: "conflict",
+  title: "Workspace conflict",
+  worktreePath: "/repo/main",
+  sessionIds: ["ses_01h00000000000000000000000", "ses_01h00000000000000000000001"],
+});
+
 function action(kind) {
   return { id: `act_${kind}`, label: kind, kind, enabled: true };
 }
@@ -126,6 +135,29 @@ test("implemented HTTP actions plan exact runtime endpoints and bodies", () => {
     targetSessionId: ITEM.sessionId,
     prompt: "Need a status check",
   });
+
+  const createWorktree = getHubPlan(WORKTREE_ITEM, action("create_worktree"), {
+    features: { worktreeCreation: true },
+    targetWorktreePath: "/repo/.worktrees/demo/t-1-work",
+    worktreeBaseRef: "HEAD",
+    worktreeReason: "split shared worktree",
+  });
+  assert.equal(createWorktree.url, "/api/worktrees/create-from-attention");
+  assert.deepEqual(createWorktree.body, {
+    attentionItemId: WORKTREE_ITEM.id,
+    dedupeKey: WORKTREE_ITEM.dedupeKey,
+    projectSlug: WORKTREE_ITEM.projectSlug,
+    taskId: WORKTREE_ITEM.taskId,
+    jobId: WORKTREE_ITEM.jobId,
+    sessionId: WORKTREE_ITEM.sessionId,
+    sessionIds: WORKTREE_ITEM.sessionIds,
+    repoRoot: WORKTREE_ITEM.worktreePath,
+    sourceWorktreePath: WORKTREE_ITEM.worktreePath,
+    targetPath: "/repo/.worktrees/demo/t-1-work",
+    baseRef: "HEAD",
+    reason: "split shared worktree",
+    title: WORKTREE_ITEM.title,
+  });
 });
 
 test("actions requiring runtime ids become disabled when fields are absent", () => {
@@ -149,6 +181,39 @@ test("ask action requires sender session and token options before planning HTTP 
   });
   assert.equal(missingToken.enabled, false);
   assert.match(missingToken.disabledReason, /options\.sessionToken/);
+});
+
+test("create_worktree action is gated and requires worktree evidence", () => {
+  assert.equal(getHubPlan(WORKTREE_ITEM, action("create_worktree")).enabled, false);
+  assert.match(getHubPlan(WORKTREE_ITEM, action("create_worktree")).disabledReason, /Worktree creation is gated/);
+
+  const missingWorktree = { ...WORKTREE_ITEM };
+  delete missingWorktree.worktreePath;
+  const missingPlan = getHubPlan(missingWorktree, action("create_worktree"), {
+    features: { worktreeCreation: true },
+  });
+  assert.equal(missingPlan.enabled, false);
+  assert.match(missingPlan.disabledReason, /item\.worktreePath/);
+});
+
+test("UI dispatcher POSTs create_worktree action to worktree endpoint", async () => {
+  const calls = [];
+  const result = await dispatchAttentionAction(WORKTREE_ITEM, action("create_worktree"), {
+    features: { worktreeCreation: true },
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ ok: true, mode: "worktree_created_from_attention" }),
+      };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/worktrees/create-from-attention");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(JSON.parse(calls[0].init.body).sourceWorktreePath, "/repo/main");
 });
 
 test("UI dispatcher POSTs acknowledge and returns parsed response", async () => {

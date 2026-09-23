@@ -36,6 +36,10 @@ function findRunSessionBracket(vnode) {
   return findAll(vnode, (node) => node.type === Bracket && node.props?.label === "+ RUN SESSION")[0] || null;
 }
 
+function findOpenSessionBracket(vnode) {
+  return findAll(vnode, (node) => node.type === Bracket && node.props?.label === "OPEN SESSION")[0] || null;
+}
+
 function findActionReason(vnode) {
   return findAll(vnode, (node) => node.type === "span" && node.props?.class === "card__action-reason")[0] || null;
 }
@@ -146,10 +150,46 @@ test("runtime session binding is a fallback when job projection is unavailable",
       runtimeSessions: [{ id: `ses_${status}`, projectSlug: "demo", taskId: "t-run", status }],
     });
 
-    assert.equal(action.disabled, true);
+    assert.equal(action.disabled, false);
     assert.equal(action.kind, "active_session");
-    assert.equal(action.reason, `Task already has active session ses_${status}`);
+    assert.equal(action.reason, null);
+    assert.equal(action.sessionId, `ses_${status}`);
   }
+});
+
+test("Card shows [OPEN SESSION] for bound runtime sessions and dispatches the callback", () => {
+  let called = null;
+  const task = baseTask();
+  const vnode = Card({
+    task,
+    projectSlug: "demo",
+    runtimeSessions: [{ id: "ses_live", projectSlug: "demo", taskId: "t-run", status: "running" }],
+    onRunSession: (selected, action) => {
+      called = { selected, action };
+    },
+  });
+
+  const open = findOpenSessionBracket(vnode);
+  assert.ok(open, "bound card should include an open-session action");
+  assert.equal(open.props.disabled, false);
+  assert.equal(open.props.title, "Open session for t-run");
+  open.props.onClick({ stopPropagation() {}, preventDefault() {} });
+  assert.equal(called.selected, task);
+  assert.equal(called.action.kind, "active_session");
+  assert.equal(called.action.sessionId, "ses_live");
+});
+
+test("runtime jobs open their owning session when projection includes a session binding", () => {
+  const action = resolveTaskRunSessionAction(baseTask(), [], {
+    projectSlug: "demo",
+    runtimeJobs: [{ id: "job_live", sessionId: "ses_live", projectSlug: "demo", taskId: "t-run", status: "running" }],
+    runtimeSessions: [{ id: "ses_live", projectSlug: "demo", taskId: "t-run", activeJobId: "job_live", status: "running" }],
+  });
+
+  assert.equal(action.disabled, false);
+  assert.equal(action.kind, "active_session");
+  assert.equal(action.sessionId, "ses_live");
+  assert.equal(action.jobId, "job_live");
 });
 
 test("authoritative runtime state keeps stale task metadata from disabling runnable cards", () => {
@@ -172,7 +212,10 @@ test("applyRuntimeJobEvent tracks live runtime job status for the card resolver"
     taskId: "t-run",
     ts: "2026-05-25T19:00:00.000Z",
   });
-  assert.equal(resolveTaskRunSessionAction(baseTask(), [], { projectSlug: "demo", runtimeJobs: jobs }).disabled, true);
+  const activeAction = resolveTaskRunSessionAction(baseTask(), [], { projectSlug: "demo", runtimeJobs: jobs });
+  assert.equal(activeAction.disabled, false);
+  assert.equal(activeAction.kind, "active_session");
+  assert.equal(activeAction.sessionId, "ses_event");
 
   jobs = applyRuntimeJobEvent(jobs, {
     type: "job.completed",

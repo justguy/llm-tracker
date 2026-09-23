@@ -12,6 +12,10 @@ When sources conflict, follow them in this order — the higher line always wins
 4. **The Executor Addendum.** Adds the provider-runtime layer (ProviderBroker, GenericPtyProvider, CodexAppServerProvider, SessionTimelineService, DiffReviewService, WorktreeService), capability gating, and the Step 0–8 implementation order. It refines and extends levels 1–3; it does not override them.
 5. **Provider-specific assumptions.** Codex app-server method names, Codex CLI flags, Claude Code wrappers, etc. Anything provider-specific must be verified against the installed provider or the vendored schema (TDD §23.2 closure 19, addendum §0) before it is coded.
 
+## Session Launch Funnel
+
+All UI entry points that create or attach a session must route through the single Run Session funnel. Task-card, swimlane, hub-level, and untasked launches can preselect different inputs, but they must converge on the same candidate selection, runtime/profile choice, preflight warning, and launch-confirmation path. Do not add a parallel launcher modal or a separate stepper flow for the same job.
+
 ## Concrete example
 
 Suppose the addendum (level 4) hints that a Codex app-server event payload includes a `command_completed` field that could mark a tracker task as done.

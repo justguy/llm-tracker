@@ -2,7 +2,7 @@
 //
 // ProviderBroker — the single mediator that routes session lifecycle calls
 // (start / attach / resume / fork / stop / send / steer / interrupt /
-// approve / deny / streamEvents / capabilities / listModels / listSkills)
+// review / approve / deny / streamEvents / capabilities / listModels / listSkills)
 // to the right RuntimeProvider by `providerId`.
 //
 // Architectural contract (addendum §4):
@@ -38,6 +38,9 @@ export const BROKER_ERROR_CODES = Object.freeze({
   NOT_SUPPORTED: "PROVIDER_OPERATION_NOT_SUPPORTED",
   INVALID_ARGUMENT: "PROVIDER_INVALID_ARGUMENT",
 });
+
+const CODEX_APP_SERVER_PROVIDER_ID = "codex_app_server";
+const DEFAULT_CODEX_FALLBACK_PROVIDER_IDS = Object.freeze(["codex_cli", "generic_pty"]);
 
 /**
  * Build a tagged broker error with a stable `code`.
@@ -107,6 +110,7 @@ export class ProviderBroker {
   /**
    * @param {object} deps
    * @param {ProviderRegistry} deps.registry
+   * @param {string[]} [deps.codexFallbackProviderIds]
    */
   constructor(deps) {
     const { registry } = deps || {};
@@ -114,6 +118,10 @@ export class ProviderBroker {
       throw new Error("ProviderBroker: registry (with get) required");
     }
     this.registry = registry;
+    this.codexFallbackProviderIds = normalizeProviderIds(
+      deps?.codexFallbackProviderIds,
+      DEFAULT_CODEX_FALLBACK_PROVIDER_IDS,
+    );
   }
 
   /** @returns {string[]} */
@@ -169,7 +177,21 @@ export class ProviderBroker {
    */
   async start(providerId, request) {
     const p = mustGetProvider(this.registry, providerId, "start");
-    return p.start(request);
+    if (providerId !== CODEX_APP_SERVER_PROVIDER_ID) {
+      return p.start(request);
+    }
+    const probe = await safeProbe(p);
+    if (probe?.ok) {
+      try {
+        return await p.start(request);
+      } catch (err) {
+        if (err?.code !== BROKER_ERROR_CODES.NOT_SUPPORTED && err?.code !== "PROVIDER_OPERATION_NOT_SUPPORTED") {
+          throw err;
+        }
+        return this.#startCodexFallback({ request, failure: providerFailureFromError(err, probe) });
+      }
+    }
+    return this.#startCodexFallback({ request, failure: providerFailureFromProbe(probe) });
   }
 
   /**
@@ -193,6 +215,18 @@ export class ProviderBroker {
    */
   async resume(providerId, threadRef) {
     const p = mustGetProvider(this.registry, providerId, "resume");
+    if (providerId === CODEX_APP_SERVER_PROVIDER_ID && !providerHasCapability(p, "threadResume")) {
+      return this.#startCodexFallback({
+        request: {
+          resumeOf: threadRef,
+          fallbackMode: "successor_spawn",
+        },
+        failure: {
+          reason: "codex thread resume unavailable; successor spawn fallback",
+          warning: providerWarning("codex_thread_resume_unavailable", "Codex thread resume unavailable; starting successor via Generic PTY", true),
+        },
+      });
+    }
     mustSupport(p, "resume", "resume");
     return p.resume(threadRef);
   }
@@ -206,6 +240,19 @@ export class ProviderBroker {
    */
   async fork(providerId, threadRef, request) {
     const p = mustGetProvider(this.registry, providerId, "fork");
+    if (providerId === CODEX_APP_SERVER_PROVIDER_ID && !providerHasCapability(p, "threadFork")) {
+      return this.#startCodexFallback({
+        request: {
+          ...(isRecord(request) ? request : {}),
+          forkOf: threadRef,
+          fallbackMode: "deterministic_rollover",
+        },
+        failure: {
+          reason: "codex thread fork unavailable; deterministic rollover fallback",
+          warning: providerWarning("codex_thread_fork_unavailable", "Codex thread fork unavailable; starting rollover successor via Generic PTY", true),
+        },
+      });
+    }
     mustSupport(p, "fork", "fork");
     return p.fork(threadRef, request);
   }
@@ -249,6 +296,22 @@ export class ProviderBroker {
   }
 
   /**
+   * Start a provider-native review for an active thread. Optional.
+   *
+   * @param {string} providerId
+   * @param {object} threadRef
+   * @param {object} request
+   */
+  async review(providerId, threadRef, request) {
+    const p = mustGetProvider(this.registry, providerId, "review");
+    if (providerId === CODEX_APP_SERVER_PROVIDER_ID && !providerHasCapability(p, "providerReview")) {
+      throw unsupportedCodexFeature("review", "provider review unavailable");
+    }
+    mustSupport(p, "review", "review");
+    return p.review(threadRef, request);
+  }
+
+  /**
    * Approve a pending provider approval decision. Optional.
    *
    * @param {string} providerId
@@ -256,6 +319,9 @@ export class ProviderBroker {
    */
   async approve(providerId, decision) {
     const p = mustGetProvider(this.registry, providerId, "approve");
+    if (providerId === CODEX_APP_SERVER_PROVIDER_ID && !providerHasCapability(p, "structuredApprovals")) {
+      throw unsupportedCodexFeature("approve", "structured approvals unavailable");
+    }
     mustSupport(p, "approve", "approve");
     return p.approve(decision);
   }
@@ -268,6 +334,9 @@ export class ProviderBroker {
    */
   async deny(providerId, decision) {
     const p = mustGetProvider(this.registry, providerId, "deny");
+    if (providerId === CODEX_APP_SERVER_PROVIDER_ID && !providerHasCapability(p, "structuredApprovals")) {
+      throw unsupportedCodexFeature("deny", "structured approvals unavailable");
+    }
     mustSupport(p, "deny", "deny");
     return p.deny(decision);
   }
@@ -297,4 +366,127 @@ export class ProviderBroker {
     mustSupport(p, "stop", "stop");
     return p.stop(threadRef);
   }
+
+  #fallbackProvider() {
+    for (const providerId of this.codexFallbackProviderIds) {
+      const provider = this.registry.get(providerId);
+      if (provider && typeof provider.start === "function") return provider;
+    }
+    return null;
+  }
+
+  async #startCodexFallback({ request, failure }) {
+    const fallback = this.#fallbackProvider();
+    if (!fallback) {
+      throw brokerError(
+        "ProviderBroker.start: codex_app_server unavailable and no Generic PTY fallback provider registered",
+        BROKER_ERROR_CODES.NOT_FOUND,
+        {
+          providerId: CODEX_APP_SERVER_PROVIDER_ID,
+          fallbackProviderIds: this.codexFallbackProviderIds,
+          failure,
+        },
+      );
+    }
+    const fallbackRequest = {
+      ...(isRecord(request) ? request : {}),
+      requestedProviderId: CODEX_APP_SERVER_PROVIDER_ID,
+      providerFallback: {
+        fromProviderId: CODEX_APP_SERVER_PROVIDER_ID,
+        toProviderId: fallback.id,
+        reason: failure?.reason || "codex_app_server unavailable",
+        transportPriority: ["stdio", "unix", "websocket"],
+      },
+    };
+    const handle = await fallback.start(fallbackRequest);
+    return {
+      ...(isRecord(handle) ? handle : { handle }),
+      providerId: text(handle?.providerId) || fallback.id,
+      requestedProviderId: CODEX_APP_SERVER_PROVIDER_ID,
+      fallback: fallbackRequest.providerFallback,
+      warnings: [failure?.warning || providerWarning(
+        "codex_app_server_unavailable",
+        "Codex App Server unavailable; falling back to Generic PTY",
+        true,
+      )],
+    };
+  }
+}
+
+function normalizeProviderIds(value, fallback) {
+  const list = Array.isArray(value) ? value : fallback;
+  return list.filter((item) => typeof item === "string" && item.length > 0);
+}
+
+async function safeProbe(provider) {
+  try {
+    return await provider.probe();
+  } catch (err) {
+    return { ok: false, reason: err?.message || "probe failed", details: { error: err?.message || String(err) } };
+  }
+}
+
+function providerFailureFromProbe(probe) {
+  const warning = probe?.details?.warning || providerWarning(
+    probe?.details?.code || "codex_app_server_unavailable",
+    probe?.reason || "Codex App Server unavailable; falling back to Generic PTY",
+    probe?.details?.setupRequired !== true,
+    probe?.details?.setupRequired === true,
+  );
+  return {
+    reason: probe?.reason || "codex_app_server unavailable",
+    warning,
+  };
+}
+
+function providerFailureFromError(err, probe) {
+  return {
+    reason: err?.message || probe?.reason || "codex_app_server start unsupported",
+    warning: providerWarning(
+      err?.code || "codex_app_server_start_unsupported",
+      err?.message || "Codex App Server start unsupported; falling back to Generic PTY",
+      true,
+    ),
+  };
+}
+
+function providerWarning(code, message, retryable, setupRequired = false) {
+  return {
+    kind: "provider_error",
+    providerId: CODEX_APP_SERVER_PROVIDER_ID,
+    code,
+    message,
+    retryable,
+    setupRequired,
+  };
+}
+
+function providerHasCapability(provider, capability) {
+  try {
+    const caps = typeof provider.capabilities === "function" ? provider.capabilities() : {};
+    return caps?.[capability] === true;
+  } catch {
+    return false;
+  }
+}
+
+function unsupportedCodexFeature(operation, reason) {
+  return brokerError(
+    `ProviderBroker.${operation}: ${reason}`,
+    BROKER_ERROR_CODES.NOT_SUPPORTED,
+    {
+      providerId: CODEX_APP_SERVER_PROVIDER_ID,
+      operation,
+      fallback: { mode: "unsupported" },
+      warning: providerWarning(`codex_${operation}_unsupported`, `Codex ${reason}`, false),
+    },
+  );
+}
+
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function text(value) {
+  return typeof value === "string" && value.length > 0 ? value : "";
 }

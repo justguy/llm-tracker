@@ -32,7 +32,7 @@ function makeStoreStub(projects) {
   };
 }
 
-async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = null, attach = null } = {}) {
+async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = null, attach = null, providerBroker = null } = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "lt-sessions-api-"));
   const projection = new RuntimeProjection();
   const appendedEvents = [];
@@ -61,6 +61,7 @@ async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = nu
     store: makeStoreStub(projects),
     jobRegistry: effectiveJobRegistry,
     ...(attach ? { attach } : {}),
+    ...(providerBroker ? { providerBroker } : {}),
     ...(tokenStore ? { tokenStore } : {}),
   });
   const server = app.listen(0, "127.0.0.1");
@@ -82,6 +83,135 @@ async function startMiniApp({ tokenStore = null, projects = {}, jobRegistry = nu
     },
   };
 }
+
+test("POST /api/sessions/:sessionId/interrupt dispatches with projected providerThread", { timeout: TEST_TIMEOUT }, async () => {
+  const calls = [];
+  const providerBroker = {
+    capabilities(providerId) {
+      assert.equal(providerId, "codex_app_server");
+      return { turnInterrupt: true };
+    },
+    async interrupt(providerId, threadRef) {
+      calls.push({ providerId, threadRef });
+      return { accepted: true };
+    },
+  };
+  const env = await startMiniApp({ providerBroker });
+  try {
+    const sessionId = makeRuntimeId("ses");
+    await env.runtimeStore.append({
+      schemaVersion: 1,
+      ts: new Date().toISOString(),
+      type: "session.started",
+      source: "http",
+      workspace: env.workspaceRoot,
+      session: {
+        id: sessionId,
+        name: "provider-backed",
+        tier: "codex_app_server",
+        providerId: "codex_app_server",
+        provider: "codex_app_server",
+        providerThread: {
+          providerId: "codex_app_server",
+          transport: "stdio",
+          threadId: "thread-live-1",
+        },
+        providerCapabilities: { turnInterrupt: true },
+      },
+    });
+
+    const res = await postJson(env.base, `/api/sessions/${sessionId}/interrupt`, {
+      reason: "test interrupt",
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.providerResult.dispatched, true);
+    assert.equal(body.providerResult.method, "interrupt");
+    assert.deepEqual(calls, [
+      {
+        providerId: "codex_app_server",
+        threadRef: {
+          providerId: "codex_app_server",
+          transport: "stdio",
+          threadId: "thread-live-1",
+        },
+      },
+    ]);
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST /api/sessions/:sessionId/message dispatches provider send and records chat message", { timeout: TEST_TIMEOUT }, async () => {
+  const calls = [];
+  const providerBroker = {
+    capabilities(providerId) {
+      assert.equal(providerId, "generic_pty");
+      return { stdinWrite: true };
+    },
+    async send(providerId, threadRef, input) {
+      calls.push({ providerId, threadRef, input });
+      return { accepted: true };
+    },
+  };
+  const env = await startMiniApp({ providerBroker });
+  try {
+    const sessionId = makeRuntimeId("ses");
+    await env.runtimeStore.append({
+      schemaVersion: 1,
+      ts: new Date().toISOString(),
+      type: "session.started",
+      source: "http",
+      workspace: env.workspaceRoot,
+      session: {
+        id: sessionId,
+        name: "pty-backed",
+        tier: "hybrid",
+        providerId: "generic_pty",
+        provider: "generic_pty",
+        providerThread: {
+          providerId: "generic_pty",
+          transport: "stdio",
+          threadId: "thread-chat-1",
+        },
+        providerCapabilities: { stdinWrite: true },
+      },
+    });
+
+    const res = await postJson(env.base, `/api/sessions/${sessionId}/message`, {
+      message: "hello agent",
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.mode, "send");
+    assert.equal(body.message.text, "hello agent");
+    assert.deepEqual(calls, [
+      {
+        providerId: "generic_pty",
+        threadRef: {
+          providerId: "generic_pty",
+          transport: "stdio",
+          threadId: "thread-chat-1",
+        },
+        input: {
+          text: "hello agent\n",
+          message: "hello agent",
+          prompt: "hello agent",
+          userInitiated: true,
+        },
+      },
+    ]);
+    const event = env.appendedEvents.find((item) => item.id === body.eventId);
+    assert.equal(event.type, "session.output");
+    assert.equal(event.stream, "structured");
+    assert.equal(event.kind, "message");
+    assert.equal(event.role, "operator");
+    assert.equal(event.text, "hello agent");
+    assert.equal(env.projection.sessions.get(sessionId).messages[0].text, "hello agent");
+  } finally {
+    await env.close();
+  }
+});
 
 async function postJson(base, path, body) {
   return fetch(`${base}${path}`, {
@@ -482,6 +612,44 @@ test("POST accepts worktreePath for manual attach sessions", { timeout: TEST_TIM
     assert.equal(body.session.cwd, "/repo");
     assert.equal(body.session.repoRoot, "/repo");
     assert.equal(body.session.worktreePath, "/repo-wt");
+  } finally {
+    await env.close();
+  }
+});
+
+test("POST repo-worktree binds an unknown-repo session", { timeout: TEST_TIMEOUT }, async () => {
+  const env = await startMiniApp();
+  try {
+    const createRes = await postJson(env.base, "/api/sessions", {
+      name: "needs repo",
+      tier: "manual",
+      projectSlug: "demo",
+    });
+    assert.equal(createRes.status, 201);
+    const { session } = await createRes.json();
+    assert.equal(session.repoRoot, undefined);
+    assert.equal(session.worktreePath, undefined);
+
+    const bindRes = await postJson(env.base, `/api/sessions/${session.id}/repo-worktree`, {
+      repoRoot: "/repo",
+      worktreePath: "/repo/.worktrees/sh-2-22",
+    });
+    assert.equal(bindRes.status, 200);
+    const bindBody = await bindRes.json();
+    assert.equal(bindBody.mode, "repo_worktree_bound");
+    assert.equal(bindBody.session.repoRoot, "/repo");
+    assert.equal(bindBody.session.worktreePath, "/repo/.worktrees/sh-2-22");
+    assert.equal(bindBody.rev, 2);
+
+    const event = env.appendedEvents.find((item) => item.type === "session.repo_bound");
+    assert.equal(event.sessionId, session.id);
+    assert.equal(event.repoRoot, "/repo");
+    assert.equal(event.worktreePath, "/repo/.worktrees/sh-2-22");
+
+    const getRes = await fetch(`${env.base}/api/sessions/${session.id}`);
+    const getBody = await getRes.json();
+    assert.equal(getBody.session.repoRoot, "/repo");
+    assert.equal(getBody.session.worktreePath, "/repo/.worktrees/sh-2-22");
   } finally {
     await env.close();
   }

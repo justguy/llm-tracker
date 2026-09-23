@@ -218,7 +218,8 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     assert.equal(layoutGetBody.layout.version, 1);
     assert.equal(layoutGetBody.layout.global.cardSizeDefault, "normal");
 
-    const layoutPut = await fetch(`${base}/api/layouts/session-hub`, {
+    const layoutUpdatedPromise = waitForMessageType(runtimeWs, "layout.updated");
+    const layoutPut = await fetch(`${base}/api/session-layouts/default`, {
       method: "PUT",
       headers: { "content-type": "application/json", origin: base },
       body: JSON.stringify({
@@ -230,6 +231,9 @@ test("startHub mounts runtime sessions API and runtime websocket without changin
     assert.equal(layoutPut.status, 200);
     const layoutPutBody = await layoutPut.json();
     assert.equal(layoutPutBody.layout.global.cardSizeDefault, "compact");
+    const layoutUpdated = await layoutUpdatedPromise;
+    assert.equal(layoutUpdated.layout.global.cardSizeDefault, "compact");
+    assert.equal(layoutUpdated.layout.views.hub.groupBy, "project");
 
     const layoutPatch = await fetch(`${base}/api/layouts/session-hub`, {
       method: "PATCH",

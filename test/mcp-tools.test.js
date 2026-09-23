@@ -166,6 +166,7 @@ test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O"
       tracker_session_broadcast: { sessionId, message: "broadcast" },
       tracker_session_attach_task: { sessionId, taskId: "t-001" },
       tracker_session_ask: { sessionId, targetSessionId: sessionId, prompt: "question" },
+      tracker_session_interrupt: { sessionId, reason: "stop current turn" },
       tracker_job_start: {
         projectSlug: "test-project",
         taskId: "t-001",
@@ -175,6 +176,7 @@ test("Session Hub mutating MCP tools reject missing sessionToken before hub I/O"
       },
       tracker_job_checkpoint: { jobId, status: "running" },
       tracker_job_complete: { jobId, summary: "done" },
+      tracker_job_complete_override: { jobId, reason: "operator override" },
       tracker_job_rollover: { jobId, reason: "context" },
       tracker_job_unblock: { jobId, reason: "ready" },
       tracker_job_verify_run: { jobId, itemId: "cmd.ok" },
@@ -324,6 +326,53 @@ test("tracker_session_attach_task forwards attach body and sessionToken to the H
   }
 });
 
+test("tracker_session_interrupt forwards reason and sessionToken to the HTTP handler", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-session-interrupt-");
+  const sessionId = "ses_01h2x3y4z5a6b7c8d9e0f1g2h3";
+  let requestBody = null;
+  let sessionToken = null;
+  const server = createServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== `/api/sessions/${sessionId}/interrupt`) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "NOT_FOUND" } }));
+      return;
+    }
+    sessionToken = req.headers["x-lt-session-token"];
+    requestBody = await readBody(req);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      sessionId,
+      providerDispatched: true,
+      event: { type: "session.interrupt", sessionId, byUser: true, reason: "stop current turn" }
+    }));
+  });
+
+  try {
+    const port = await listen(server);
+    const tool = createTools(workspace, port).get("tracker_session_interrupt");
+    const result = await tool.handler({
+      sessionId,
+      sessionToken: "session-token",
+      reason: "stop current turn",
+      idempotencyKey: "interrupt-1"
+    });
+    assert.notEqual(result.isError, true);
+    assert.equal(sessionToken, "session-token");
+    assert.deepEqual(requestBody, {
+      reason: "stop current turn",
+      idempotencyKey: "interrupt-1"
+    });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.providerDispatched, true);
+    assert.equal(payload.event.type, "session.interrupt");
+    assert.equal(payload.event.reason, "stop current turn");
+  } finally {
+    await closeServer(server);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("tracker_job_complete preserves the gates_pending union as a normal MCP result", async () => {
   const workspace = setupWorkspace("llm-tracker-mcp-tools-job-gates-");
   const jobId = "job_01h2x3y4z5a6b7c8d9e0f1g2h3";
@@ -365,6 +414,70 @@ test("tracker_job_complete preserves the gates_pending union as a normal MCP res
     assert.equal(payload.mode, "gates_pending");
     assert.equal(payload.requiresOverride, true);
     assert.equal(payload.overridePromptUrl, `/api/jobs/${jobId}/complete-override`);
+  } finally {
+    await closeServer(server);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracker_job_complete_override validates reason and forwards the override request", async () => {
+  const workspace = setupWorkspace("llm-tracker-mcp-tools-job-override-");
+  const jobId = "job_01h2x3y4z5a6b7c8d9e0f1g2h3";
+  let requestBody = null;
+  let sessionToken = null;
+  const server = createServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== `/api/jobs/${jobId}/complete-override`) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "NOT_FOUND" } }));
+      return;
+    }
+    sessionToken = req.headers["x-lt-session-token"];
+    requestBody = await readBody(req);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      mode: "completed_via_override",
+      jobId,
+      overrideEventId: "evt_override_1"
+    }));
+  });
+
+  try {
+    const port = await listen(server);
+    const tool = createTools(workspace, port).get("tracker_job_complete_override");
+
+    const missing = await tool.handler({ jobId, sessionToken: "session-token" });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /requires reason/);
+
+    const overlong = await tool.handler({
+      jobId,
+      sessionToken: "session-token",
+      reason: "x".repeat(2001)
+    });
+    assert.equal(overlong.isError, true);
+    assert.match(overlong.content[0].text, /2000 characters or fewer/);
+
+    const result = await tool.handler({
+      jobId,
+      sessionToken: "session-token",
+      reason: "operator override",
+      summary: "verified manually",
+      user: "agent",
+      idempotencyKey: "job-override-1"
+    });
+
+    assert.notEqual(result.isError, true);
+    assert.equal(sessionToken, "session-token");
+    assert.deepEqual(requestBody, {
+      summary: "verified manually",
+      user: "agent",
+      idempotencyKey: "job-override-1",
+      reason: "operator override"
+    });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.mode, "completed_via_override");
+    assert.equal(payload.overrideEventId, "evt_override_1");
   } finally {
     await closeServer(server);
     rmSync(workspace, { recursive: true, force: true });

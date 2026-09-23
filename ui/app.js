@@ -13,6 +13,9 @@ import { ConnectionPip, Drawer, EmptyState } from "./shell-chrome.js";
 import { AttentionStrip } from "./attention/AttentionStrip.js";
 import { TriagePage } from "./triage/TriagePage.js";
 import { AttachDialog } from "./session-hub/AttachDialog.js";
+import { messageCapability } from "./session-hub/ChatComposer.js";
+import { HubTopBar } from "./session-hub/HubTopBar.js";
+import { SessionDetailDockView } from "./session-hub/SessionDetailDock.js";
 import {
   SessionGroupView,
   applyRuntimeSessionsMessage,
@@ -21,8 +24,10 @@ import {
   requestOverrideJobComplete,
   requestResolveHumanApproval,
   requestRunMissingGates,
+  requestSessionRepoWorktreeUpdate,
   requestSpawnReviewerDraft,
 } from "./session-hub/SessionGroup.js";
+import { ToolShelf } from "./session-hub/ToolShelf.js";
 import { RunSessionWizard } from "./run-session/RunSessionWizard.js";
 import {
   deleteProject,
@@ -77,6 +82,104 @@ function isRuntimeRecord(value) {
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function initialWorkspaceMode(settings) {
+  const queryMode = typeof location !== "undefined"
+    ? new URLSearchParams(location.search).get("mode")
+    : null;
+  if (queryMode === "sessionHub") return "sessionHub";
+  if (queryMode === "tracker") return "tracker";
+  return settings?.workspaceMode === "sessionHub" ? "sessionHub" : "tracker";
+}
+
+function clampToolShelfWidth(value) {
+  const width = Number(value);
+  if (!Number.isFinite(width)) return 360;
+  return Math.max(280, Math.min(520, Math.round(width)));
+}
+
+function runtimeSessionId(session) {
+  return nonEmptyString(session?.id);
+}
+
+function runtimeJobId(job) {
+  return nonEmptyString(job?.id) || nonEmptyString(job?.jobId);
+}
+
+function taskList(projectEntry) {
+  return Array.isArray(projectEntry?.data?.tasks) ? projectEntry.data.tasks : [];
+}
+
+function taskForSession(session, projects, activeSlug) {
+  const taskId = nonEmptyString(session?.taskId);
+  if (!taskId) return null;
+  const slug = nonEmptyString(session?.projectSlug) || activeSlug;
+  const task = taskList(projects[slug]).find((item) => item?.id === taskId);
+  return task || { id: taskId, title: session?.taskTitle || taskId };
+}
+
+function jobForSession(session, jobs) {
+  const activeJobId = nonEmptyString(session?.activeJobId);
+  return normalizeRuntimeJobList(jobs).find((job) => {
+    const id = runtimeJobId(job);
+    if (activeJobId && id === activeJobId) return true;
+    return nonEmptyString(job?.sessionId) === runtimeSessionId(session);
+  }) || (activeJobId ? { id: activeJobId, sessionId: runtimeSessionId(session) } : null);
+}
+
+function repoForSession(session) {
+  const root = nonEmptyString(session?.repoRoot);
+  const worktreePath = nonEmptyString(session?.worktreePath);
+  return root || worktreePath ? { root, worktreePath } : null;
+}
+
+function timelineItemsForSession(session) {
+  if (Array.isArray(session?.timelineItems)) return session.timelineItems;
+  if (Array.isArray(session?.timelinePreview)) return session.timelinePreview;
+  if (Array.isArray(session?.timeline)) return session.timeline;
+  if (Array.isArray(session?.events)) return session.events;
+  return [];
+}
+
+function stdioEntriesForSession(session) {
+  return session?.stdioEntries || session?.stdioBuffer || session?.output || session?.outputs || session?.runtimeEvents || [];
+}
+
+function capabilitiesForSession(session) {
+  const provider = isRuntimeRecord(session?.providerCapabilities) ? session.providerCapabilities : {};
+  const caps = isRuntimeRecord(session?.capabilities) ? session.capabilities : {};
+  const tier = nonEmptyString(session?.tier);
+  return {
+    ...provider,
+    ...caps,
+    structured: provider.structured !== false && caps.structured !== false,
+    structuredChat:
+      provider.structuredChat === true ||
+      caps.structuredChat === true ||
+      provider.turnSteer === true ||
+      caps.turnSteer === true ||
+      provider.stdinWrite === true ||
+      caps.stdinWrite === true,
+    worktree: provider.worktree !== false && caps.worktree !== false,
+    review: provider.review === true || caps.review === true || !!nonEmptyString(session?.activeJobId),
+  };
+}
+
+function sessionCanReceiveOperatorMessage(session) {
+  return messageCapability(session || {}, capabilitiesForSession(session)).enabled;
+}
+
+export function preferredSessionForWorkspace(sessions, selectedSessionId = null) {
+  const list = Array.isArray(sessions) ? sessions.filter(Boolean) : [];
+  const selected = list.find((session) => runtimeSessionId(session) === selectedSessionId);
+  if (selected) return selected;
+  return (
+    list.find(sessionCanReceiveOperatorMessage) ||
+    list.find((session) => session?.status === "active" || session?.status === "waiting_for_human") ||
+    list[0] ||
+    null
+  );
 }
 
 function normalizeRuntimeJobList(jobs) {
@@ -162,6 +265,7 @@ function App() {
   const [filter, setFilter] = useState("");
   const [searchMode, setSearchMode] = useState("filter");
   const [boardView, setBoardView] = useState(["tree", "graph"].includes(initialSettings.boardView) ? initialSettings.boardView : "swimlane");
+  const [workspaceMode, setWorkspaceMode] = useState(() => initialWorkspaceMode(initialSettings));
   const [fuzzyState, setFuzzyState] = useState({
     slug: null,
     query: "",
@@ -197,6 +301,18 @@ function App() {
   const [runtimeSessions, setRuntimeSessions] = useState([]);
   const [runtimeJobs, setRuntimeJobs] = useState([]);
   const [runtimeWsUp, setRuntimeWsUp] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [selectedSessionTab, setSelectedSessionTab] = useState("summary");
+  const [stdioPaused, setStdioPaused] = useState(false);
+  const [stdioFollow, setStdioFollow] = useState(true);
+  const [stdioQuery, setStdioQuery] = useState("");
+  const [stdioCopied, setStdioCopied] = useState(false);
+  const [sessionChatDrafts, setSessionChatDrafts] = useState({});
+  const [sessionQueuedDrafts, setSessionQueuedDrafts] = useState({});
+  const [sessionChatErrors, setSessionChatErrors] = useState({});
+  const [toolShelfWidth, setToolShelfWidth] = useState(
+    clampToolShelfWidth(initialSettings.toolShelfWidth)
+  );
   const [sessionCardSize, setSessionCardSize] = useState(
     ["compact", "normal", "large"].includes(initialSettings.sessionCardSize)
       ? initialSettings.sessionCardSize
@@ -243,8 +359,8 @@ function App() {
 
   // Persist settings
   useEffect(() => {
-    saveSettings({ theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView, sessionCardSize });
-  }, [theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView, sessionCardSize]);
+    saveSettings({ theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView, workspaceMode, sessionCardSize, toolShelfWidth });
+  }, [theme, headerCollapsed, drawerPinned, pinnedSlugs, scratchpadExpanded, activeSlug, boardView, workspaceMode, sessionCardSize, toolShelfWidth]);
 
   // Apply theme class on root
   useEffect(() => {
@@ -560,6 +676,73 @@ function App() {
     }
   };
 
+  const onOpenHubRunSession = (intent = {}) => {
+    setWorkspaceMode("sessionHub");
+    if (intent.mode === "attach_existing") {
+      setAttachOpen(true);
+      return;
+    }
+    setDropRunSession({
+      source: intent.source || "global_new_session",
+      mode: intent.mode || "task_backed",
+      projectSlug: intent.projectSlug || activeSlug || "",
+      taskId: "",
+    });
+  };
+
+  const onOpenSelectedSession = (sessionId, slug = activeSlug) => {
+    const id = nonEmptyString(sessionId);
+    if (!id) return;
+    if (slug) setActiveSlug(slug);
+    setSelectedSessionId(id);
+    setSelectedSessionTab("summary");
+    setWorkspaceMode("sessionHub");
+  };
+
+  const onProjectSessionRun = (intent = {}) => {
+    setWorkspaceMode("sessionHub");
+    setDropRunSession({
+      source: intent.source || "project_session_strip",
+      mode: intent.mode || "task_backed",
+      projectSlug: intent.projectSlug || activeSlug || "",
+      taskId: "",
+      taskLocked: false,
+    });
+  };
+
+  const onBoardRunSession = (slug, task, action = {}) => {
+    const sessionId = nonEmptyString(action.sessionId);
+    if (sessionId) {
+      onOpenSelectedSession(sessionId, slug);
+      return;
+    }
+    const taskId = nonEmptyString(task?.id);
+    if (!taskId) return;
+    setWorkspaceMode("sessionHub");
+    setDropRunSession({
+      source: "task_card",
+      mode: "task_backed",
+      projectSlug: slug || activeSlug || "",
+      taskId,
+      taskLocked: true,
+    });
+  };
+
+  const onStartToolShelfResize = (event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = toolShelfWidth;
+    const onPointerMove = (moveEvent) => {
+      setToolShelfWidth(clampToolShelfWidth(startWidth + startX - moveEvent.clientX));
+    };
+    const onPointerUp = () => {
+      globalThis.removeEventListener("pointermove", onPointerMove);
+      globalThis.removeEventListener("pointerup", onPointerUp);
+    };
+    globalThis.addEventListener("pointermove", onPointerMove);
+    globalThis.addEventListener("pointerup", onPointerUp, { once: true });
+  };
+
   const onCompleteJob = async ({ jobId }) => {
     const targetJobId = nonEmptyString(jobId);
     if (!targetJobId) return;
@@ -577,6 +760,29 @@ function App() {
       });
     } catch (err) {
       setCompletionPanel(targetJobId, { busyAction: null, error: err?.message || "complete failed" });
+    }
+  };
+
+  const onSetRepoWorktree = async ({ sessionId, repoRoot, worktreePath }) => {
+    const targetSessionId = nonEmptyString(sessionId);
+    if (!targetSessionId || typeof globalThis.prompt !== "function") return;
+    const nextRepoRoot = nonEmptyString(globalThis.prompt("Repo root", repoRoot || worktreePath || ""));
+    if (!nextRepoRoot) return;
+    const nextWorktreePath = nonEmptyString(globalThis.prompt("Worktree path", worktreePath || nextRepoRoot));
+    if (!nextWorktreePath) return;
+    try {
+      const result = await requestSessionRepoWorktreeUpdate({
+        sessionId: targetSessionId,
+        repoRoot: nextRepoRoot,
+        worktreePath: nextWorktreePath,
+      });
+      if (result?.session) {
+        setRuntimeSessions((prev) => prev.map((session) =>
+          session?.id === targetSessionId ? { ...session, ...result.session } : session
+        ));
+      }
+    } catch (err) {
+      alert(`Set repo/worktree failed: ${err?.message || "request failed"}`);
     }
   };
 
@@ -723,12 +929,67 @@ function App() {
   const slugs = Object.keys(projects).sort();
   const active = activeSlug ? projects[activeSlug] : null;
   const visibleRuntimeSessions = useMemo(
-    () =>
-      runtimeSessions.filter(
-        (session) => !activeSlug || !session?.projectSlug || session.projectSlug === activeSlug
-      ),
-    [runtimeSessions, activeSlug]
+    () => runtimeSessions,
+    [runtimeSessions]
   );
+  const selectedSession = useMemo(() => {
+    return preferredSessionForWorkspace(visibleRuntimeSessions, selectedSessionId);
+  }, [visibleRuntimeSessions, selectedSessionId]);
+  const selectedTask = useMemo(
+    () => taskForSession(selectedSession, projects, activeSlug),
+    [selectedSession, projects, activeSlug]
+  );
+  const selectedJob = useMemo(
+    () => jobForSession(selectedSession, runtimeJobs),
+    [selectedSession, runtimeJobs]
+  );
+  const selectedRepo = useMemo(() => repoForSession(selectedSession), [selectedSession]);
+  const selectedCapabilities = useMemo(
+    () => capabilitiesForSession(selectedSession),
+    [selectedSession]
+  );
+  const onSessionHubToolAction = ({ groupId, actionId, task, session, job, repo }) => {
+    if (groupId === "task" && task?.id) {
+      const slug = session?.projectSlug || activeSlug;
+      if (actionId === "run") {
+        setWorkspaceMode("sessionHub");
+        setDropRunSession({ source: "tool_shelf", mode: "task_backed", projectSlug: slug || "", taskId: task.id });
+        return;
+      }
+      const mode = actionId === "exec" ? "execute" : actionId === "verify" ? "verify" : actionId === "why" ? "why" : "brief";
+      onOpenTaskDrawer(slug, task.id, mode);
+      return;
+    }
+    if (groupId === "session") {
+      if (actionId === "chat") setSelectedSessionTab("chat");
+      else if (actionId === "stdio") setSelectedSessionTab("stdio");
+      else if (actionId === "rollover") setSelectedSessionTab("context");
+      else if (actionId === "mcp_contract") setSelectedSessionTab("context");
+      else if (actionId === "stop" && session?.id) alert(`Stop session ${session.id} from its session card or CLI.`);
+      else if (session?.id) setSelectedSessionId(session.id);
+      return;
+    }
+    if (groupId === "job") {
+      if (actionId === "skills") setSelectedSessionTab("skills");
+      else if (actionId === "context" || actionId === "verify" || actionId === "blocked") setSelectedSessionTab("context");
+      else if (actionId === "complete" && runtimeJobId(job)) onCompleteJob({ jobId: runtimeJobId(job) });
+      return;
+    }
+    if (groupId === "repo") {
+      if (actionId === "diff" || actionId === "conflicts" || actionId === "status" || actionId === "files") {
+        setSelectedSessionTab("diff");
+        return;
+      }
+      if (actionId === "worktree" && session?.id) {
+        onSetRepoWorktree({ sessionId: session.id, repoRoot: repo?.root || session.repoRoot, worktreePath: repo?.worktreePath || session.worktreePath });
+      }
+      return;
+    }
+    if (groupId === "review") {
+      if (actionId === "spawn_reviewer" && runtimeJobId(job)) onSpawnReviewer({ jobId: runtimeJobId(job), session });
+      else setSelectedSessionTab("diff");
+    }
+  };
   const fuzzyMatchMap = useMemo(
     () => new Map((fuzzyState.matches || []).map((match) => [match.id, match])),
     [fuzzyState.matches]
@@ -745,6 +1006,12 @@ function App() {
       text: `FUZZY · ${fuzzyState.matches.length} hit${fuzzyState.matches.length === 1 ? "" : "s"} for "${filter}"`
     };
   }, [searchMode, filter, fuzzyState]);
+
+  useEffect(() => {
+    const ids = visibleRuntimeSessions.map(runtimeSessionId).filter(Boolean);
+    if (selectedSessionId && ids.includes(selectedSessionId)) return;
+    setSelectedSessionId(runtimeSessionId(preferredSessionForWorkspace(visibleRuntimeSessions)) || null);
+  }, [visibleRuntimeSessions, selectedSessionId]);
 
   useEffect(() => {
     const nextSlug = selectActiveSlugAfterProjectsChange(activeSlug, projects);
@@ -894,10 +1161,19 @@ function App() {
               <${RunSessionWizard}
                 projectSlug=${dropRunSession.projectSlug || ""}
                 taskId=${dropRunSession.taskId || ""}
-                source="task_card"
-                taskLocked=${true}
+                source=${dropRunSession.source || "hub_run"}
+                mode=${dropRunSession.mode || (dropRunSession.taskId ? "task_backed" : "untasked")}
+                taskLocked=${dropRunSession.taskLocked === true}
                 initialDraft=${Number.isInteger(dropRunProject?.rev) ? { expectedTrackerRev: dropRunProject.rev } : null}
-                onLaunch=${() => setDropRunSession(null)}
+                onLaunch=${(result) => {
+                  const launchedSessionId = nonEmptyString(result?.sessionId);
+                  if (launchedSessionId) {
+                    setSelectedSessionId(launchedSessionId);
+                    setSelectedSessionTab("chat");
+                    setWorkspaceMode("sessionHub");
+                  }
+                  setDropRunSession(null);
+                }}
               />
             </div>
           </div>
@@ -958,15 +1234,54 @@ function App() {
       />
     </div>
   `;
+  const workspaceModeTabsEl = html`
+    <div class="workspace-mode-tabs" role="tablist" aria-label="Primary workspace mode">
+      <button
+        class=${`workspace-mode-tab ${workspaceMode === "tracker" ? "workspace-mode-tab--active" : ""}`}
+        type="button"
+        role="tab"
+        aria-selected=${workspaceMode === "tracker"}
+        onClick=${() => setWorkspaceMode("tracker")}
+      >
+        Tracker
+      </button>
+      <button
+        class=${`workspace-mode-tab ${workspaceMode === "sessionHub" ? "workspace-mode-tab--active" : ""}`}
+        type="button"
+        role="tab"
+        aria-selected=${workspaceMode === "sessionHub"}
+        onClick=${() => setWorkspaceMode("sessionHub")}
+      >
+        Session Hub
+        <span>${visibleRuntimeSessions.length}</span>
+      </button>
+    </div>
+  `;
   const sessionGroupEl = html`
-    <div class="session-group-row">
+    <section
+      class="session-hub-operator-shell"
+      aria-label="Session Hub operator workspace"
+      data-browser-acceptance="desktop-operator-workspace narrow-operator-workspace"
+    >
+      <${HubTopBar}
+        sessionCount=${visibleRuntimeSessions.length}
+        activeProjectName=${active?.data?.meta?.name || activeSlug || "workspace"}
+        connected=${runtimeWsUp}
+        onOpenWizard=${onOpenHubRunSession}
+        onAttach=${() => setAttachOpen(true)}
+      />
       <${SessionGroupView}
         sessions=${visibleRuntimeSessions}
         size=${sessionCardSize}
         connected=${runtimeWsUp}
         projectSlug=${activeSlug || ""}
+        selectedSessionId=${runtimeSessionId(selectedSession)}
         dropPreflight=${sessionDropPreflight}
         completionPanels=${completionPanels}
+        onSelectSession=${(session) => {
+          const id = runtimeSessionId(session);
+          if (id) setSelectedSessionId(id);
+        }}
         onSizeChange=${setSessionCardSize}
         onAttach=${() => setAttachOpen(true)}
         onCompleteJob=${onCompleteJob}
@@ -976,10 +1291,134 @@ function App() {
         onSpawnReviewer=${onSpawnReviewer}
         onOverrideComplete=${onOverrideComplete}
         onCompletionPanelValidationError=${onCompletionPanelValidationError}
+        onSetRepoWorktree=${onSetRepoWorktree}
         onTaskDropPreflight=${onTaskDropPreflight}
         onDismissDropPreflight=${() => setSessionDropPreflight(null)}
       />
-    </div>
+      <div
+        class="session-hub-workspace"
+        style=${`--session-tools-width: ${toolShelfWidth}px`}
+      >
+        <main class="session-hub-workspace__main">
+          ${selectedSession
+            ? html`
+                <${SessionDetailDockView}
+                  session=${selectedSession}
+                  task=${selectedTask}
+                  job=${selectedJob}
+                  stdioEntries=${stdioEntriesForSession(selectedSession)}
+                  timelineItems=${timelineItemsForSession(selectedSession)}
+                  activeTab=${selectedSessionTab}
+                  visible=${true}
+                  paused=${stdioPaused}
+                  follow=${stdioFollow}
+                  query=${stdioQuery}
+                  copied=${stdioCopied}
+                  chatDraft=${sessionChatDrafts[runtimeSessionId(selectedSession)] || ""}
+                  queuedChatDrafts=${sessionQueuedDrafts[runtimeSessionId(selectedSession)] || []}
+                  chatError=${sessionChatErrors[runtimeSessionId(selectedSession)] || ""}
+                  capabilities=${selectedCapabilities}
+                  onSelectTab=${setSelectedSessionTab}
+                  onTogglePause=${setStdioPaused}
+                  onToggleFollow=${setStdioFollow}
+                  onSearch=${setStdioQuery}
+                  onCopy=${async (text) => {
+                    if (globalThis.navigator?.clipboard?.writeText) {
+                      await globalThis.navigator.clipboard.writeText(text);
+                    }
+                    setStdioCopied(true);
+                    setTimeout(() => setStdioCopied(false), 1200);
+                  }}
+                  onDraftChange=${(value) => {
+                    const id = runtimeSessionId(selectedSession);
+                    if (!id) return;
+                    setSessionChatDrafts((prev) => ({ ...prev, [id]: value }));
+                    if (sessionChatErrors[id]) {
+                      setSessionChatErrors((prev) => ({ ...prev, [id]: "" }));
+                    }
+                  }}
+                  onQueuedDraftsChange=${(value) => {
+                    const id = runtimeSessionId(selectedSession);
+                    if (!id) return;
+                    setSessionQueuedDrafts((prev) => ({ ...prev, [id]: Array.isArray(value) ? value : [] }));
+                  }}
+                  onSend=${(result) => {
+                    const id = runtimeSessionId(selectedSession);
+                    const message = result?.body?.message;
+                    if (!id) return;
+                    if (!result?.ok) {
+                      setSessionChatErrors((prev) => ({
+                        ...prev,
+                        [id]: result?.disabledReason || result?.body?.error?.message || "message send failed",
+                      }));
+                      return;
+                    }
+                    setSessionChatErrors((prev) => ({ ...prev, [id]: "" }));
+                    if (!message?.text) return;
+                    setRuntimeSessions((prev) => applyRuntimeSessionsMessage(prev, {
+                      type: "runtime.event",
+                      event: {
+                        id: result.body.eventId || `evt_ui_message_${Date.now()}`,
+                        type: "session.output",
+                        source: "http",
+                        sessionId: id,
+                        stream: "structured",
+                        kind: "message",
+                        role: message.role || "operator",
+                        text: message.text,
+                        message: message.text,
+                        ts: message.ts || new Date().toISOString(),
+                      },
+                    }));
+                  }}
+                  onInterrupt=${(result) => {
+                    if (!result?.ok && result?.disabledReason) alert(`Interrupt failed: ${result.disabledReason}`);
+                  }}
+                  onForceKill=${({ sessionId }) => alert(`Force kill ${sessionId} from the session card or CLI.`)}
+                  onSetRepoWorktree=${onSetRepoWorktree}
+                />
+              `
+            : html`
+                <section class="session-hub-workspace__empty" aria-label="Session detail">
+                  <strong>No session running</strong>
+                  <span>Start or attach a session to open the operator workspace and chat with an agent.</span>
+                  <div class="session-hub-workspace__empty-actions">
+                    <button type="button" onClick=${() => onOpenHubRunSession({ mode: "task_backed", source: "empty_state_pick_task" })}>
+                      Pick task
+                    </button>
+                    <button type="button" onClick=${() => onOpenHubRunSession({ mode: "untasked", source: "empty_state_untasked" })}>
+                      Start untasked
+                    </button>
+                    <button type="button" onClick=${() => setAttachOpen(true)}>
+                      Attach existing
+                    </button>
+                  </div>
+                </section>
+              `}
+        </main>
+        <button
+          class="session-hub-workspace__resize"
+          type="button"
+          aria-label="Resize tool shelf"
+          title="Resize tool shelf"
+          onPointerDown=${onStartToolShelfResize}
+          onKeyDown=${(event) => {
+            if (event.key === "ArrowLeft") setToolShelfWidth((value) => clampToolShelfWidth(value + 24));
+            if (event.key === "ArrowRight") setToolShelfWidth((value) => clampToolShelfWidth(value - 24));
+          }}
+        />
+        <aside class="session-hub-workspace__tools" aria-label="Selected tools">
+          <${ToolShelf}
+            task=${selectedTask}
+            session=${selectedSession}
+            job=${selectedJob}
+            repo=${selectedRepo}
+            capabilities=${selectedCapabilities}
+            onAction=${onSessionHubToolAction}
+          />
+        </aside>
+      </div>
+    </section>
   `;
   const triageEl = triageOpen
     ? html`
@@ -1036,7 +1475,8 @@ function App() {
           onTogglePinProject=${onTogglePinProject}
         />
         ${attentionStripEl}
-        ${sessionGroupEl}
+        ${workspaceModeTabsEl}
+        ${workspaceMode === "sessionHub" ? sessionGroupEl : null}
         <${EmptyState} workspace=${workspace} onOpenHelp=${() => setHelpOpen(true)} />
         <${ConnectionPip} up=${wsUp} />
         ${drawerEl}
@@ -1089,7 +1529,8 @@ function App() {
           onTogglePinProject=${onTogglePinProject}
         />
         ${attentionStripEl}
-        ${sessionGroupEl}
+        ${workspaceModeTabsEl}
+        ${workspaceMode === "sessionHub" ? sessionGroupEl : null}
         ${err ? html`<div class="error-banner"><b>${err.kind} error</b> — ${err.message}</div>` : null}
         <div class="empty-state"><p>Project file is not yet valid. Fix it and save.</p></div>
         <${ConnectionPip} up=${wsUp} />
@@ -1145,84 +1586,91 @@ function App() {
           onTogglePinProject=${onTogglePinProject}
       />
       ${attentionStripEl}
-      ${sessionGroupEl}
-      ${!headerCollapsed ? html`
-        <${HeroStrip}
-          project=${active}
-          slug=${activeSlug}
-          onPickTask=${onPickTask}
-          onOpenTaskModal=${onOpenTaskModalHandler}
-        />
-      ` : null}
-      ${active?.data
-        ? html`<${ScratchpadRow}
-            slug=${activeSlug}
-            text=${active?.data?.meta?.scratchpad || ""}
-            updatedAt=${active?.data?.meta?.updatedAt || null}
-            expanded=${!!scratchpadExpanded[activeSlug]}
-            onToggleExpand=${onToggleScratchpad}
-            onSave=${onSaveScratchpad}
-          />`
-        : null}
-      <div class="banner-row">
-        <${FilterToggles}
-          counts=${derived.counts}
-          statusFilters=${statusFilters}
-          toggleStatus=${toggleStatus}
-          blockedCount=${Object.keys(derived.blocked || {}).length}
-          openCount=${derived.total - Object.keys(derived.blocked || {}).length}
-          blockFilters=${blockFilters}
-          toggleBlock=${toggleBlock}
-          boardView=${boardView}
-          setBoardView=${setBoardView}
-        />
-      </div>
-      <div class=${`workspace-split ${solo ? "has-solo" : ""}`}>
-        ${paneSlugs.map((s) => {
-          const paneFuzzyMatchMap = fuzzyMatchMapForPane({
-            searchMode,
-            fuzzyState,
-            filter,
-            slug: s,
-            fuzzyMatchMap
-          });
-          return html`
-            <${ProjectPane}
-              key=${s}
-              slug=${s}
-              project=${projects[s]}
-              isActive=${s === activeSlug}
-              solo=${solo}
-              pinned=${pinnedSlugs.includes(s)}
-              onFocus=${setActiveSlug}
-              onTogglePin=${onTogglePinProject}
-              filter=${filter}
-              searchMode=${searchMode}
-              boardView=${boardView}
-              fuzzyMatchMap=${paneFuzzyMatchMap}
-              statusFilters=${statusFilters}
-              blockFilters=${blockFilters}
-              onMove=${onMove}
-              onToggleCollapse=${onToggleCollapse}
-              onMoveLane=${onMoveLane}
-              onDeleteTask=${onDeleteTask}
-              onSaveComment=${onSaveComment}
-              onOpenTask=${onOpenTaskDrawer}
-              openTaskId=${taskDrawer?.slug === s ? taskDrawer.taskId : null}
-              openTaskMode=${taskDrawer?.slug === s ? taskDrawer.mode : "brief"}
-              onCloseTask=${() =>
-                setTaskDrawer((current) => (current?.slug === s ? null : current))
-              }
-              onOpenTaskModal=${(task, mode) => onOpenTaskModalHandler(s, task, mode)}
-              runtimeSessions=${runtimeSessions}
-              runtimeJobs=${runtimeJobs}
-              scratchpadExpanded=${!!scratchpadExpanded[s]}
-              onToggleScratchpad=${onToggleScratchpad}
-              onSaveScratchpad=${onSaveScratchpad}
-            />
-          `;
-        })}
-      </div>
+      ${workspaceModeTabsEl}
+      ${workspaceMode === "sessionHub"
+        ? sessionGroupEl
+        : html`
+            ${!headerCollapsed ? html`
+              <${HeroStrip}
+                project=${active}
+                slug=${activeSlug}
+                onPickTask=${onPickTask}
+                onOpenTaskModal=${onOpenTaskModalHandler}
+              />
+            ` : null}
+            ${active?.data
+              ? html`<${ScratchpadRow}
+                  slug=${activeSlug}
+                  text=${active?.data?.meta?.scratchpad || ""}
+                  updatedAt=${active?.data?.meta?.updatedAt || null}
+                  expanded=${!!scratchpadExpanded[activeSlug]}
+                  onToggleExpand=${onToggleScratchpad}
+                  onSave=${onSaveScratchpad}
+                />`
+              : null}
+            <div class="banner-row">
+              <${FilterToggles}
+                counts=${derived.counts}
+                statusFilters=${statusFilters}
+                toggleStatus=${toggleStatus}
+                blockedCount=${Object.keys(derived.blocked || {}).length}
+                openCount=${derived.total - Object.keys(derived.blocked || {}).length}
+                blockFilters=${blockFilters}
+                toggleBlock=${toggleBlock}
+                boardView=${boardView}
+                setBoardView=${setBoardView}
+              />
+            </div>
+            <div class=${`workspace-split ${solo ? "has-solo" : ""}`}>
+              ${paneSlugs.map((s) => {
+                const paneFuzzyMatchMap = fuzzyMatchMapForPane({
+                  searchMode,
+                  fuzzyState,
+                  filter,
+                  slug: s,
+                  fuzzyMatchMap
+                });
+                return html`
+                  <${ProjectPane}
+                    key=${s}
+                    slug=${s}
+                    project=${projects[s]}
+                    isActive=${s === activeSlug}
+                    solo=${solo}
+                    pinned=${pinnedSlugs.includes(s)}
+                    onFocus=${setActiveSlug}
+                    onTogglePin=${onTogglePinProject}
+                    filter=${filter}
+                    searchMode=${searchMode}
+                    boardView=${boardView}
+                    fuzzyMatchMap=${paneFuzzyMatchMap}
+                    statusFilters=${statusFilters}
+                    blockFilters=${blockFilters}
+                    onMove=${onMove}
+                    onToggleCollapse=${onToggleCollapse}
+                    onMoveLane=${onMoveLane}
+                    onDeleteTask=${onDeleteTask}
+                    onSaveComment=${onSaveComment}
+                    onOpenTask=${onOpenTaskDrawer}
+                    openTaskId=${taskDrawer?.slug === s ? taskDrawer.taskId : null}
+                    openTaskMode=${taskDrawer?.slug === s ? taskDrawer.mode : "brief"}
+                    onCloseTask=${() =>
+                      setTaskDrawer((current) => (current?.slug === s ? null : current))
+                    }
+                    onOpenTaskModal=${(task, mode) => onOpenTaskModalHandler(s, task, mode)}
+                    onRunSession=${onBoardRunSession}
+                    onRunProjectSession=${onProjectSessionRun}
+                    onSelectSession=${(sessionId) => onOpenSelectedSession(sessionId, s)}
+                    runtimeSessions=${runtimeSessions}
+                    runtimeJobs=${runtimeJobs}
+                    scratchpadExpanded=${!!scratchpadExpanded[s]}
+                    onToggleScratchpad=${onToggleScratchpad}
+                    onSaveScratchpad=${onSaveScratchpad}
+                  />
+                `;
+              })}
+            </div>
+          `}
       <${ConnectionPip} up=${wsUp} />
       ${drawerEl}
       ${helpEl}

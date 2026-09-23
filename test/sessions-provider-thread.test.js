@@ -343,25 +343,9 @@ test("create: rejects providerCapabilities that is not an object", async () => {
   }
 });
 
-// --- projection-absorption-deferred invariant ------------------------------
+// --- projection provider state --------------------------------------------
 
-test("create: projection.sessions record does NOT carry providerThread / providerCapabilities", async () => {
-  // This test pins the durable-truth boundary asserted by SH-2-21:
-  //
-  //   1. providerThread + providerCapabilities are runtime-only.
-  //   2. They ride through the session.started event payload via the
-  //      schema's additionalProperties: true (no schema change).
-  //   3. Today's `handleSessionStarted` in hub/runtime/projection.js does
-  //      NOT absorb either key. That absorption is deferred to SH-2-17 /
-  //      SH-2-18 (provider adapters that emit `session.provider.*` events).
-  //   4. The tracker JSON write path (hub/projects.js / legacy tracker
-  //      layer) only writes data sourced from the projection — so a key
-  //      that never reaches projection.sessions never reaches the tracker
-  //      JSON either. This is the "never written into durable tracker
-  //      JSON" evidence required by the task's DoD #2.
-  //
-  // When SH-2-17 / SH-2-18 land and start absorbing these fields onto the
-  // projection record, this test should be updated alongside that change.
+test("create: projection.sessions record carries providerThread / providerCapabilities", async () => {
   const env = startEnv();
   try {
     const providerThread = fullyPopulatedProviderThread();
@@ -378,19 +362,12 @@ test("create: projection.sessions record does NOT carry providerThread / provide
     assert.ok(evt.session.providerThread);
     assert.ok(evt.session.providerCapabilities);
 
-    // Projection-side: neither field present (absorption is deferred).
+    // Projection-side: runtime provider state is available to follow-up
+    // provider actions without writing it to tracker task JSON.
     const stored = env.projection.sessions.get(created.sessionId);
     assert.ok(stored, "session record was created in the projection");
-    assert.equal(
-      stored.providerThread,
-      undefined,
-      "projection does not yet absorb providerThread (SH-2-17/18 follow-up)",
-    );
-    assert.equal(
-      stored.providerCapabilities,
-      undefined,
-      "projection does not yet absorb providerCapabilities (SH-2-17/18 follow-up)",
-    );
+    assert.deepEqual(stored.providerThread, providerThread);
+    assert.deepEqual(stored.providerCapabilities, providerCapabilities);
   } finally {
     env.close();
   }

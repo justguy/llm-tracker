@@ -20,7 +20,7 @@ import { computeAttentionDedupeKey } from "../dedupe.js";
  */
 
 const DEFAULT_THRESHOLD_PERCENT = 80;
-const STRUCTURED_USAGE_SOURCES = new Set(["app_server", "mcp"]);
+const STRUCTURED_USAGE_SOURCES = new Set(["app_server", "codex_app_server", "mcp"]);
 
 /**
  * @param {{
@@ -106,7 +106,14 @@ export function contextHighRule(input) {
       updatedAt: nowIso,
       dedupeKey,
       recommendedActions: [
-        { id: "rollover", label: "Roll over", kind: "rollover", enabled: true },
+        {
+          id: "rollover",
+          label: "Roll over",
+          kind: "rollover",
+          enabled: true,
+          rolloverTriggerSource: "context_high",
+          rolloverTriggerLabel: "context-high",
+        },
         { id: "request_checkpoint", label: "Checkpoint", kind: "request_checkpoint", enabled: true },
         { id: "open_session", label: "Open session", kind: "open_session", enabled: true },
       ],

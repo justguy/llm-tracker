@@ -1,0 +1,50 @@
+.session-context-tab {
+  display: grid;
+  gap: 10px;
+}
+
+.session-context-tab__header,
+.session-context-tab__main,
+.session-context-tab__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.session-context-tab__header {
+  justify-content: space-between;
+}
+
+.session-context-tab__items {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.session-context-tab__item {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid #d7dde8;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.session-context-tab__status,
+.session-context-tab__meta span,
+.session-context-tab__evidence {
+  color: #475569;
+  font-size: 12px;
+}
+
+.session-context-tab__status {
+  font-weight: 700;
+}
+
+.session-context-tab__evidence--empty,
+.session-context-tab__empty {
+  color: #64748b;
+}

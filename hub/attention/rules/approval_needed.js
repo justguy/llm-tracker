@@ -76,8 +76,8 @@ export function approvalNeededRule(input) {
         updatedAt: nowIso,
         dedupeKey,
         recommendedActions: [
-          { id: "approve", label: "Approve", kind: "approve", enabled: true },
-          { id: "deny", label: "Deny", kind: "deny", enabled: true },
+          providerApprovalAction("approve", "Approve", evidenceRef, "approved"),
+          providerApprovalAction("deny", "Deny", evidenceRef, "denied"),
           { id: "open_session", label: "Open session", kind: "open_session", enabled: true },
         ],
       };
@@ -222,4 +222,16 @@ export function approvalNeededRule(input) {
   }
 
   return out;
+}
+
+function providerApprovalAction(id, label, approvalId, decision) {
+  return {
+    id,
+    label,
+    kind: id,
+    enabled: true,
+    providerAction: "approvals.resolve",
+    decision,
+    ...(approvalId ? { approvalId } : {}),
+  };
 }

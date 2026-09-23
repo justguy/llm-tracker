@@ -87,21 +87,7 @@ export function sandboxEscapeRequestedRule(input) {
         createdAt: nowIso,
         updatedAt: nowIso,
         dedupeKey,
-        recommendedActions: [
-          {
-            id: "escalate_sandbox",
-            label: "Escalate sandbox",
-            kind: "escalate_sandbox",
-            enabled: true,
-          },
-          { id: "deny", label: "Deny", kind: "deny", enabled: true },
-          {
-            id: "restart_stricter_sandbox",
-            label: "Restart with stricter sandbox",
-            kind: "restart_stricter_sandbox",
-            enabled: true,
-          },
-        ],
+        recommendedActions: sandboxApprovalActions(evidenceRef),
       };
       if (typeof session.projectSlug === "string" && session.projectSlug.length > 0) {
         item.projectSlug = session.projectSlug;
@@ -157,21 +143,7 @@ export function sandboxEscapeRequestedRule(input) {
       createdAt: nowIso,
       updatedAt: nowIso,
       dedupeKey,
-      recommendedActions: [
-        {
-          id: "escalate_sandbox",
-          label: "Escalate sandbox",
-          kind: "escalate_sandbox",
-          enabled: true,
-        },
-        { id: "deny", label: "Deny", kind: "deny", enabled: true },
-        {
-          id: "restart_stricter_sandbox",
-          label: "Restart with stricter sandbox",
-          kind: "restart_stricter_sandbox",
-          enabled: true,
-        },
-      ],
+      recommendedActions: sandboxApprovalActions(evidenceRef),
     };
     if (typeof w.projectSlug === "string" && w.projectSlug.length > 0) {
       item.projectSlug = w.projectSlug;
@@ -183,4 +155,36 @@ export function sandboxEscapeRequestedRule(input) {
   }
 
   return out;
+}
+
+function sandboxApprovalActions(approvalId) {
+  return [
+    sandboxResolveAction("approve_once", "Approve once", "approved", approvalId, "once"),
+    sandboxResolveAction("approve_for_session", "Approve for session", "approved", approvalId, "session"),
+    {
+      id: "escalate_sandbox",
+      label: "Escalate sandbox",
+      kind: "escalate_sandbox",
+      enabled: true,
+      providerAction: "approvals.resolve",
+      decision: "approved",
+      sandboxScope: "session",
+      sandboxConfigChange: "demote",
+      ...(approvalId ? { approvalId } : {}),
+    },
+    sandboxResolveAction("deny", "Deny", "denied", approvalId, "none"),
+  ];
+}
+
+function sandboxResolveAction(id, label, decision, approvalId, sandboxScope) {
+  return {
+    id,
+    label,
+    kind: id === "deny" ? "deny" : "approve",
+    enabled: true,
+    providerAction: "approvals.resolve",
+    decision,
+    sandboxScope,
+    ...(approvalId ? { approvalId } : {}),
+  };
 }

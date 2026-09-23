@@ -13,7 +13,7 @@ import { makeRuntimeId } from "../hub/runtime/ids.js";
 const TEST_TIMEOUT = 8000;
 const WORKSPACE = "/tmp/lt-diffs-api";
 
-function makeHarness({ session, job, project, runtimeEvents = [], providerEvents = [] } = {}) {
+function makeHarness({ session, job, project, runtimeEvents = [], providerEvents = [], providerBroker } = {}) {
   const routes = new Map();
   const app = {
     get(path, handler) {
@@ -45,6 +45,7 @@ function makeHarness({ session, job, project, runtimeEvents = [], providerEvents
     projection,
     getRuntimeEvents: () => runtimeEvents,
     getProviderEvents: () => providerEvents,
+    providerBroker,
     runGit: fakeRunGit,
   });
   return {
@@ -90,6 +91,8 @@ test("GET /api/sessions/:sessionId/diff returns DiffReview tabs", { timeout: TES
     taskId: "task-1",
     activeJobId: jobId,
     repoRoot: "/repo",
+    providerId: "codex_app_server",
+    threadRef: { threadId: "thread-1" },
   };
   const job = {
     id: jobId,
@@ -137,7 +140,19 @@ test("GET /api/sessions/:sessionId/diff returns DiffReview tabs", { timeout: TES
       files: ["src/app.js"],
     },
   ];
-  const app = makeHarness({ session, job, project, runtimeEvents, providerEvents });
+  const app = makeHarness({
+    session,
+    job,
+    project,
+    runtimeEvents,
+    providerEvents,
+    providerBroker: {
+      capabilities(providerId) {
+        assert.equal(providerId, "codex_app_server");
+        return { providerReview: true };
+      },
+    },
+  });
 
   const res = await app.getDiff(sessionId);
 
@@ -150,6 +165,14 @@ test("GET /api/sessions/:sessionId/diff returns DiffReview tabs", { timeout: TES
   assert.equal(res.body.rev, 7);
   const review = res.body.diffReview;
   assert.equal(review.sessionId, sessionId);
+  assert.equal(review.providerId, "codex_app_server");
+  assert.equal(review.providerThreadId, "thread-1");
+  assert.equal(review.providerCapabilities.providerReview, true);
+  assert.deepEqual(review.providerReview, {
+    available: true,
+    capability: "providerReview",
+    endpoint: `/api/sessions/${encodeURIComponent(sessionId)}/provider/review`,
+  });
   assert.equal(review.baseRev, 2);
   assert.equal(review.currentRev, 5);
   assert.equal(review.baseGitSha, "1111111");

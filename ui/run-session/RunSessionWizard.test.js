@@ -8,14 +8,19 @@ import {
   buildRunSessionDraftPatch,
   copyRunSessionPrompt,
   createRunSessionDraft,
+  dedicatedWorktreeConfirmationRequired,
   fetchRunCandidates,
   hasUnresolvedHighWarnings,
   launchDisabledReasonFor,
   launchRunSessionDraft,
+  materializeDedicatedWorktreeIntent,
   normalizeRunCandidates,
   patchRunSessionDraft,
+  promoteNewTaskFromLauncher,
+  worktreeAutoCreateAllowed,
 } from "./RunSessionWizard.js";
 import { buildRunSessionCopyPrompt } from "../../hub/api/run-session.js";
+import { buildRunSessionPreflightWarnings } from "../../hub/run-session/preflight.js";
 
 function flattenRenderedNodes(node, acc = []) {
   if (Array.isArray(node)) {
@@ -156,6 +161,20 @@ test("high severity preflight warnings block launch with a concrete reason", () 
   );
 });
 
+test("open NewTaskFormDraft blocks launch until promoted", () => {
+  assert.equal(
+    launchDisabledReasonFor({
+      draft: {
+        id: "draft_aaaaaaaaaaaaaaaaaaaaaaaa",
+        mode: "untasked",
+        newTaskFormDraft: { title: "New task", projectSlug: "demo" },
+      },
+      warnings: [],
+    }),
+    "Finish adding task",
+  );
+});
+
 test("buildRunSessionCliCommand renders the launch brief command", () => {
   assert.equal(
     buildRunSessionCliCommand({
@@ -233,6 +252,39 @@ test("RunSessionWizardView renders task, runtime, preflight severity, and disabl
   assert.equal(copyPrompt.props.disabled, false);
 });
 
+test("RunSessionWizardView opens compact new task form", () => {
+  const changes = [];
+  const vnode = RunSessionWizardView({
+    draft: {
+      id: "draft_aaaaaaaaaaaaaaaaaaaaaaaa",
+      source: "hub_run",
+      mode: "untasked",
+      projectSlug: "demo",
+      taskLocked: false,
+      runtime: "codex_app_server",
+      newTaskFormDraft: { title: "Launch follow-up", projectSlug: "demo", dod: ["Verified"] },
+      warnings: [],
+    },
+    onDraftChange: (patch) => changes.push(patch),
+  });
+  const renderedText = collectVNodeText(vnode);
+  assert.match(renderedText, /\[\+ ADD TASK\]/);
+  assert.match(renderedText, /Finish adding task/);
+  assert.match(renderedText, /DoD/);
+  const launch = flattenRenderedNodes(vnode)
+    .find((node) => node.type === "button" && collectVNodeText(node).includes("[LAUNCH]"));
+  assert.equal(launch.props.disabled, true);
+  const dodInput = flattenRenderedNodes(vnode)
+    .find((node) => node.type === "textarea");
+  assert.equal(dodInput.props.value, "Verified");
+  const titleInput = flattenRenderedNodes(vnode)
+    .find((node) => node.type === "input" && node.props.value === "Launch follow-up");
+  titleInput.props.onInput({ currentTarget: { value: "Promoted task" } });
+  assert.deepEqual(changes.at(-1), {
+    newTaskFormDraft: { title: "Promoted task", projectSlug: "demo", dod: ["Verified"] },
+  });
+});
+
 test("RunSessionWizardView orders preflight warnings by severity", () => {
   const vnode = RunSessionWizardView({
     draft: {
@@ -250,6 +302,120 @@ test("RunSessionWizardView orders preflight warnings by severity", () => {
     .filter((node) => node.type === "li")
     .map((node) => node.props["data-severity"]);
   assert.deepEqual(severities, ["high", "medium", "low"]);
+});
+
+test("preflight recommends a dedicated worktree for shared task repo worktrees", () => {
+  const warnings = buildRunSessionPreflightWarnings({
+    draft: {
+      source: "task_card",
+      mode: "task_backed",
+      projectSlug: "demo",
+      taskId: "sh-3-19",
+    },
+    task: {
+      id: "sh-3-19",
+      title: "Preflight: preselect dedicated worktree creation",
+      repos: { primary: { root: "/repo/demo", worktree: "/repo/demo" } },
+    },
+    sessions: [{ id: "ses_live", status: "running", worktreePath: "/repo/demo" }],
+    sessionHubConfig: {
+      worktrees: {
+        recommendOnTaskSessionStart: true,
+        defaultNamingPattern: "{projectSlug}/{taskId}-{shortTitle}",
+      },
+    },
+  });
+
+  assert.deepEqual(warnings, [
+    {
+      kind: "shared_worktree",
+      worktreePath: "/repo/demo",
+      sessionIds: ["ses_live"],
+      severity: "medium",
+      recommendedAction: "create_dedicated_worktree",
+      recommendedWorktreePath: "demo/sh-3-19-preflight-preselect-dedicated-worktree-creation",
+      defaultNamingPattern: "{projectSlug}/{taskId}-{shortTitle}",
+    },
+  ]);
+});
+
+test("RunSessionWizardView preselects editable dedicated worktree and requires confirmation when gated", () => {
+  const warning = {
+    kind: "shared_worktree",
+    worktreePath: "/repo/demo",
+    sessionIds: ["ses_live"],
+    severity: "medium",
+    recommendedAction: "create_dedicated_worktree",
+    recommendedWorktreePath: "demo/sh-3-19-preflight",
+  };
+  const changes = [];
+  const vnode = RunSessionWizardView({
+    draft: {
+      id: "draft_aaaaaaaaaaaaaaaaaaaaaaaa",
+      mode: "task_backed",
+      taskId: "sh-3-19",
+      warnings: [warning],
+    },
+    trustedLocalMode: { allowWorktreeCreationFromUI: true },
+    worktrees: { allowTrustedAutoCreateOnLaunch: false },
+    onDraftChange: (patch) => changes.push(patch),
+  });
+  const renderedText = collectVNodeText(vnode);
+  assert.match(renderedText, /Create dedicated worktree/);
+  assert.match(renderedText, /Confirm dedicated worktree creation/);
+  assert.equal(dedicatedWorktreeConfirmationRequired({
+    draft: { warnings: [warning] },
+    trustedLocalMode: { allowWorktreeCreationFromUI: true },
+    worktrees: { allowTrustedAutoCreateOnLaunch: false },
+  }), true);
+
+  const nodes = flattenRenderedNodes(vnode);
+  const pathInput = nodes.find((node) => node.type === "input" && node.props.value === "demo/sh-3-19-preflight");
+  assert.equal(pathInput.props.value, "demo/sh-3-19-preflight");
+  pathInput.props.onInput({ currentTarget: { value: "demo/custom-path" } });
+  assert.deepEqual(changes.at(-1), {
+    createDedicatedWorktree: true,
+    dedicatedWorktreePath: "demo/custom-path",
+    worktreePath: "demo/custom-path",
+    worktreeCreateConfirmed: false,
+  });
+
+  const launch = nodes.find((node) => node.type === "button" && collectVNodeText(node).includes("[LAUNCH]"));
+  assert.equal(launch.props.disabled, true);
+  assert.equal(launch.props.title, "Confirm dedicated worktree creation");
+});
+
+test("trusted worktree auto-create path does not require explicit confirmation", () => {
+  const draft = {
+    id: "draft_aaaaaaaaaaaaaaaaaaaaaaaa",
+    mode: "task_backed",
+    taskId: "sh-3-19",
+    warnings: [{
+      kind: "shared_worktree",
+      worktreePath: "/repo/demo",
+      sessionIds: ["ses_live"],
+      severity: "medium",
+      recommendedAction: "create_dedicated_worktree",
+      recommendedWorktreePath: "demo/sh-3-19-preflight",
+    }],
+  };
+  const trustedLocalMode = { allowWorktreeCreationFromUI: true };
+  const worktrees = { allowTrustedAutoCreateOnLaunch: true };
+
+  assert.equal(worktreeAutoCreateAllowed({ trustedLocalMode, worktrees }), true);
+  assert.equal(dedicatedWorktreeConfirmationRequired({ draft, trustedLocalMode, worktrees }), false);
+  assert.deepEqual(materializeDedicatedWorktreeIntent({ draft, trustedLocalMode, worktrees }), {
+    ...draft,
+    createDedicatedWorktree: true,
+    dedicatedWorktreePath: "demo/sh-3-19-preflight",
+    worktreePath: "demo/sh-3-19-preflight",
+    worktreeAutoCreateOnLaunch: true,
+  });
+
+  const vnode = RunSessionWizardView({ draft, trustedLocalMode, worktrees });
+  const launch = flattenRenderedNodes(vnode)
+    .find((node) => node.type === "button" && collectVNodeText(node).includes("[LAUNCH]"));
+  assert.equal(launch.props.disabled, false);
 });
 
 test("RunSessionWizard API helpers call the real run-session endpoint contract", async () => {
@@ -283,6 +449,9 @@ test("RunSessionWizard API helpers call the real run-session endpoint contract",
     if (url === "/api/run-session/draft/draft_aaaaaaaaaaaaaaaaaaaaaaaa/copy-prompt") {
       return jsonResponse({ draftId: "draft_aaaaaaaaaaaaaaaaaaaaaaaa", cli: "llm-tracker run session", prompt: "ready" });
     }
+    if (url === "/api/run-session/drafts/draft_aaaaaaaaaaaaaaaaaaaaaaaa/new-task") {
+      return jsonResponse({ draft: { id: "draft_aaaaaaaaaaaaaaaaaaaaaaaa", mode: "task_backed", taskId: "task-new" }, taskId: "task-new", rev: 8, eventId: "evt_a" });
+    }
     throw new Error(`unexpected url ${url}`);
   };
 
@@ -309,6 +478,9 @@ test("RunSessionWizard API helpers call the real run-session endpoint contract",
   const copied = await copyRunSessionPrompt({ fetcher, draftId: draft.id });
   assert.equal(copied.prompt, "ready");
 
+  const promoted = await promoteNewTaskFromLauncher({ fetcher, draftId: draft.id });
+  assert.equal(promoted.taskId, "task-new");
+
   assert.deepEqual(
     calls.map((call) => [call.url, call.options.method || "GET"]),
     [
@@ -317,6 +489,7 @@ test("RunSessionWizard API helpers call the real run-session endpoint contract",
       ["/api/run-session/drafts/draft_aaaaaaaaaaaaaaaaaaaaaaaa", "PATCH"],
       ["/api/run-session/launch", "POST"],
       ["/api/run-session/draft/draft_aaaaaaaaaaaaaaaaaaaaaaaa/copy-prompt", "POST"],
+      ["/api/run-session/drafts/draft_aaaaaaaaaaaaaaaaaaaaaaaa/new-task", "POST"],
     ],
   );
 });

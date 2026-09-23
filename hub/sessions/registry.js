@@ -22,13 +22,13 @@
 //   - HTTP routing (lives in `hub/api/sessions.js`; SH-1-09 / SH-2-12 /
 //     SH-2-23 own those routes).
 //   - Persisting the full v0.7 field set into the projection. Today the
-//     projection (`hub/runtime/projection.js` `handleSessionStarted`) only
-//     absorbs `id, name, tier, projectSlug, taskId, status, statusSource,
-//     startedAt, warnings`. The other v0.7 inputs (sandbox, ctxMax,
-//     activeJobId, agent, provider, model, cwd, repoRoot, worktreePath,
-//     branch, providerThread, providerCapabilities) ride through the event
-//     payload (`session.*` has `additionalProperties: true` in the schema)
-//     and are absorbed by subsequent tasks that extend the projection:
+//     projection (`hub/runtime/projection.js` `handleSessionStarted`) absorbs
+//     the current card-facing subset (`id, name, tier, projectSlug, taskId,
+//     agent, provider, model, cwd, repoRoot, worktreePath, branch, status,
+//     statusSource, startedAt, warnings`). The other v0.7 inputs (sandbox,
+//     ctxMax, activeJobId, providerThread, providerCapabilities) ride through
+//     the event payload (`session.*` has `additionalProperties: true` in the
+//     schema) and are absorbed by subsequent tasks that extend the projection:
 //     SH-2-17/18 (provider adapters absorb providerThread /
 //     providerCapabilities via `session.provider.*` events), SH-2-24
 //     (sandbox field). The registry exposes them as inputs today so the
@@ -39,6 +39,7 @@
 //     accept them on input so they cannot be written into an event.
 
 import { validateProviderCapabilities } from "../providers/capabilities.js";
+import { isSessionId } from "../runtime/ids.js";
 
 /**
  * @typedef {"dumb_terminal" | "mcp_tracked" | "codex_app_server" | "hybrid" | "manual"} SessionTier
@@ -113,6 +114,8 @@ const V07_OPTIONAL_INPUT_FIELDS = Object.freeze([
   "repoRoot",
   "worktreePath",
   "branch",
+  "predecessorSessionId",
+  "successorSessionId",
   // v0.7 addendum §7: runtime-only ProviderThreadRef + ProviderCapabilities.
   // Ride through the event payload (additionalProperties: true) — never
   // written into durable tracker JSON. Projection absorption is deferred to
@@ -158,6 +161,9 @@ const PROVIDER_THREAD_ALL_KEYS = new Set([
   "transport",
   ...PROVIDER_THREAD_OPTIONAL_STRING_FIELDS,
 ]);
+
+const WORKTREE_METADATA_FIELDS = Object.freeze(["worktreePath", "branch"]);
+const SESSION_LINEAGE_FIELDS = Object.freeze(["predecessorSessionId", "successorSessionId"]);
 
 /**
  * Validate the shape of a ProviderThreadRef (addendum §7). Throws TypeError
@@ -373,6 +379,44 @@ function assertV07FieldShapes(input) {
   }
 }
 
+function assertWorktreeMetadataShapes(input, context) {
+  for (const f of WORKTREE_METADATA_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(input, f)) {
+      if (typeof input[f] !== "string" || input[f].length === 0) {
+        throw makeError(`${context}: ${f} must be a non-empty string when present`, "INVALID_INPUT", { field: f });
+      }
+    }
+  }
+}
+
+function assertSessionLineageShapes(input, context) {
+  for (const f of SESSION_LINEAGE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(input, f)) {
+      if (typeof input[f] !== "string" || !isSessionId(input[f])) {
+        throw makeError(`${context}: ${f} must be a ses_ id when present`, "INVALID_SESSION_ID", { field: f });
+      }
+    }
+  }
+}
+
+function pickWorktreeMetadata(input) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const f of WORKTREE_METADATA_FIELDS) {
+    if (typeof input[f] === "string" && input[f].length > 0) out[f] = input[f];
+  }
+  return out;
+}
+
+function pickSessionLineage(input) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const f of SESSION_LINEAGE_FIELDS) {
+    if (typeof input[f] === "string" && isSessionId(input[f])) out[f] = input[f];
+  }
+  return out;
+}
+
 /**
  * @typedef {object} SessionRegistryDeps
  * @property {{ append: (event: object) => Promise<{ ok: true; eventId: string; rev: number }> }} runtimeStore
@@ -413,6 +457,8 @@ export class SessionRegistry {
     this.validateRuntimeEvent = validateRuntimeEvent;
     this.workspace = workspace;
     this.now = typeof now === "function" ? now : () => new Date().toISOString();
+    /** @type {Map<string, { predecessorSessionId?: string; successorSessionId?: string }>} */
+    this.sessionLineage = new Map();
   }
 
   /**
@@ -423,7 +469,7 @@ export class SessionRegistry {
    * @returns {object[]}
    */
   list() {
-    return this.projection.toSnapshots().sessions;
+    return this.projection.toSnapshots().sessions.map((session) => this.#enrichSession(session));
   }
 
   /**
@@ -434,7 +480,8 @@ export class SessionRegistry {
    */
   get(sessionId) {
     if (typeof sessionId !== "string") return null;
-    return this.projection.sessions.get(sessionId) || null;
+    const session = this.projection.sessions.get(sessionId);
+    return session ? this.#enrichSession(session) : null;
   }
 
   /**
@@ -462,6 +509,8 @@ export class SessionRegistry {
    * @param {string}  [input.repoRoot]
    * @param {string}  [input.worktreePath]
    * @param {string}  [input.branch]
+   * @param {string}  [input.predecessorSessionId]
+   * @param {string}  [input.successorSessionId]
    * @param {object}  [input.providerThread]        ProviderThreadRef (addendum §7); runtime-only, rides through event payload, never persisted to tracker JSON
    * @param {object}  [input.providerCapabilities]  ProviderCapabilities (addendum §5); runtime-only, same persistence rules as providerThread
    * @returns {Promise<{ sessionId: string; rev: number; eventId: string; session: object | null }>}
@@ -490,6 +539,17 @@ export class SessionRegistry {
     }
 
     assertV07FieldShapes(input);
+    assertSessionLineageShapes(input, "create");
+    if (
+      typeof input.predecessorSessionId === "string" &&
+      !this.projection.sessions.get(input.predecessorSessionId)
+    ) {
+      throw makeError(
+        `create: predecessor session '${input.predecessorSessionId}' not found`,
+        "UNKNOWN_PREDECESSOR_SESSION",
+        { predecessorSessionId: input.predecessorSessionId },
+      );
+    }
 
     const sessionId = this.makeRuntimeId("ses");
     /** @type {Record<string, any>} */
@@ -514,11 +574,85 @@ export class SessionRegistry {
 
     const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
     const result = await this.runtimeStore.append(eventForAppend);
+    if (typeof input.predecessorSessionId === "string") {
+      this.#recordLineage(input.predecessorSessionId, sessionId);
+    }
     return {
       sessionId,
       rev: result.rev,
       eventId: result.eventId,
       session: this.get(sessionId),
+    };
+  }
+
+  /**
+   * Mark a predecessor session as rolled over and link it to its successor in
+   * one append-only event. The projection does not yet persist lineage fields,
+   * so this registry also keeps a local read-through index for callers using
+   * this instance; the durable event carries the same pair for replay once the
+   * projection absorbs the v0.7 lineage fields.
+   *
+   * @param {string} predecessorSessionId
+   * @param {string} successorSessionId
+   * @param {{ reason?: string; comment?: string; source?: string; idempotencyKey?: string }} [input]
+   * @returns {Promise<{ rev: number; eventId: string; predecessor: object | null; successor: object | null }>}
+   */
+  async linkSuccessor(predecessorSessionId, successorSessionId, input = {}) {
+    if (typeof predecessorSessionId !== "string" || !isSessionId(predecessorSessionId)) {
+      throw makeError("linkSuccessor: predecessorSessionId must be a ses_ id", "INVALID_SESSION_ID", { field: "predecessorSessionId" });
+    }
+    if (typeof successorSessionId !== "string" || !isSessionId(successorSessionId)) {
+      throw makeError("linkSuccessor: successorSessionId must be a ses_ id", "INVALID_SESSION_ID", { field: "successorSessionId" });
+    }
+    if (predecessorSessionId === successorSessionId) {
+      throw makeError("linkSuccessor: predecessor and successor must be different sessions", "INVALID_INPUT");
+    }
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw makeError("linkSuccessor: input must be an object", "INVALID_INPUT");
+    }
+    assertNoForbiddenFields(input, "linkSuccessor");
+    const predecessor = this.projection.sessions.get(predecessorSessionId);
+    if (!predecessor) {
+      throw makeError(`linkSuccessor: unknown predecessor session '${predecessorSessionId}'`, "UNKNOWN_SESSION", { sessionId: predecessorSessionId });
+    }
+    const successor = this.projection.sessions.get(successorSessionId);
+    if (!successor) {
+      throw makeError(`linkSuccessor: unknown successor session '${successorSessionId}'`, "UNKNOWN_SESSION", { sessionId: successorSessionId });
+    }
+
+    const { reason, comment, source = "system", idempotencyKey } = input;
+    if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+      throw makeError("linkSuccessor: reason must be a non-empty string when present", "INVALID_INPUT", { field: "reason" });
+    }
+    if (comment !== undefined && (typeof comment !== "string" || comment.length === 0)) {
+      throw makeError("linkSuccessor: comment must be a non-empty string when present", "INVALID_INPUT", { field: "comment" });
+    }
+
+    const eventForValidation = {
+      schemaVersion: 1,
+      id: this.makeRuntimeId("evt"),
+      ts: this.now(),
+      type: "session.status",
+      source,
+      workspace: this.workspace,
+      sessionId: predecessorSessionId,
+      status: "rolled_over",
+      successorSessionId,
+      predecessorSessionId,
+      ...(reason ? { reason } : {}),
+      ...(comment ? { comment } : {}),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    };
+    this.validateRuntimeEvent(eventForValidation);
+
+    const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
+    const result = await this.runtimeStore.append(eventForAppend);
+    this.#recordLineage(predecessorSessionId, successorSessionId);
+    return {
+      rev: result.rev,
+      eventId: result.eventId,
+      predecessor: this.get(predecessorSessionId),
+      successor: this.get(successorSessionId),
     };
   }
 
@@ -572,6 +706,53 @@ export class SessionRegistry {
   }
 
   /**
+   * Record a worktree/branch binding update for a session. The event uses the
+   * generic `session.task_attached` runtime variant with a distinct mode so
+   * the append-only log captures the binding even before a dedicated schema
+   * variant exists.
+   *
+   * @param {string} sessionId
+   * @param {{ worktreePath?: string; branch?: string; source?: string; idempotencyKey?: string }} input
+   * @returns {Promise<{ rev: number; eventId: string; session: object | null }>}
+   */
+  async updateWorktreeBinding(sessionId, input) {
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      throw makeError("updateWorktreeBinding: sessionId required", "INVALID_INPUT");
+    }
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw makeError("updateWorktreeBinding: input must be an object", "INVALID_INPUT");
+    }
+    assertNoForbiddenFields(input, "updateWorktreeBinding");
+    assertWorktreeMetadataShapes(input, "updateWorktreeBinding");
+    const metadata = pickWorktreeMetadata(input);
+    if (Object.keys(metadata).length === 0) {
+      throw makeError("updateWorktreeBinding: worktreePath or branch required", "INVALID_INPUT");
+    }
+    if (!this.projection.sessions.get(sessionId)) {
+      throw makeError(`updateWorktreeBinding: unknown session '${sessionId}'`, "UNKNOWN_SESSION", { sessionId });
+    }
+
+    const { source = "system", idempotencyKey } = input;
+    const eventForValidation = {
+      schemaVersion: 1,
+      id: this.makeRuntimeId("evt"),
+      ts: this.now(),
+      type: "session.task_attached",
+      source,
+      workspace: this.workspace,
+      sessionId,
+      mode: "worktree_bound",
+      ...metadata,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    };
+    this.validateRuntimeEvent(eventForValidation);
+
+    const { id: _placeholderEventId, ...eventForAppend } = eventForValidation;
+    const result = await this.runtimeStore.append(eventForAppend);
+    return { rev: result.rev, eventId: result.eventId, session: this.get(sessionId) };
+  }
+
+  /**
    * Archive a session by emitting a `session.status` event with status
    * "archived". Convenience wrapper over `updateStatus`.
    *
@@ -585,5 +766,24 @@ export class SessionRegistry {
       ...(opts && opts.comment ? { comment: opts.comment } : {}),
       ...(opts && opts.source ? { source: opts.source } : {}),
     });
+  }
+
+  #recordLineage(predecessorSessionId, successorSessionId) {
+    this.sessionLineage.set(predecessorSessionId, {
+      ...(this.sessionLineage.get(predecessorSessionId) || {}),
+      successorSessionId,
+    });
+    this.sessionLineage.set(successorSessionId, {
+      ...(this.sessionLineage.get(successorSessionId) || {}),
+      predecessorSessionId,
+    });
+  }
+
+  #enrichSession(session) {
+    if (!session || typeof session !== "object") return session;
+    const lineage = this.sessionLineage.get(session.id) || {};
+    const projected = pickSessionLineage(session);
+    const merged = { ...projected, ...lineage };
+    return Object.keys(merged).length > 0 ? { ...session, ...merged } : session;
   }
 }

@@ -50,6 +50,33 @@ export const DEFAULT_UI_ATTENTION_ACTION_FEATURES = Object.freeze({
   quietBatchRestart: false,
 });
 
+const DEFAULT_ROLLOVER_ACTIONS_BY_KIND = Object.freeze({
+  context_high: Object.freeze({
+    id: "rollover",
+    label: "Roll over",
+    kind: "rollover",
+    enabled: true,
+    rolloverTriggerSource: "context_high",
+    rolloverTriggerLabel: "context-high",
+  }),
+  not_responding: Object.freeze({
+    id: "rollover",
+    label: "Roll over",
+    kind: "rollover",
+    enabled: true,
+    rolloverTriggerSource: "not_responding",
+    rolloverTriggerLabel: "not-responding",
+  }),
+  done_claimed_verify_missing: Object.freeze({
+    id: "rollover",
+    label: "Roll over",
+    kind: "rollover",
+    enabled: true,
+    rolloverTriggerSource: "done_claimed_verify_missing",
+    rolloverTriggerLabel: "verify-missing",
+  }),
+});
+
 const ACTION_SPECS = Object.freeze({
   open_session: eventSpec("llm-tracker:attention-open-session"),
   open_stdio: eventSpec("llm-tracker:attention-open-stdio"),
@@ -72,8 +99,8 @@ const ACTION_SPECS = Object.freeze({
     method: "POST",
     required: ["jobId"],
     url: (item) => `/api/jobs/${encodeURIComponent(item.jobId)}/rollover`,
-    body: (_item, _action, options) => ({
-      reason: options.rolloverReason || "attention_action",
+    body: (_item, action, options) => ({
+      reason: options.rolloverReason || action?.rolloverTriggerSource || "attention_action",
     }),
   },
   run_closeout: eventSpec("llm-tracker:attention-run-closeout"),
@@ -84,11 +111,29 @@ const ACTION_SPECS = Object.freeze({
     "Reviewer spawning is gated until the reviewer phase lands",
   ),
   view_conflict: eventSpec("llm-tracker:attention-view-conflict"),
-  create_worktree: eventSpec(
-    "llm-tracker:attention-create-worktree",
-    "worktreeCreation",
-    "Worktree creation is gated until trusted local worktree creation is enabled",
-  ),
+  create_worktree: {
+    dispatch: "http",
+    feature: "worktreeCreation",
+    disabledReason: "Worktree creation is gated until trusted local worktree creation is enabled",
+    method: "POST",
+    required: ["worktreePath"],
+    url: () => "/api/worktrees/create-from-attention",
+    body: (item, action, options) => ({
+      attentionItemId: item.id,
+      dedupeKey: item.dedupeKey,
+      projectSlug: item.projectSlug,
+      taskId: item.taskId,
+      jobId: item.jobId,
+      sessionId: item.sessionId,
+      sessionIds: item.sessionIds,
+      repoRoot: item.repoRoot || item.worktreePath,
+      sourceWorktreePath: item.worktreePath,
+      targetPath: options.targetWorktreePath || action.targetPath,
+      baseRef: options.worktreeBaseRef || action.baseRef,
+      reason: options.worktreeReason || "operator requested worktree from attention action",
+      title: item.title,
+    }),
+  },
   bind_task: eventSpec("llm-tracker:attention-bind-task"),
   copy_context: { dispatch: "copy" },
   escalate_sandbox: eventSpec(
@@ -318,8 +363,26 @@ export function decorateAttentionAction(item, action, options = {}) {
 }
 
 export function decorateAttentionActions(actions, item, options = {}) {
-  if (!Array.isArray(actions)) return [];
-  return actions.map((action) => decorateAttentionAction(item, action, options));
+  return withDefaultAttentionActions(item, actions).map((action) =>
+    decorateAttentionAction(item, action, options),
+  );
+}
+
+export function withDefaultAttentionActions(item, actions) {
+  const base = Array.isArray(actions) ? actions : [];
+  const fallback = defaultRolloverActionForItem(item);
+  if (!fallback) return base;
+  if (base.some((action) => action?.kind === "rollover" || action?.id === fallback.id)) {
+    return base;
+  }
+  return [...base, fallback];
+}
+
+function defaultRolloverActionForItem(item) {
+  if (!item || typeof item !== "object") return null;
+  if (typeof item.jobId !== "string" || item.jobId.length === 0) return null;
+  const action = DEFAULT_ROLLOVER_ACTIONS_BY_KIND[item.kind];
+  return action ? { ...action } : null;
 }
 
 export async function dispatchAttentionAction(item, action, options = {}) {

@@ -201,8 +201,9 @@ export function timelineItemFromRuntimeEvent(event, options = {}) {
   const sessionId = resolveSessionId(event, options.sessionId);
   if (!sessionId) return null;
 
+  const rawStdio = isRawStdioRuntimeEvent(event);
   let kind = "status";
-  if (eventType === "session.output") kind = "message";
+  if (rawStdio || eventType === "session.output") kind = "message";
   else if (eventType === "session.warning" || eventType === "session.warning_cleared") kind = "warning";
   else if (JOB_CHECKPOINT_TYPES.has(eventType)) kind = "checkpoint";
   else if (eventType === "skill.run.started" || eventType === "skill.run.finished") kind = "skill";
@@ -279,10 +280,13 @@ export function timelineItemFromProviderItem(providerItem, options = {}) {
   const providerId = stringOrNull(providerItem.providerId) || "unknown-provider";
   const providerKind = stringOrNull(providerItem.kind) || "checkpoint";
   const data = isPlainObject(providerItem.data) ? providerItem.data : {};
+  const rawStdio = isRawStdioProviderItem(providerItem, data);
   const evidenceRef =
     stringOrNull(providerItem.evidenceRef) ||
     makeProviderEvidenceRef(providerId, providerKind, ts, data, options.ordinal);
-  const kind = timelineKindFromProviderItem(providerKind, data, providerItem);
+  const kind = rawStdio
+    ? "message"
+    : timelineKindFromProviderItem(providerKind, data, providerItem);
 
   if (!VALID_PROVIDER_ITEM_KINDS.has(providerKind)) {
     return null;
@@ -295,8 +299,8 @@ export function timelineItemFromProviderItem(providerItem, options = {}) {
     title: titleForProviderItem(providerKind, data, providerItem),
     detail: detailForProviderItem(providerKind, data),
     ts,
-    source: "provider",
-    confidence: "structured",
+    source: rawStdio ? "raw_stdio" : "provider",
+    confidence: rawStdio ? "derived" : "structured",
     evidenceRef,
   });
   assertValidTimelineItem(item);
@@ -351,9 +355,7 @@ function collectSessionIds(event) {
 
 function sourceForRuntimeEvent(event) {
   if (event.type === "human.override") return "human";
-  if (event.type === "session.output" && (event.stream === "stdout" || event.stream === "stderr")) {
-    return "raw_stdio";
-  }
+  if (isRawStdioRuntimeEvent(event)) return "raw_stdio";
   switch (event.source) {
     case "adapter":
       return "provider";
@@ -381,6 +383,32 @@ function confidenceForRuntimeEvent(event) {
     return "structured";
   }
   return "unknown";
+}
+
+function isRawStdioRuntimeEvent(event) {
+  return (
+    event.type === "session.output" &&
+    (isRawStdioStream(event.stream) ||
+      isRawStdioSource(event.source) ||
+      isRawStdioSource(event.context?.source))
+  );
+}
+
+function isRawStdioProviderItem(providerItem, data) {
+  return (
+    isRawStdioSource(providerItem.source) ||
+    isRawStdioSource(data.source) ||
+    providerItem.rawStdio === true ||
+    data.rawStdio === true
+  );
+}
+
+function isRawStdioStream(value) {
+  return value === "stdout" || value === "stderr";
+}
+
+function isRawStdioSource(value) {
+  return value === "raw_stdio";
 }
 
 function titleForRuntimeEvent(event) {

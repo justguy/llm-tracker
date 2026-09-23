@@ -55,6 +55,7 @@ export function conflictRule(input) {
     });
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
+    const recommendedActions = recommendedActionsForConflict(c);
     /** @type {AttentionItem} */
     const item = {
       id: input.makeId("att"),
@@ -73,18 +74,51 @@ export function conflictRule(input) {
       createdAt: nowIso,
       updatedAt: nowIso,
       dedupeKey,
-      recommendedActions: [
-        { id: "view_conflict", label: "View conflict", kind: "view_conflict", enabled: true },
-        { id: "acknowledge", label: "Acknowledge", kind: "acknowledge", enabled: true },
-      ],
+      recommendedActions,
     };
     if (typeof c.projectSlug === "string" && c.projectSlug.length > 0) {
       item.projectSlug = c.projectSlug;
     }
     if (typeof c.taskId === "string" && c.taskId.length > 0) item.taskId = c.taskId;
+    if (typeof c.jobId === "string" && c.jobId.length > 0) item.jobId = c.jobId;
     if (typeof c.sessionId === "string" && c.sessionId.length > 0) item.sessionId = c.sessionId;
+    if (typeof c.worktreePath === "string" && c.worktreePath.length > 0) item.worktreePath = c.worktreePath;
+    if (typeof c.repoRoot === "string" && c.repoRoot.length > 0) item.repoRoot = c.repoRoot;
+    if (Array.isArray(c.sessionIds)) {
+      const sessionIds = c.sessionIds.filter((id) => typeof id === "string" && id.length > 0);
+      if (sessionIds.length > 0) item.sessionIds = sessionIds;
+    }
     out.push(item);
   }
 
   return out;
+}
+
+function recommendedActionsForConflict(conflict) {
+  const incoming = Array.isArray(conflict?.recommendedActions)
+    ? conflict.recommendedActions
+    : [];
+  const normalized = incoming
+    .filter((action) => action && typeof action === "object")
+    .map((action) => ({
+      id: typeof action.id === "string" && action.id.length > 0 ? action.id : action.kind,
+      label: typeof action.label === "string" && action.label.length > 0 ? action.label : action.kind,
+      kind: action.kind,
+      enabled: action.enabled !== false,
+      ...(action.disabledReason && action.enabled === false ? { disabledReason: action.disabledReason } : {}),
+    }))
+    .filter((action) => typeof action.kind === "string" && action.kind.length > 0);
+
+  if (normalized.length > 0) return normalized;
+  if (conflict?.kind === "multiple_sessions_same_worktree") {
+    return [
+      { id: "create_worktree_for_job", label: "Create worktree for this job", kind: "create_worktree", enabled: true },
+      { id: "acknowledge", label: "Acknowledge", kind: "acknowledge", enabled: true },
+      { id: "open_conflicts", label: "Open conflicts", kind: "view_conflict", enabled: true },
+    ];
+  }
+  return [
+    { id: "view_conflict", label: "View conflict", kind: "view_conflict", enabled: true },
+    { id: "acknowledge", label: "Acknowledge", kind: "acknowledge", enabled: true },
+  ];
 }

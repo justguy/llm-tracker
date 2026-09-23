@@ -44,6 +44,30 @@ test("conflict: file_conflict produces one watcher_git-sourced item", () => {
   assert.ok(items[0].recommendedActions.some((a) => a.kind === "view_conflict"));
 });
 
+test("conflict: same-worktree conflict exposes create_worktree as primary action", () => {
+  const c = {
+    id: "cf_worktree",
+    kind: "multiple_sessions_same_worktree",
+    projectSlug: "p",
+    worktreePath: "/repo/main",
+    sessionIds: ["ses_1", "ses_2"],
+    message: "Multiple active sessions share worktree /repo/main.",
+    recommendedActions: [
+      { id: "create_worktree_for_job", label: "Create worktree for this job", kind: "create_worktree", enabled: true },
+      { id: "acknowledge", label: "Acknowledge", kind: "acknowledge", enabled: true },
+      { id: "open_conflicts", label: "Open conflicts", kind: "view_conflict", enabled: true },
+    ],
+  };
+  const items = conflictRule(baseInput({ conflicts: [c] }));
+  assert.equal(items.length, 1);
+  assertValidAttentionItem(items[0]);
+  assert.equal(items[0].worktreePath, "/repo/main");
+  assert.deepEqual(items[0].sessionIds, ["ses_1", "ses_2"]);
+  assert.equal(items[0].recommendedActions[0].kind, "create_worktree");
+  assert.equal(items[0].recommendedActions[1].kind, "acknowledge");
+  assert.equal(items[0].recommendedActions[2].kind, "view_conflict");
+});
+
 test("conflict: outside_allowed_paths is excluded (separate rule)", () => {
   const c = { id: "cf_oap", kind: "outside_allowed_paths" };
   assert.deepEqual(conflictRule(baseInput({ conflicts: [c] })), []);

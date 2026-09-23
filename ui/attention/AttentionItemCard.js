@@ -65,7 +65,7 @@ export function resolveClearCondition(item) {
 }
 
 function renderActions(actions, item, onAction, actionOptions) {
-  const decorated = decorateAttentionActions(actions, item, actionOptions);
+  const decorated = decorateAttentionActions(actions, item, normalizeAttentionActionOptions(actionOptions));
   if (decorated.length === 0) return null;
   return html`
     <div class="attention-item-card__actions">
@@ -91,12 +91,34 @@ function renderActions(actions, item, onAction, actionOptions) {
   `;
 }
 
+export function normalizeAttentionActionOptions(actionOptions = {}) {
+  const trustedLocalMode = actionOptions?.trustedLocalMode || {};
+  const worktrees = actionOptions?.worktrees || {};
+  const features = {
+    ...(actionOptions?.features && typeof actionOptions.features === "object" ? actionOptions.features : {}),
+  };
+  if (
+    features.worktreeCreation !== true &&
+    trustedLocalMode.allowWorktreeCreationFromUI === true
+  ) {
+    features.worktreeCreation = true;
+  }
+  if (worktrees.allowTrustedAutoCreateOnLaunch === true) {
+    features.worktreeTrustedAutoCreateOnLaunch = true;
+  }
+  return {
+    ...(actionOptions && typeof actionOptions === "object" ? actionOptions : {}),
+    features,
+  };
+}
+
 function runAttentionAction(item, action, onAction, actionOptions) {
+  const normalizedOptions = normalizeAttentionActionOptions(actionOptions);
   if (typeof onAction === "function") {
     onAction(item, action);
     return;
   }
-  dispatchAttentionAction(item, action, actionOptions).catch((err) => {
+  dispatchAttentionAction(item, action, normalizedOptions).catch((err) => {
     console.error("Attention action dispatch failed:", err?.message || err);
   });
 }
