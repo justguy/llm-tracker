@@ -222,6 +222,23 @@ If the hub is already running, add one more line: *"Before using the tracker, re
 
 ---
 
+## Recover interrupted task context
+
+The optional [Agent Task Recovery & Handoff skill](skills/agent-task-recovery-handoff/SKILL.md)
+reconstructs goals, current evidence, contradictory notes, stale checks and remaining
+work after an interruption. It produces a recovery brief or an unsent handoff with
+the next permitted action. It works without a tracker and does not restore files,
+restart sessions, run checks or contact another agent.
+
+Copy the complete `skills/agent-task-recovery-handoff` directory into the skill
+location supported by your host, then invoke `$agent-task-recovery-handoff` with the
+relevant notes, diffs or logs. Keep the supporting files with SKILL.md. See the
+[behavioral cases](skills/agent-task-recovery-handoff/tests/cases.md) and
+[evaluation limits](skills/agent-task-recovery-handoff/tests/validation.md);
+client installation and automatic loading have not been tested.
+
+---
+
 ## Zero-token terminal shortcut
 
 If you want direct tracker commands from a Codex or Claude terminal session without asking the model anything, print the shell wrapper once and load it into your shell:
