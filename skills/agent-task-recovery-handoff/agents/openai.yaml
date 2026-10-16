@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Task Recovery & Handoff"
+  short_description: "Recover task context and prepare evidence-linked handoffs"
+  default_prompt: "Use $agent-task-recovery-handoff to reconstruct this interrupted task from the available evidence and prepare an unsent handoff."
